@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -19,15 +20,18 @@ import (
 )
 
 const (
-	binaryPath = "/Users/mw/workspace/repo/github.com/openbotstack/openbotstack-runtime/build/openbotstack"
-	repoRoot   = "/Users/mw/workspace/repo/github.com/openbotstack/openbotstack-runtime"
+	binaryPath = "../build/openbotstack"
+	repoRoot   = ".."
 	serverURL  = "http://localhost:8888"
 )
 
 func TestFullSystem(t *testing.T) {
 	// 1. Setup: Ensure binary exists
-	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
-		t.Fatalf("Binary not found at %s. Run 'make binary' first.", binaryPath)
+	absBinaryPath, _ := filepath.Abs(binaryPath)
+	absRepoRoot, _ := filepath.Abs(repoRoot)
+
+	if _, err := os.Stat(absBinaryPath); os.IsNotExist(err) {
+		t.Fatalf("Binary not found at %s (abs: %s). Run 'make binary' first.", binaryPath, absBinaryPath)
 	}
 
 	// 2. Mock LLM Server
@@ -127,8 +131,8 @@ func TestFullSystem(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, binaryPath, "--addr=:8888")
-	cmd.Dir = repoRoot
+	cmd := exec.CommandContext(ctx, absBinaryPath, "--addr=:8888")
+	cmd.Dir = absRepoRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 

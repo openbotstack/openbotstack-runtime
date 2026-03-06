@@ -137,6 +137,9 @@ docker-run: ## Run Docker container
 # Development helpers
 # ============================================================================
 
+build-dir:
+	mkdir -p $(BUILD_DIR)
+
 run: binary ## Build and run locally
 	$(BUILD_DIR)/$(BINARY_NAME) --addr=:8080
 
