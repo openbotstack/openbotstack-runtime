@@ -393,7 +393,7 @@ func TestReloadSkill(t *testing.T) {
 	s := newMockSkill("reload-test", true)
 
 	// Load, unload, reload
-	e.LoadSkill(ctx, s)
+	_ = e.LoadSkill(ctx, s)
 	_ = e.UnloadSkill(ctx, "reload-test")
 	err := e.LoadSkill(ctx, s)
 	if err != nil {

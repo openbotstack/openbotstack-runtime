@@ -66,7 +66,7 @@ func TestWordCountBasic(t *testing.T) {
 
 func TestWordCountWords(t *testing.T) {
 	SetInput([]byte(`{"text": "the quick brown fox"}`))
-	Execute()
+	_ = Execute()
 
 	var output Output
 	_ = json.Unmarshal(GetOutput(), &output)
@@ -116,7 +116,7 @@ func TestWordCountBoundary(t *testing.T) {
 	}
 	input := `{"text": "` + longText + `"}`
 	SetInput([]byte(input))
-	Execute()
+	_ = Execute()
 
 	var output Output
 	_ = json.Unmarshal(GetOutput(), &output)

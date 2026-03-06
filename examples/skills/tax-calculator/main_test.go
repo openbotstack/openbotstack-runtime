@@ -16,10 +16,10 @@ func TestUSGoods(t *testing.T) {
 	data, _ := json.Marshal(input)
 	SetInput(data)
 
-	Execute()
+	_ = Execute()
 
 	var output TaxOutput
-	json.Unmarshal(GetOutput(), &output)
+	_ = json.Unmarshal(GetOutput(), &output)
 
 	if !almostEqual(output.TaxRate, 0.08) {
 		t.Errorf("Expected tax rate 0.08, got %f", output.TaxRate)
@@ -38,10 +38,10 @@ func TestEUDigital(t *testing.T) {
 	data, _ := json.Marshal(input)
 	SetInput(data)
 
-	Execute()
+	_ = Execute()
 
 	var output TaxOutput
-	json.Unmarshal(GetOutput(), &output)
+	_ = json.Unmarshal(GetOutput(), &output)
 
 	if !almostEqual(output.TaxRate, 0.23) {
 		t.Errorf("Expected tax rate 0.23, got %f", output.TaxRate)
@@ -57,10 +57,10 @@ func TestCNServices(t *testing.T) {
 	data, _ := json.Marshal(input)
 	SetInput(data)
 
-	Execute()
+	_ = Execute()
 
 	var output TaxOutput
-	json.Unmarshal(GetOutput(), &output)
+	_ = json.Unmarshal(GetOutput(), &output)
 
 	if !almostEqual(output.TaxRate, 0.06) {
 		t.Errorf("Expected tax rate 0.06, got %f", output.TaxRate)
@@ -76,10 +76,10 @@ func TestNegativeAmount(t *testing.T) {
 	data, _ := json.Marshal(input)
 	SetInput(data)
 
-	Execute()
+	_ = Execute()
 
 	var output TaxOutput
-	json.Unmarshal(GetOutput(), &output)
+	_ = json.Unmarshal(GetOutput(), &output)
 
 	if output.Error == "" {
 		t.Error("Expected error for negative amount")
@@ -92,10 +92,10 @@ func TestZeroAmount(t *testing.T) {
 	data, _ := json.Marshal(input)
 	SetInput(data)
 
-	Execute()
+	_ = Execute()
 
 	var output TaxOutput
-	json.Unmarshal(GetOutput(), &output)
+	_ = json.Unmarshal(GetOutput(), &output)
 
 	if output.Error == "" {
 		t.Error("Expected error for zero amount")
@@ -108,10 +108,10 @@ func TestInvalidRegion(t *testing.T) {
 	data, _ := json.Marshal(input)
 	SetInput(data)
 
-	Execute()
+	_ = Execute()
 
 	var output TaxOutput
-	json.Unmarshal(GetOutput(), &output)
+	_ = json.Unmarshal(GetOutput(), &output)
 
 	if output.Error == "" {
 		t.Error("Expected error for invalid region")
@@ -124,10 +124,10 @@ func TestInvalidCategory(t *testing.T) {
 	data, _ := json.Marshal(input)
 	SetInput(data)
 
-	Execute()
+	_ = Execute()
 
 	var output TaxOutput
-	json.Unmarshal(GetOutput(), &output)
+	_ = json.Unmarshal(GetOutput(), &output)
 
 	if output.Error == "" {
 		t.Error("Expected error for invalid category")
@@ -140,10 +140,10 @@ func TestExcessiveAmount(t *testing.T) {
 	data, _ := json.Marshal(input)
 	SetInput(data)
 
-	Execute()
+	_ = Execute()
 
 	var output TaxOutput
-	json.Unmarshal(GetOutput(), &output)
+	_ = json.Unmarshal(GetOutput(), &output)
 
 	if output.Error == "" {
 		t.Error("Expected error for excessive amount")
@@ -158,10 +158,10 @@ func TestDeterminism(t *testing.T) {
 		data, _ := json.Marshal(input)
 		SetInput(data)
 
-		Execute()
+		_ = Execute()
 
 		var output TaxOutput
-		json.Unmarshal(GetOutput(), &output)
+		_ = json.Unmarshal(GetOutput(), &output)
 
 		// Must be exactly the same every time
 		if !almostEqual(output.TaxAmount, 24.69) {
