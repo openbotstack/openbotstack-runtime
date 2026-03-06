@@ -1,0 +1,38 @@
+id: core/summarize
+name: Text Summarizer
+type: declarative
+version: 1.0.0
+description: Summarizes text into concise bullet points using LLM
+
+# Declarative skills have no wasm, only a prompt template
+prompt: |
+  You are a precise summarization assistant.
+  
+  Given the following text, produce exactly 3 bullet points that capture
+  the key information. Be concise, factual, and objective.
+  
+  Do not add opinions or information not present in the source.
+  
+  Text to summarize:
+  {{.Input}}
+
+input_schema:
+  type: object
+  properties:
+    text:
+      type: string
+      description: The text to summarize
+  required:
+    - text
+
+output_schema:
+  type: object
+  properties:
+    summary:
+      type: array
+      items:
+        type: string
+
+permissions: []  # No permissions needed - LLM only
+
+timeout: 30s

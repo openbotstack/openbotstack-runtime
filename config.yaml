@@ -1,0 +1,13 @@
+server:
+  addr: ":8080"
+
+redis:
+  url: "redis://localhost:6379"
+
+providers:
+  llm:
+    default: modelscope
+    modelscope:
+      base_url: "https://api-inference.modelscope.cn/v1"
+      api_key: "" # To be filled or used from ENV
+      model: "Qwen/Qwen2.5-Coder-32B-Instruct"

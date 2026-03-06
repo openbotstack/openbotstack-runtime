@@ -1,0 +1,40 @@
+id: core/sentiment
+name: Sentiment Analyzer
+type: llm-assisted
+version: 1.0.0
+description: Analyzes text sentiment with business logic and LLM reasoning
+
+requires:
+  - text_generation
+
+input_schema:
+  type: object
+  properties:
+    text:
+      type: string
+      description: Text to analyze for sentiment
+      maxLength: 5000
+  required:
+    - text
+
+output_schema:
+  type: object
+  properties:
+    sentiment:
+      type: string
+      enum: [positive, negative, neutral]
+    confidence:
+      type: number
+      minimum: 0
+      maximum: 1
+    reasoning:
+      type: string
+
+permissions:
+  - llm:generate
+
+timeout: 60s
+
+resources:
+  max_memory_mb: 16
+  max_cpu_ms: 5000

@@ -1,0 +1,36 @@
+id: core/meeting.summarize
+name: Meeting Summarize
+description: Summarizes meeting transcripts and extracts action items
+version: 1.0.0
+type: llm
+input_schema:
+  type: object
+  properties:
+    transcript:
+      type: string
+      description: Meeting transcript text
+    max_length:
+      type: integer
+      description: Maximum summary length in words
+      default: 200
+  required:
+    - transcript
+output_schema:
+  type: object
+  properties:
+    summary:
+      type: string
+      description: Meeting summary
+    action_items:
+      type: array
+      items:
+        type: string
+      description: List of action items extracted
+    attendees:
+      type: array
+      items:
+        type: string
+      description: List of attendees detected
+    error:
+      type: string
+      description: Error message if operation failed

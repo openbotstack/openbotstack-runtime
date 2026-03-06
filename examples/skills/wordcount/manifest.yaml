@@ -1,0 +1,27 @@
+id: core/text.wordcount
+name: Word Count
+description: Counts words in a text and returns the word list
+version: 1.0.0
+type: wasm
+input_schema:
+  type: object
+  properties:
+    text:
+      type: string
+      description: Text to count words in
+  required:
+    - text
+output_schema:
+  type: object
+  properties:
+    count:
+      type: integer
+      description: Number of words
+    words:
+      type: array
+      items:
+        type: string
+      description: List of words
+    error:
+      type: string
+      description: Error message if operation failed

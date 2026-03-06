@@ -1,0 +1,21 @@
+name: hello-world
+version: 1.0.0
+description: A minimal hello-world skill example
+
+# Entrypoint is the compiled wasm file
+entrypoint: main.wasm
+
+# Triggers define when this skill is activated
+triggers:
+  - pattern: "hello"
+  - pattern: "hi"
+  - pattern: "greet"
+
+# Host API permissions required by this skill
+permissions:
+  - log:write
+
+# Resource limits (optional, uses defaults if not specified)
+limits:
+  max_memory: 64MB
+  max_execution: 10s

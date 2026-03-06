@@ -1,0 +1,50 @@
+id: core/tax-calculator
+name: Tax Calculator
+type: deterministic
+version: 1.0.0
+description: Calculates tax based on region and category - fully deterministic, no LLM
+
+# Deterministic skills have NO LLM requirements
+requires: []
+
+input_schema:
+  type: object
+  properties:
+    amount:
+      type: number
+      minimum: 0.01
+      maximum: 1000000000
+    region:
+      type: string
+      enum: [US, EU, CN]
+    category:
+      type: string
+      enum: [goods, services, digital]
+  required:
+    - amount
+    - region
+    - category
+
+output_schema:
+  type: object
+  properties:
+    amount:
+      type: number
+    tax_rate:
+      type: number
+    tax_amount:
+      type: number
+    total_amount:
+      type: number
+    region:
+      type: string
+    category:
+      type: string
+
+permissions: []  # No permissions needed - pure calculation
+
+timeout: 5s  # Fast, deterministic
+
+resources:
+  max_memory_mb: 8
+  max_cpu_ms: 1000
