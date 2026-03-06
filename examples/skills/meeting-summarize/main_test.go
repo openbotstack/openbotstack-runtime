@@ -58,7 +58,7 @@ func TestExecuteEmptyTranscript(t *testing.T) {
 	result, _ := executor.Execute(context.Background(), []byte(input))
 
 	var output Output
-	json.Unmarshal(result, &output)
+	_ = json.Unmarshal(result, &output)
 
 	if output.Error == "" {
 		t.Error("Expected error for empty transcript")
@@ -72,7 +72,7 @@ func TestExecuteInvalidInput(t *testing.T) {
 	result, _ := executor.Execute(context.Background(), []byte(`not json`))
 
 	var output Output
-	json.Unmarshal(result, &output)
+	_ = json.Unmarshal(result, &output)
 
 	if output.Error == "" {
 		t.Error("Expected error for invalid input")
@@ -89,7 +89,7 @@ func TestExecuteLLMFailure(t *testing.T) {
 	result, _ := executor.Execute(context.Background(), []byte(input))
 
 	var output Output
-	json.Unmarshal(result, &output)
+	_ = json.Unmarshal(result, &output)
 
 	if output.Error == "" {
 		t.Error("Expected error when LLM fails")

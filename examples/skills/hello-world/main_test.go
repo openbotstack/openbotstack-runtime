@@ -27,7 +27,7 @@ func TestExecuteHello(t *testing.T) {
 	data, _ := json.Marshal(input)
 	SetInput(data)
 
-	Execute()
+	_ = Execute()
 
 	var output SkillOutput
 	_ = json.Unmarshal(GetOutput(), &output)
@@ -42,7 +42,7 @@ func TestExecuteHi(t *testing.T) {
 	data, _ := json.Marshal(input)
 	SetInput(data)
 
-	Execute()
+	_ = Execute()
 
 	var output SkillOutput
 	_ = json.Unmarshal(GetOutput(), &output)
@@ -57,7 +57,7 @@ func TestExecuteName(t *testing.T) {
 	data, _ := json.Marshal(input)
 	SetInput(data)
 
-	Execute()
+	_ = Execute()
 
 	var output SkillOutput
 	_ = json.Unmarshal(GetOutput(), &output)
