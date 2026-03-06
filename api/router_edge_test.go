@@ -122,7 +122,7 @@ func TestChatEndpointExtraFields(t *testing.T) {
 
 	// Verify the response skill came from agent, not the request
 	var resp api.ChatResponse
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
 	if resp.SkillUsed == "hacked" {
 		t.Error("Bug: skill_id from request was used - this is a security issue!")
 	}

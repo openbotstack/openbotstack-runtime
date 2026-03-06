@@ -214,7 +214,7 @@ func TestListSkillsMultiple(t *testing.T) {
 func TestCanExecuteTrue(t *testing.T) {
 	e := executor.NewDefaultExecutor()
 	ctx := context.Background()
-	e.LoadSkill(ctx, newMockSkill("skill-1", true))
+	_ = e.LoadSkill(ctx, newMockSkill("skill-1", true))
 
 	can, err := e.CanExecute(ctx, "skill-1")
 	if err != nil {
@@ -253,7 +253,7 @@ func TestCanExecuteEmptyID(t *testing.T) {
 func TestExecuteSuccess(t *testing.T) {
 	e := executor.NewDefaultExecutor()
 	ctx := context.Background()
-	e.LoadSkill(ctx, newMockSkill("skill-1", true))
+	_ = e.LoadSkill(ctx, newMockSkill("skill-1", true))
 
 	result, err := e.Execute(ctx, runtime.ExecutionRequest{
 		SkillID: "skill-1",
@@ -310,7 +310,7 @@ func TestExecuteWithRealWasm(t *testing.T) {
 	ctx := context.Background()
 
 	s := &mockSkill{id: "wasm-skill", valid: true, timeout: 30 * time.Second, wasmBytes: testWasm}
-	e.LoadSkill(ctx, s)
+	_ = e.LoadSkill(ctx, s)
 
 	result, err := e.Execute(ctx, runtime.ExecutionRequest{
 		SkillID: "wasm-skill",

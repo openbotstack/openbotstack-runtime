@@ -138,7 +138,7 @@ func TestSkillsEndpointNoProvider(t *testing.T) {
 	}
 
 	var skills []api.SkillResponse
-	json.Unmarshal(rr.Body.Bytes(), &skills)
+	_ = json.Unmarshal(rr.Body.Bytes(), &skills)
 	if len(skills) != 0 {
 		t.Errorf("Expected empty list, got %d", len(skills))
 	}
