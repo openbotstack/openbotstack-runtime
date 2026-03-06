@@ -40,7 +40,7 @@ jobs:
 
       - name: Run Tests
         working-directory: openbotstack-runtime
-        run: make test-v
+        run: make binary test-v
 
   build-frontend:
     runs-on: ubuntu-latest
