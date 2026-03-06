@@ -86,8 +86,11 @@ func TestChatFlowWithSession(t *testing.T) {
 		"message":   "What is 2+2?",
 	}
 	body1, _ := json.Marshal(req1)
-	resp1, _ := http.Post(srv.URL+"/v1/chat", "application/json", bytes.NewReader(body1))
-	defer resp1.Body.Close()
+	resp1, err := http.Post(srv.URL+"/v1/chat", "application/json", bytes.NewReader(body1))
+	if err != nil {
+		t.Fatalf("First request failed: %v", err)
+	}
+	defer resp1.Body.Close() //nolint:errcheck // test cleanup
 
 	if resp1.StatusCode != http.StatusOK {
 		t.Fatalf("First message failed with status %d", resp1.StatusCode)
@@ -104,7 +107,7 @@ func TestChatHistoryRetrieval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET history failed: %v", err)
 	}
-	defer histResp.Body.Close()
+	defer histResp.Body.Close() //nolint:errcheck // test cleanup
 
 	if histResp.StatusCode != http.StatusOK {
 		t.Errorf("Expected 200 for history, got %d", histResp.StatusCode)

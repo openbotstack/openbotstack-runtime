@@ -69,10 +69,10 @@ func (p *LLMPlanner) buildPrompt(req PlanRequest) string {
 
 	sb.WriteString("Available skills:\n")
 	for _, skill := range req.AvailableSkills {
-		sb.WriteString(fmt.Sprintf("- %s (%s): %s\n", skill.ID, skill.Name, skill.Description))
+		_, _ = fmt.Fprintf(&sb, "- %s (%s): %s\n", skill.ID, skill.Name, skill.Description)
 		if skill.InputSchema != nil {
 			schemaJSON, _ := json.Marshal(skill.InputSchema)
-			sb.WriteString(fmt.Sprintf("  Input schema: %s\n", string(schemaJSON)))
+			_, _ = fmt.Fprintf(&sb, "  Input schema: %s\n", string(schemaJSON))
 		}
 	}
 

@@ -98,7 +98,7 @@ func TestWordCountInvalidInput(t *testing.T) {
 			Execute()
 
 			var output Output
-			json.Unmarshal(GetOutput(), &output)
+			_ = json.Unmarshal(GetOutput(), &output)
 
 			// Either error or empty result is acceptable
 			if output.Error == "" && output.Count != 0 {

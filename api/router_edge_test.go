@@ -2,7 +2,6 @@ package api_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -10,25 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openbotstack/openbotstack-runtime/agent"
 	"github.com/openbotstack/openbotstack-runtime/api"
 )
 
 // ==================== Edge Case Tests ====================
-
-// slowAgent simulates a slow/hanging agent.
-type slowAgent struct {
-	delay time.Duration
-}
-
-func (s *slowAgent) HandleMessage(ctx context.Context, req agent.MessageRequest) (*agent.MessageResponse, error) {
-	select {
-	case <-time.After(s.delay):
-		return &agent.MessageResponse{Message: "delayed response"}, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-}
 
 func TestChatEndpointEmptyBody(t *testing.T) {
 	handler := api.NewRouter(&mockAgent{})

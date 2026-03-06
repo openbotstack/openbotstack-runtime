@@ -47,7 +47,7 @@ func (r *Router) handleSkills(w http.ResponseWriter, req *http.Request) {
 
 	if r.skills == nil {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]SkillResponse{})
+		_ = json.NewEncoder(w).Encode([]SkillResponse{})
 		return
 	}
 
@@ -80,7 +80,7 @@ func (r *Router) handleSkills(w http.ResponseWriter, req *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(skills)
+	_ = json.NewEncoder(w).Encode(skills)
 }
 
 // ExecutionStore provides access to execution history.
@@ -106,7 +106,7 @@ func (r *Router) handleExecutions(w http.ResponseWriter, req *http.Request) {
 
 	if r.execStore == nil {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]ExecutionRecord{})
+		_ = json.NewEncoder(w).Encode([]ExecutionRecord{})
 		return
 	}
 
@@ -117,5 +117,5 @@ func (r *Router) handleExecutions(w http.ResponseWriter, req *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(records)
+	_ = json.NewEncoder(w).Encode(records)
 }

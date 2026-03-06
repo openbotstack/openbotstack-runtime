@@ -121,6 +121,6 @@ func main() {}
 // execute is the wasm entrypoint called by the runtime.
 //
 //export execute
-func execute() {
-	Execute()
+func execute() { //nolint:unused // wasm export
+	_ = Execute()
 }

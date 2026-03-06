@@ -103,7 +103,7 @@ func TestLoadSkillDuplicate(t *testing.T) {
 	ctx := context.Background()
 	s := newMockSkill("skill-1", true)
 
-	e.LoadSkill(ctx, s)
+	_ = e.LoadSkill(ctx, s)
 	err := e.LoadSkill(ctx, s)
 	if err != executor.ErrSkillAlreadyLoaded {
 		t.Errorf("Expected ErrSkillAlreadyLoaded, got %v", err)
@@ -117,7 +117,7 @@ func TestUnloadSkillSuccess(t *testing.T) {
 	ctx := context.Background()
 	s := newMockSkill("skill-1", true)
 
-	e.LoadSkill(ctx, s)
+	_ = e.LoadSkill(ctx, s)
 	err := e.UnloadSkill(ctx, "skill-1")
 	if err != nil {
 		t.Fatalf("UnloadSkill failed: %v", err)
@@ -155,7 +155,7 @@ func TestGetSkillSuccess(t *testing.T) {
 	ctx := context.Background()
 	s := newMockSkill("skill-1", true)
 
-	e.LoadSkill(ctx, s)
+	_ = e.LoadSkill(ctx, s)
 	got, err := e.GetSkill(ctx, "skill-1")
 	if err != nil {
 		t.Fatalf("GetSkill failed: %v", err)
@@ -394,7 +394,7 @@ func TestReloadSkill(t *testing.T) {
 
 	// Load, unload, reload
 	e.LoadSkill(ctx, s)
-	e.UnloadSkill(ctx, "reload-test")
+	_ = e.UnloadSkill(ctx, "reload-test")
 	err := e.LoadSkill(ctx, s)
 	if err != nil {
 		t.Fatalf("Reload failed: %v", err)

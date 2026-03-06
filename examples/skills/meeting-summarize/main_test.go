@@ -152,7 +152,7 @@ func TestMaxLengthDefault(t *testing.T) {
 
 	// No max_length specified - should use default 200
 	input := `{"transcript": "Test transcript"}`
-	executor.Execute(context.Background(), []byte(input))
+	_, _ = executor.Execute(context.Background(), []byte(input))
 
 	// We'd need to capture the prompt to verify, but the test passes if no error
 }

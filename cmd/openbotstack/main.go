@@ -77,7 +77,7 @@ func main() {
 		slog.Error("failed to initialize wasm runtime", "error", err)
 		os.Exit(1)
 	}
-	defer wasmRuntime.Close()
+	defer wasmRuntime.Close() //nolint:errcheck // best-effort cleanup on shutdown
 
 	// Initialize Host API (LLM)
 	var llmClient *llm.Client

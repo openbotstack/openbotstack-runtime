@@ -118,7 +118,7 @@ func TestSkillsEndpointEmpty(t *testing.T) {
 	}
 
 	var skills []api.SkillResponse
-	json.Unmarshal(rr.Body.Bytes(), &skills)
+	_ = json.Unmarshal(rr.Body.Bytes(), &skills)
 	if len(skills) != 0 {
 		t.Errorf("Expected empty list, got %d", len(skills))
 	}
@@ -163,7 +163,7 @@ func TestExecutionsEndpoint(t *testing.T) {
 	logger := audit.NewPGAuditLogger()
 
 	// Add some execution events
-	logger.Log(context.Background(), audit.Event{
+	_ = logger.Log(context.Background(), audit.Event{
 		ID:       "exec-1",
 		Action:   "skill.execute",
 		Resource: "core/math.add",
@@ -171,7 +171,7 @@ func TestExecutionsEndpoint(t *testing.T) {
 		Duration: 42 * time.Millisecond,
 		Metadata: map[string]string{"session_id": "sess-1"},
 	})
-	logger.Log(context.Background(), audit.Event{
+	_ = logger.Log(context.Background(), audit.Event{
 		ID:       "exec-2",
 		Action:   "skill.execute",
 		Resource: "core/text.wordcount",
@@ -251,7 +251,7 @@ func TestExecutionsEndpointEmpty(t *testing.T) {
 	}
 
 	var execs []api.ExecutionRecord
-	json.Unmarshal(rr.Body.Bytes(), &execs)
+	_ = json.Unmarshal(rr.Body.Bytes(), &execs)
 	if len(execs) != 0 {
 		t.Errorf("Expected empty, got %d", len(execs))
 	}

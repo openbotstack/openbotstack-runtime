@@ -238,7 +238,7 @@ func runTestCases(t *testing.T) {
 				t.Errorf("UI request failed: %v", err)
 				continue
 			}
-			defer resp.Body.Close()
+			defer resp.Body.Close() //nolint:errcheck // test cleanup
 			if resp.StatusCode != http.StatusFound {
 				t.Errorf("Root should redirect, got %d", resp.StatusCode)
 			}
@@ -251,7 +251,7 @@ func runTestCases(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Request failed: %v", err)
 			}
-			defer resp.Body.Close()
+			defer resp.Body.Close() //nolint:errcheck // test cleanup
 
 			if resp.StatusCode != tt.wantStatus {
 				t.Errorf("Status code = %d, want %d", resp.StatusCode, tt.wantStatus)

@@ -79,12 +79,12 @@ func NewSSEHandler(w http.ResponseWriter) *SSEHandler {
 // WriteEvent writes a single SSE event.
 func (h *SSEHandler) WriteEvent(event SSEEvent) error {
 	if event.ID != "" {
-		fmt.Fprintf(h.w, "id: %s\n", event.ID)
+		_, _ = fmt.Fprintf(h.w, "id: %s\n", event.ID)
 	}
 	if event.Event != "" {
-		fmt.Fprintf(h.w, "event: %s\n", event.Event)
+		_, _ = fmt.Fprintf(h.w, "event: %s\n", event.Event)
 	}
-	fmt.Fprintf(h.w, "data: %s\n\n", event.Data)
+	_, _ = fmt.Fprintf(h.w, "data: %s\n\n", event.Data)
 
 	if h.flusher != nil {
 		h.flusher.Flush()

@@ -81,6 +81,6 @@ func setError(msg string) error {
 func main() {}
 
 //export execute
-func execute() {
-	Execute()
+func execute() { //nolint:unused // wasm export
+	_ = Execute()
 }
