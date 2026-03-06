@@ -11,6 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: openbotstack-runtime
 
       - name: Checkout Core (dependency)
         uses: actions/checkout@v4
@@ -22,7 +24,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.26.1'
-          cache-dependency-path: go.sum
+          cache-dependency-path: openbotstack-runtime/go.sum
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -30,12 +32,14 @@ jobs:
           node-version: '20'
 
       - name: Build Frontend
+        working-directory: openbotstack-runtime
         run: |
           cd web
           npm ci
           npm run build
 
       - name: Run Tests
+        working-directory: openbotstack-runtime
         run: make test-v
 
   build-frontend:
