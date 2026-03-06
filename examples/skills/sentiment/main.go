@@ -122,4 +122,4 @@ func setError(msg string) error {
 func main() {}
 
 //export execute
-func execute() { Execute() }
+func execute() { _ = Execute() }

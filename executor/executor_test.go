@@ -304,7 +304,7 @@ func TestExecuteWithRealWasm(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create wasm runtime: %v", err)
 	}
-	defer rt.Close()
+	defer rt.Close() //nolint:errcheck // test cleanup
 
 	e := executor.NewDefaultExecutorWithRuntime(rt)
 	ctx := context.Background()
@@ -329,7 +329,7 @@ func TestExecuteWithLoadSkillWithWasm(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create wasm runtime: %v", err)
 	}
-	defer rt.Close()
+	defer rt.Close() //nolint:errcheck // test cleanup
 
 	e := executor.NewDefaultExecutorWithRuntime(rt)
 	ctx := context.Background()

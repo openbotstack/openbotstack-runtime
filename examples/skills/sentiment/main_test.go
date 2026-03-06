@@ -12,10 +12,10 @@ func TestSentimentPositive(t *testing.T) {
 	data, _ := json.Marshal(input)
 	SetInput(data)
 
-	Execute()
+	_ = Execute()
 
 	var output SkillOutput
-	json.Unmarshal(GetOutput(), &output)
+	_ = json.Unmarshal(GetOutput(), &output)
 
 	if output.Sentiment != "positive" {
 		t.Errorf("Expected positive, got %s", output.Sentiment)
@@ -31,10 +31,10 @@ func TestSentimentNegative(t *testing.T) {
 	data, _ := json.Marshal(input)
 	SetInput(data)
 
-	Execute()
+	_ = Execute()
 
 	var output SkillOutput
-	json.Unmarshal(GetOutput(), &output)
+	_ = json.Unmarshal(GetOutput(), &output)
 
 	if output.Sentiment != "negative" {
 		t.Errorf("Expected negative, got %s", output.Sentiment)
@@ -47,10 +47,10 @@ func TestSentimentNeutral(t *testing.T) {
 	data, _ := json.Marshal(input)
 	SetInput(data)
 
-	Execute()
+	_ = Execute()
 
 	var output SkillOutput
-	json.Unmarshal(GetOutput(), &output)
+	_ = json.Unmarshal(GetOutput(), &output)
 
 	if output.Sentiment != "neutral" {
 		t.Errorf("Expected neutral, got %s", output.Sentiment)
@@ -63,10 +63,10 @@ func TestEmptyInput(t *testing.T) {
 	data, _ := json.Marshal(input)
 	SetInput(data)
 
-	Execute()
+	_ = Execute()
 
 	var output SkillOutput
-	json.Unmarshal(GetOutput(), &output)
+	_ = json.Unmarshal(GetOutput(), &output)
 
 	if output.Error == "" {
 		t.Error("Expected error for empty text")
@@ -83,10 +83,10 @@ func TestInputTooLong(t *testing.T) {
 	data, _ := json.Marshal(input)
 	SetInput(data)
 
-	Execute()
+	_ = Execute()
 
 	var output SkillOutput
-	json.Unmarshal(GetOutput(), &output)
+	_ = json.Unmarshal(GetOutput(), &output)
 
 	if output.Error == "" {
 		t.Error("Expected error for long text")
@@ -99,10 +99,10 @@ func TestShortTextConfidence(t *testing.T) {
 	data, _ := json.Marshal(input)
 	SetInput(data)
 
-	Execute()
+	_ = Execute()
 
 	var output SkillOutput
-	json.Unmarshal(GetOutput(), &output)
+	_ = json.Unmarshal(GetOutput(), &output)
 
 	// Short text should have reduced confidence (92% * 0.8 = ~73.6%)
 	if output.Confidence > 0.8 {
