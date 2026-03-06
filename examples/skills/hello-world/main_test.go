@@ -117,7 +117,7 @@ func TestOutputMetadata(t *testing.T) {
 	data, _ := json.Marshal(input)
 	SetInput(data)
 
-	Execute()
+	_ = Execute()
 
 	var output SkillOutput
 	_ = json.Unmarshal(GetOutput(), &output)
@@ -140,7 +140,7 @@ func TestInputWithSession(t *testing.T) {
 	data, _ := json.Marshal(input)
 	SetInput(data)
 
-	Execute()
+	_ = Execute()
 
 	var output SkillOutput
 	_ = json.Unmarshal(GetOutput(), &output)
