@@ -36,7 +36,7 @@ func TestRuntimeExecuteWithStartExport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRuntime failed: %v", err)
 	}
-	defer rt.Close()
+	defer rt.Close() //nolint:errcheck // test cleanup
 
 	ctx := context.Background()
 	_, err = rt.Execute(ctx, minimalWasm, nil, DefaultLimits())
@@ -50,7 +50,7 @@ func TestRuntimeExecuteWithExecuteExport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRuntime failed: %v", err)
 	}
-	defer rt.Close()
+	defer rt.Close() //nolint:errcheck // test cleanup
 
 	ctx := context.Background()
 	_, err = rt.Execute(ctx, executeWasm, nil, DefaultLimits())
@@ -64,7 +64,7 @@ func TestRuntimeExecuteInvalidWasm(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRuntime failed: %v", err)
 	}
-	defer rt.Close()
+	defer rt.Close() //nolint:errcheck // test cleanup
 
 	ctx := context.Background()
 	_, err = rt.Execute(ctx, invalidWasm, nil, DefaultLimits())
@@ -78,7 +78,7 @@ func TestRuntimeTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRuntime failed: %v", err)
 	}
-	defer rt.Close()
+	defer rt.Close() //nolint:errcheck // test cleanup
 
 	ctx := context.Background()
 	limits := Limits{
@@ -98,7 +98,7 @@ func TestRuntimeConcurrent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRuntime failed: %v", err)
 	}
-	defer rt.Close()
+	defer rt.Close() //nolint:errcheck // test cleanup
 
 	ctx := context.Background()
 	done := make(chan error, 10)

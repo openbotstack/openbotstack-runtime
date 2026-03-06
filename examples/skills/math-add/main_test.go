@@ -81,7 +81,7 @@ func TestExecuteInvalidInput(t *testing.T) {
 			}
 
 			var output Output
-			json.Unmarshal(result, &output)
+			_ = json.Unmarshal(result, &output)
 			if output.Error == "" {
 				t.Error("Expected error message in output")
 			}
@@ -93,7 +93,7 @@ func TestExecuteInvalidInput(t *testing.T) {
 func TestExecuteMissingFields(t *testing.T) {
 	result, _ := Execute([]byte(`{}`))
 	var output Output
-	json.Unmarshal(result, &output)
+	_ = json.Unmarshal(result, &output)
 	// 0 + 0 = 0, no error expected
 	if output.Sum != 0 {
 		t.Errorf("Expected sum 0, got %v", output.Sum)
@@ -104,7 +104,7 @@ func TestExecuteBoundary(t *testing.T) {
 	// Edge case: very small numbers
 	result, _ := Execute([]byte(`{"a": 0.0000001, "b": 0.0000002}`))
 	var output Output
-	json.Unmarshal(result, &output)
+	_ = json.Unmarshal(result, &output)
 	if output.Sum < 0.0000002 || output.Sum > 0.0000004 {
 		t.Errorf("Precision issue: %v", output.Sum)
 	}

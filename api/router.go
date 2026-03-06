@@ -91,7 +91,7 @@ func (r *Router) registerRoutes() {
 
 func (r *Router) handleHealth(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "healthy"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "healthy"})
 }
 
 func (r *Router) handleChat(w http.ResponseWriter, req *http.Request) {
@@ -133,7 +133,7 @@ func (r *Router) handleChat(w http.ResponseWriter, req *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func (r *Router) handleSessions(w http.ResponseWriter, req *http.Request) {
@@ -154,7 +154,7 @@ func (r *Router) handleSessions(w http.ResponseWriter, req *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func (r *Router) handleNotFound(w http.ResponseWriter, req *http.Request) {

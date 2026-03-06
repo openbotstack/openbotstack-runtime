@@ -130,7 +130,7 @@ func (r *Runtime) Execute(ctx context.Context, wasmBytes []byte, input []byte, l
 	if err != nil {
 		return nil, fmt.Errorf("wasm: instantiation failed: %w", err)
 	}
-	defer mod.Close(ctx)
+	defer mod.Close(ctx) //nolint:errcheck // error on close is ignored
 
 	// Lifecycle step 1: Initialize (Go Reactor pattern)
 	if init := mod.ExportedFunction("_initialize"); init != nil {

@@ -11,7 +11,7 @@ import (
 
 func TestJobQueueSubmit(t *testing.T) {
 	queue := worker.NewJobQueue(4)
-	defer queue.Stop()
+	defer queue.Stop() //nolint:errcheck // test cleanup
 
 	job := worker.Job{
 		ID:   "job-1",
@@ -29,7 +29,7 @@ func TestJobQueueSubmit(t *testing.T) {
 
 func TestJobQueueProcess(t *testing.T) {
 	queue := worker.NewJobQueue(2)
-	defer queue.Stop()
+	defer queue.Stop() //nolint:errcheck // test cleanup
 
 	var processed atomic.Int32
 
@@ -56,7 +56,7 @@ func TestJobQueueProcess(t *testing.T) {
 
 func TestJobQueueConcurrency(t *testing.T) {
 	queue := worker.NewJobQueue(4) // 4 workers
-	defer queue.Stop()
+	defer queue.Stop()             //nolint:errcheck // test cleanup
 
 	var concurrent atomic.Int32
 	var maxConcurrent atomic.Int32
