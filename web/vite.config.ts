@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   base: '/ui/',  // Embedded at /ui/* in Go binary
   build: {
-    outDir: 'dist',
+    outDir: 'webui/dist',
     assetsInlineLimit: 0,  // Don't inline - embed all assets
   },
 })
