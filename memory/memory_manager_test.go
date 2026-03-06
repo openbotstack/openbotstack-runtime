@@ -60,7 +60,7 @@ func TestMemoryManagerMultipleMessages(t *testing.T) {
 	mgr := memory.NewMemoryManager(embedder, store, summarizer)
 
 	ctx := context.Background()
-	mgr.Initialize(ctx)
+	_ = mgr.Initialize(ctx)
 
 	messages := []struct {
 		role    string
@@ -95,7 +95,7 @@ func TestMemoryManagerSummarizationTriggered(t *testing.T) {
 	mgr := memory.NewMemoryManager(embedder, store, summarizer)
 
 	ctx := context.Background()
-	mgr.Initialize(ctx)
+	_ = mgr.Initialize(ctx)
 
 	// Send 12 messages to trigger summarization (threshold = 10)
 	for i := 0; i < 12; i++ {
@@ -103,7 +103,7 @@ func TestMemoryManagerSummarizationTriggered(t *testing.T) {
 		if i%2 == 1 {
 			role = "assistant"
 		}
-		mgr.OnMessage(ctx, "sess-3", "t1", "u1", role, "message content for turn")
+		_ = mgr.OnMessage(ctx, "sess-3", "t1", "u1", role, "message content for turn")
 	}
 
 	// Wait for async summarization
@@ -137,7 +137,7 @@ func TestMemoryManagerEmptyRecall(t *testing.T) {
 	mgr := memory.NewMemoryManager(embedder, store, summarizer)
 
 	ctx := context.Background()
-	mgr.Initialize(ctx)
+	_ = mgr.Initialize(ctx)
 
 	// Recall with no stored data
 	docs, err := mgr.Recall(ctx, "anything", 5)

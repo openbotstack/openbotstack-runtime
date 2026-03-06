@@ -145,7 +145,7 @@ func (m *MemoryManager) summarizeAsync(ctx context.Context, sessionID, tenantID,
 		},
 	}
 
-	m.store.Upsert(ctx, summaryCollection, doc)
+	_ = m.store.Upsert(ctx, summaryCollection, doc)
 
 	// Clear history after summarization
 	m.mu.Lock()

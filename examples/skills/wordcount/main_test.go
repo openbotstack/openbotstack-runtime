@@ -46,7 +46,7 @@ func TestWordCountBasic(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			SetInput([]byte(tt.input))
-			Execute()
+			_ = Execute()
 
 			var output Output
 			if err := json.Unmarshal(GetOutput(), &output); err != nil {
@@ -69,7 +69,7 @@ func TestWordCountWords(t *testing.T) {
 	Execute()
 
 	var output Output
-	json.Unmarshal(GetOutput(), &output)
+	_ = json.Unmarshal(GetOutput(), &output)
 
 	expectedWords := []string{"the", "quick", "brown", "fox"}
 	if len(output.Words) != len(expectedWords) {
@@ -95,7 +95,7 @@ func TestWordCountInvalidInput(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			SetInput([]byte(tt.input))
-			Execute()
+			_ = Execute()
 
 			var output Output
 			_ = json.Unmarshal(GetOutput(), &output)
@@ -119,7 +119,7 @@ func TestWordCountBoundary(t *testing.T) {
 	Execute()
 
 	var output Output
-	json.Unmarshal(GetOutput(), &output)
+	_ = json.Unmarshal(GetOutput(), &output)
 
 	if output.Count != 1000 {
 		t.Errorf("Count = %d, want 1000", output.Count)

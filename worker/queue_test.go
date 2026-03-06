@@ -96,7 +96,7 @@ func TestJobQueueStop(t *testing.T) {
 
 func TestJobQueueStatus(t *testing.T) {
 	queue := worker.NewJobQueue(2)
-	defer queue.Stop()
+	defer queue.Stop() //nolint:errcheck // test cleanup
 
 	status := queue.Status()
 	if status.Workers != 2 {

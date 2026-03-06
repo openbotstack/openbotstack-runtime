@@ -19,7 +19,7 @@ func TestRuntimeCreate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRuntime failed: %v", err)
 	}
-	defer rt.Close()
+	defer rt.Close() //nolint:errcheck // test cleanup
 
 	if rt == nil {
 		t.Fatal("NewRuntime returned nil")
@@ -28,7 +28,7 @@ func TestRuntimeCreate(t *testing.T) {
 
 func TestRuntimeLoadModule(t *testing.T) {
 	rt, _ := wasm.NewRuntime()
-	defer rt.Close()
+	defer rt.Close() //nolint:errcheck // test cleanup
 
 	ctx := context.Background()
 	mod, err := rt.LoadModule(ctx, "test", minimalWasm)
@@ -43,7 +43,7 @@ func TestRuntimeLoadModule(t *testing.T) {
 
 func TestRuntimeLoadInvalidModule(t *testing.T) {
 	rt, _ := wasm.NewRuntime()
-	defer rt.Close()
+	defer rt.Close() //nolint:errcheck // test cleanup
 
 	ctx := context.Background()
 	_, err := rt.LoadModule(ctx, "invalid", []byte{0x00, 0x00})
@@ -54,7 +54,7 @@ func TestRuntimeLoadInvalidModule(t *testing.T) {
 
 func TestRuntimeExecuteWithLimits(t *testing.T) {
 	rt, _ := wasm.NewRuntime()
-	defer rt.Close()
+	defer rt.Close() //nolint:errcheck // test cleanup
 
 	ctx := context.Background()
 	limits := wasm.Limits{
@@ -134,7 +134,7 @@ func TestDefaultLimits(t *testing.T) {
 
 func TestRuntimeMultipleModules(t *testing.T) {
 	rt, _ := wasm.NewRuntime()
-	defer rt.Close()
+	defer rt.Close() //nolint:errcheck // test cleanup
 
 	ctx := context.Background()
 

@@ -15,7 +15,7 @@ func TestExecuteEmptyInput(t *testing.T) {
 	}
 
 	var output SkillOutput
-	json.Unmarshal(outputBuffer, &output)
+	_ = json.Unmarshal(outputBuffer, &output)
 
 	if output.Message != "Hello! I'm the hello-world skill. How can I help you?" {
 		t.Errorf("Unexpected response: %s", output.Message)
@@ -30,7 +30,7 @@ func TestExecuteHello(t *testing.T) {
 	Execute()
 
 	var output SkillOutput
-	json.Unmarshal(GetOutput(), &output)
+	_ = json.Unmarshal(GetOutput(), &output)
 
 	if output.Message != "Hello! I'm the hello-world skill. How can I help you?" {
 		t.Errorf("Unexpected response: %s", output.Message)
@@ -45,7 +45,7 @@ func TestExecuteHi(t *testing.T) {
 	Execute()
 
 	var output SkillOutput
-	json.Unmarshal(GetOutput(), &output)
+	_ = json.Unmarshal(GetOutput(), &output)
 
 	if output.Message != "Hello! I'm the hello-world skill. How can I help you?" {
 		t.Errorf("Unexpected response: %s", output.Message)
@@ -60,7 +60,7 @@ func TestExecuteName(t *testing.T) {
 	Execute()
 
 	var output SkillOutput
-	json.Unmarshal(GetOutput(), &output)
+	_ = json.Unmarshal(GetOutput(), &output)
 
 	if output.Message != "I'm the OpenBotStack hello-world skill!" {
 		t.Errorf("Unexpected response: %s", output.Message)
@@ -75,7 +75,7 @@ func TestExecuteHelp(t *testing.T) {
 	Execute()
 
 	var output SkillOutput
-	json.Unmarshal(GetOutput(), &output)
+	_ = json.Unmarshal(GetOutput(), &output)
 
 	if output.Message != "I can respond to greetings. Try saying 'hello' or ask my name!" {
 		t.Errorf("Unexpected response: %s", output.Message)
@@ -90,7 +90,7 @@ func TestExecuteVersion(t *testing.T) {
 	Execute()
 
 	var output SkillOutput
-	json.Unmarshal(GetOutput(), &output)
+	_ = json.Unmarshal(GetOutput(), &output)
 
 	if output.Message != "hello-world skill v1.0.0" {
 		t.Errorf("Unexpected response: %s", output.Message)
@@ -105,7 +105,7 @@ func TestExecuteUnknown(t *testing.T) {
 	Execute()
 
 	var output SkillOutput
-	json.Unmarshal(GetOutput(), &output)
+	_ = json.Unmarshal(GetOutput(), &output)
 
 	if output.Message != "I heard you say: random message" {
 		t.Errorf("Unexpected response: %s", output.Message)
@@ -120,7 +120,7 @@ func TestOutputMetadata(t *testing.T) {
 	Execute()
 
 	var output SkillOutput
-	json.Unmarshal(GetOutput(), &output)
+	_ = json.Unmarshal(GetOutput(), &output)
 
 	if output.Data["skill"] != "hello-world" {
 		t.Errorf("Expected skill='hello-world', got %q", output.Data["skill"])
@@ -143,7 +143,7 @@ func TestInputWithSession(t *testing.T) {
 	Execute()
 
 	var output SkillOutput
-	json.Unmarshal(GetOutput(), &output)
+	_ = json.Unmarshal(GetOutput(), &output)
 
 	if output.Error != "" {
 		t.Errorf("Unexpected error: %s", output.Error)

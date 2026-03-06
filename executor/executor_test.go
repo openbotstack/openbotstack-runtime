@@ -199,9 +199,9 @@ func TestListSkillsMultiple(t *testing.T) {
 	e := executor.NewDefaultExecutor()
 	ctx := context.Background()
 
-	e.LoadSkill(ctx, newMockSkill("a", true))
-	e.LoadSkill(ctx, newMockSkill("b", true))
-	e.LoadSkill(ctx, newMockSkill("c", true))
+	_ = e.LoadSkill(ctx, newMockSkill("a", true))
+	_ = e.LoadSkill(ctx, newMockSkill("b", true))
+	_ = e.LoadSkill(ctx, newMockSkill("c", true))
 
 	ids := e.ListSkills(ctx)
 	if len(ids) != 3 {

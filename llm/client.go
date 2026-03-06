@@ -86,7 +86,7 @@ func (c *Client) Generate(ctx context.Context, prompt string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck // body closed after read
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

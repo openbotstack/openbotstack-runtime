@@ -74,7 +74,7 @@ func TestSandboxedHTTPClientAllowed(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"message": "ok"}`))
+		_, _ = w.Write([]byte(`{"message": "ok"}`))
 	}))
 	defer server.Close()
 
@@ -139,7 +139,7 @@ func TestSandboxedHTTPClientPOST(t *testing.T) {
 		n, _ := r.Body.Read(buf)
 		receivedBody = buf[:n]
 		w.WriteHeader(http.StatusCreated)
-		w.Write([]byte(`{"created": true}`))
+		_, _ = w.Write([]byte(`{"created": true}`))
 	}))
 	defer server.Close()
 

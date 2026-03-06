@@ -50,7 +50,7 @@ func NewRuntime() (*Runtime, error) {
 
 	// Instantiate WASI
 	if _, err := wasi_snapshot_preview1.Instantiate(ctx, engine); err != nil {
-		engine.Close(ctx)
+		_ = engine.Close(ctx)
 		return nil, err
 	}
 

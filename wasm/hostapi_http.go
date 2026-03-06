@@ -136,7 +136,7 @@ func (c *SandboxedHTTPClient) Fetch(ctx context.Context, urlStr, method string, 
 	if err != nil {
 		return nil, 0, err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck // closed after io.ReadAll
 
 	// Read response body
 	respBody, err := io.ReadAll(resp.Body)
