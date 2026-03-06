@@ -112,7 +112,7 @@ func TestExecutePlainTextResponse(t *testing.T) {
 	result, _ := executor.Execute(context.Background(), []byte(input))
 
 	var output Output
-	json.Unmarshal(result, &output)
+	_ = json.Unmarshal(result, &output)
 
 	if output.Error != "" {
 		t.Errorf("Unexpected error: %s", output.Error)
