@@ -1,5 +1,5 @@
 // Package executor implements skill execution with sandboxing.
-package executor
+package skill_executor
 
 import (
 	"context"
@@ -8,10 +8,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/openbotstack/openbotstack-core/runtime"
-	"github.com/openbotstack/openbotstack-core/skill"
-	"github.com/openbotstack/openbotstack-runtime/agent"
-	"github.com/openbotstack/openbotstack-runtime/wasm"
+	"github.com/openbotstack/openbotstack-core/execution"
+	"github.com/openbotstack/openbotstack-core/registry/skills"
+	"github.com/openbotstack/openbotstack-core/control/agent"
+	"github.com/openbotstack/openbotstack-runtime/sandbox/wasm"
+	"github.com/openbotstack/openbotstack-runtime/toolrunner"
 )
 
 var (
@@ -31,39 +32,48 @@ var (
 	ErrNoWasmBytes = errors.New("executor: skill has no wasm bytes")
 )
 
-// WasmSkill extends skill.Skill with Wasm bytes.
+// WasmSkill extends skills.Skill with Wasm bytes.
 type WasmSkill interface {
-	skill.Skill
+	skills.Skill
 	WasmBytes() []byte
 }
 
 // DefaultExecutor implements SkillExecutor with real Wasm execution.
 type DefaultExecutor struct {
 	mu      sync.RWMutex
-	skills  map[string]skill.Skill
+	skills  map[string]skills.Skill
 	wasm    map[string][]byte // Wasm bytes per skill
 	runtime *wasm.Runtime
+	tools   toolrunner.ToolRunner
 }
 
 // NewDefaultExecutor creates a new executor.
 func NewDefaultExecutor() *DefaultExecutor {
 	return &DefaultExecutor{
-		skills: make(map[string]skill.Skill),
+		skills: make(map[string]skills.Skill),
 		wasm:   make(map[string][]byte),
 	}
 }
 
-// NewDefaultExecutorWithRuntime creates an executor with Wasm runtime.
-func NewDefaultExecutorWithRuntime(rt *wasm.Runtime) *DefaultExecutor {
+// NewDefaultExecutorWithRuntime creates an executor with Wasm execution.
+func NewDefaultExecutorWithRuntime(rt *wasm.Runtime, tools toolrunner.ToolRunner) *DefaultExecutor {
 	return &DefaultExecutor{
-		skills:  make(map[string]skill.Skill),
+		skills:  make(map[string]skills.Skill),
 		wasm:    make(map[string][]byte),
 		runtime: rt,
+		tools:   tools,
 	}
 }
 
+// SetToolRunner updates the tool runner.
+func (e *DefaultExecutor) SetToolRunner(tools toolrunner.ToolRunner) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.tools = tools
+}
+
 // LoadSkill prepares a skill for execution.
-func (e *DefaultExecutor) LoadSkill(ctx context.Context, s skill.Skill) error {
+func (e *DefaultExecutor) LoadSkill(ctx context.Context, s skills.Skill) error {
 	if s == nil {
 		return ErrNilSkill
 	}
@@ -94,7 +104,7 @@ func (e *DefaultExecutor) LoadSkill(ctx context.Context, s skill.Skill) error {
 }
 
 // LoadSkillWithWasm loads a skill with its Wasm module bytes.
-func (e *DefaultExecutor) LoadSkillWithWasm(ctx context.Context, s skill.Skill, wasmBytes []byte) error {
+func (e *DefaultExecutor) LoadSkillWithWasm(ctx context.Context, s skills.Skill, wasmBytes []byte) error {
 	if s == nil {
 		return ErrNilSkill
 	}
@@ -141,7 +151,7 @@ func (e *DefaultExecutor) UnloadSkill(ctx context.Context, skillID string) error
 }
 
 // GetSkill returns a loaded skill by ID.
-func (e *DefaultExecutor) GetSkill(ctx context.Context, skillID string) (skill.Skill, error) {
+func (e *DefaultExecutor) GetSkill(ctx context.Context, skillID string) (skills.Skill, error) {
 	if skillID == "" {
 		return nil, ErrEmptySkillID
 	}
@@ -182,12 +192,12 @@ func (e *DefaultExecutor) CanExecute(ctx context.Context, skillID string) (bool,
 }
 
 // Execute runs a skill with the given input.
-func (e *DefaultExecutor) Execute(ctx context.Context, req runtime.ExecutionRequest) (*runtime.ExecutionResult, error) {
+func (e *DefaultExecutor) Execute(ctx context.Context, req execution.ExecutionRequest) (*execution.ExecutionResult, error) {
 	start := time.Now()
 
 	if req.SkillID == "" {
-		return &runtime.ExecutionResult{
-			Status:   runtime.StatusFailed,
+		return &execution.ExecutionResult{
+			Status:   execution.StatusFailed,
 			Error:    "empty skill ID",
 			Duration: time.Since(start),
 		}, ErrEmptySkillID
@@ -199,11 +209,11 @@ func (e *DefaultExecutor) Execute(ctx context.Context, req runtime.ExecutionRequ
 	e.mu.RUnlock()
 
 	if !exists {
-		return &runtime.ExecutionResult{
-			Status:   runtime.StatusFailed,
+		return &execution.ExecutionResult{
+			Status:   execution.StatusFailed,
 			Error:    "skill not loaded",
 			Duration: time.Since(start),
-		}, runtime.ErrSkillNotLoaded
+		}, execution.ErrSkillNotLoaded
 	}
 
 	// Apply timeout
@@ -225,37 +235,37 @@ func (e *DefaultExecutor) Execute(ctx context.Context, req runtime.ExecutionRequ
 		output, err := e.runtime.Execute(ctx, wasmBytes, req.Input, limits)
 		if err != nil {
 			if ctx.Err() == context.DeadlineExceeded {
-				return &runtime.ExecutionResult{
-					Status:   runtime.StatusTimeout,
+				return &execution.ExecutionResult{
+					Status:   execution.StatusTimeout,
 					Error:    "execution timeout",
 					Duration: time.Since(start),
-				}, runtime.ErrExecutionTimeout
+				}, execution.ErrExecutionTimeout
 			}
-			return &runtime.ExecutionResult{
-				Status:   runtime.StatusFailed,
+			return &execution.ExecutionResult{
+				Status:   execution.StatusFailed,
 				Error:    err.Error(),
 				Duration: time.Since(start),
 			}, err
 		}
 
-		return &runtime.ExecutionResult{
-			Status:   runtime.StatusSuccess,
+		return &execution.ExecutionResult{
+			Status:   execution.StatusSuccess,
 			Output:   output,
 			Duration: time.Since(start),
 		}, nil
 	}
 
 	// Fallback for skills without Wasm (declarative skills)
-	result := &runtime.ExecutionResult{
-		Status:   runtime.StatusSuccess,
+	result := &execution.ExecutionResult{
+		Status:   execution.StatusSuccess,
 		Duration: time.Since(start),
 	}
 
 	select {
 	case <-ctx.Done():
-		result.Status = runtime.StatusTimeout
+		result.Status = execution.StatusTimeout
 		result.Error = "execution timeout"
-		return result, runtime.ErrExecutionTimeout
+		return result, execution.ErrExecutionTimeout
 	default:
 		// For declarative skills, return empty output (handled by agent)
 		result.Output = []byte(`{"type": "declarative"}`)
@@ -282,14 +292,14 @@ var ErrNilExecutionPlan = errors.New("executor: nil execution plan")
 //  3. Calls the underlying Execute method
 //
 // Direct calls to Execute with raw bytes are discouraged.
-func (e *DefaultExecutor) ExecuteFromPlan(ctx context.Context, plan *agent.ExecutionPlan, meta agent.ExecutionMeta) (*runtime.ExecutionResult, error) {
+func (e *DefaultExecutor) ExecuteFromPlan(ctx context.Context, plan *agent.ExecutionPlan, meta agent.ExecutionMeta) (*execution.ExecutionResult, error) {
 	if plan == nil {
 		return nil, ErrNilExecutionPlan
 	}
 
 	if err := plan.Validate(); err != nil {
-		return &runtime.ExecutionResult{
-			Status: runtime.StatusRejected,
+		return &execution.ExecutionResult{
+			Status: execution.StatusRejected,
 			Error:  err.Error(),
 		}, err
 	}
@@ -297,14 +307,14 @@ func (e *DefaultExecutor) ExecuteFromPlan(ctx context.Context, plan *agent.Execu
 	// Serialize arguments to JSON
 	inputBytes, err := plan.ArgumentsJSON()
 	if err != nil {
-		return &runtime.ExecutionResult{
-			Status: runtime.StatusFailed,
+		return &execution.ExecutionResult{
+			Status: execution.StatusFailed,
 			Error:  "failed to serialize arguments: " + err.Error(),
 		}, err
 	}
 
 	// Build ExecutionRequest from plan
-	req := runtime.ExecutionRequest{
+	req := execution.ExecutionRequest{
 		SkillID:   plan.SkillID,
 		Input:     inputBytes,
 		TenantID:  meta.TenantID,
@@ -313,6 +323,29 @@ func (e *DefaultExecutor) ExecuteFromPlan(ctx context.Context, plan *agent.Execu
 	}
 
 	return e.Execute(ctx, req)
+}
+
+// ExecutePlan runs a multi-step execution plan using a StepRunner.
+func (e *DefaultExecutor) ExecutePlan(ctx context.Context, plan *execution.ExecutionPlan, ec *execution.ExecutionContext) error {
+	if plan == nil {
+		return ErrNilExecutionPlan
+	}
+
+	runner := NewStepRunner(e, e.tools)
+	for _, step := range plan.Steps {
+		// Check for context cancellation
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		_, err := runner.RunStep(ctx, ec, step)
+		if err != nil {
+			// In request-scoped ephemeral execution, we stop on the first error
+			return fmt.Errorf("step %s failed: %w", step.Name, err)
+		}
+	}
+
+	return nil
 }
 
 // List returns all loaded skill IDs.
@@ -327,7 +360,7 @@ func (e *DefaultExecutor) List() []string {
 }
 
 // Get retrieves a skill by ID.
-func (e *DefaultExecutor) Get(id string) (skill.Skill, error) {
+func (e *DefaultExecutor) Get(id string) (skills.Skill, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	s, exists := e.skills[id]

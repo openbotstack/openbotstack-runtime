@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/openbotstack/openbotstack-runtime/wasm"
+	"github.com/openbotstack/openbotstack-runtime/sandbox/wasm"
 )
 
 // ==================== HTTP Allowlist Tests ====================
@@ -112,8 +112,8 @@ func TestSandboxedHTTPClientDenied(t *testing.T) {
 func TestSandboxedHTTPClientTimeout(t *testing.T) {
 	// Start slow server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Never respond (will timeout)
-		select {}
+		// Wait for request context to be done (will timeout or be cancelled by Close)
+		<-r.Context().Done()
 	}))
 	defer server.Close()
 

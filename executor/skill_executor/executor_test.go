@@ -1,4 +1,4 @@
-package executor_test
+package skill_executor_test
 
 import (
 	"context"
@@ -6,13 +6,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openbotstack/openbotstack-core/runtime"
-	"github.com/openbotstack/openbotstack-core/skill"
-	"github.com/openbotstack/openbotstack-runtime/executor"
-	"github.com/openbotstack/openbotstack-runtime/wasm"
+	"github.com/openbotstack/openbotstack-core/execution"
+	control_skills "github.com/openbotstack/openbotstack-core/control/skills"
+	executor "github.com/openbotstack/openbotstack-runtime/executor/skill_executor"
+	"github.com/openbotstack/openbotstack-runtime/sandbox/wasm"
 )
 
-// mockSkill implements skill.Skill for testing.
+// mockSkill implements skills.Skill for testing.
 type mockSkill struct {
 	id        string
 	valid     bool
@@ -24,8 +24,8 @@ func (m *mockSkill) ID() string                      { return m.id }
 func (m *mockSkill) Name() string                    { return "mock-" + m.id }
 func (m *mockSkill) Description() string             { return "Test skill " + m.id }
 func (m *mockSkill) Timeout() time.Duration          { return m.timeout }
-func (m *mockSkill) InputSchema() *skill.JSONSchema  { return nil }
-func (m *mockSkill) OutputSchema() *skill.JSONSchema { return nil }
+func (m *mockSkill) InputSchema() *control_skills.JSONSchema  { return nil }
+func (m *mockSkill) OutputSchema() *control_skills.JSONSchema { return nil }
 func (m *mockSkill) RequiredPermissions() []string   { return nil }
 func (m *mockSkill) Validate() error {
 	if !m.valid {
@@ -255,14 +255,14 @@ func TestExecuteSuccess(t *testing.T) {
 	ctx := context.Background()
 	_ = e.LoadSkill(ctx, newMockSkill("skill-1", true))
 
-	result, err := e.Execute(ctx, runtime.ExecutionRequest{
+	result, err := e.Execute(ctx, execution.ExecutionRequest{
 		SkillID: "skill-1",
 		Input:   []byte("test"),
 	})
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
-	if result.Status != runtime.StatusSuccess {
+	if result.Status != execution.StatusSuccess {
 		t.Errorf("Expected StatusSuccess, got %v", result.Status)
 	}
 }
@@ -271,13 +271,13 @@ func TestExecuteSkillNotLoaded(t *testing.T) {
 	e := executor.NewDefaultExecutor()
 	ctx := context.Background()
 
-	result, err := e.Execute(ctx, runtime.ExecutionRequest{
+	result, err := e.Execute(ctx, execution.ExecutionRequest{
 		SkillID: "nonexistent",
 	})
-	if err != runtime.ErrSkillNotLoaded {
+	if err != execution.ErrSkillNotLoaded {
 		t.Errorf("Expected ErrSkillNotLoaded, got %v", err)
 	}
-	if result.Status != runtime.StatusFailed {
+	if result.Status != execution.StatusFailed {
 		t.Errorf("Expected StatusFailed, got %v", result.Status)
 	}
 }
@@ -286,13 +286,13 @@ func TestExecuteEmptySkillID(t *testing.T) {
 	e := executor.NewDefaultExecutor()
 	ctx := context.Background()
 
-	result, err := e.Execute(ctx, runtime.ExecutionRequest{
+	result, err := e.Execute(ctx, execution.ExecutionRequest{
 		SkillID: "",
 	})
 	if err != executor.ErrEmptySkillID {
 		t.Errorf("Expected ErrEmptySkillID, got %v", err)
 	}
-	if result.Status != runtime.StatusFailed {
+	if result.Status != execution.StatusFailed {
 		t.Errorf("Expected StatusFailed, got %v", result.Status)
 	}
 }
@@ -306,20 +306,20 @@ func TestExecuteWithRealWasm(t *testing.T) {
 	}
 	defer rt.Close() //nolint:errcheck // test cleanup
 
-	e := executor.NewDefaultExecutorWithRuntime(rt)
+	e := executor.NewDefaultExecutorWithRuntime(rt, nil)
 	ctx := context.Background()
 
 	s := &mockSkill{id: "wasm-skill", valid: true, timeout: 30 * time.Second, wasmBytes: testWasm}
 	_ = e.LoadSkill(ctx, s)
 
-	result, err := e.Execute(ctx, runtime.ExecutionRequest{
+	result, err := e.Execute(ctx, execution.ExecutionRequest{
 		SkillID: "wasm-skill",
 		Input:   []byte(`{"name": "test"}`),
 	})
 	if err != nil {
 		t.Fatalf("Execute with real Wasm failed: %v", err)
 	}
-	if result.Status != runtime.StatusSuccess {
+	if result.Status != execution.StatusSuccess {
 		t.Errorf("Expected StatusSuccess, got %v (error: %s)", result.Status, result.Error)
 	}
 }
@@ -331,7 +331,7 @@ func TestExecuteWithLoadSkillWithWasm(t *testing.T) {
 	}
 	defer rt.Close() //nolint:errcheck // test cleanup
 
-	e := executor.NewDefaultExecutorWithRuntime(rt)
+	e := executor.NewDefaultExecutorWithRuntime(rt, nil)
 	ctx := context.Background()
 
 	s := newMockSkill("wasm-skill-2", true)
@@ -340,13 +340,13 @@ func TestExecuteWithLoadSkillWithWasm(t *testing.T) {
 		t.Fatalf("LoadSkillWithWasm failed: %v", err)
 	}
 
-	result, err := e.Execute(ctx, runtime.ExecutionRequest{
+	result, err := e.Execute(ctx, execution.ExecutionRequest{
 		SkillID: "wasm-skill-2",
 	})
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
-	if result.Status != runtime.StatusSuccess {
+	if result.Status != execution.StatusSuccess {
 		t.Errorf("Expected StatusSuccess, got %v", result.Status)
 	}
 }
@@ -367,8 +367,8 @@ func TestFullLifecycle(t *testing.T) {
 	}
 
 	// Execute
-	result, err := e.Execute(ctx, runtime.ExecutionRequest{SkillID: "lifecycle-test"})
-	if err != nil || result.Status != runtime.StatusSuccess {
+	result, err := e.Execute(ctx, execution.ExecutionRequest{SkillID: "lifecycle-test"})
+	if err != nil || result.Status != execution.StatusSuccess {
 		t.Fatalf("Execute failed: %v", err)
 	}
 
@@ -381,8 +381,8 @@ func TestFullLifecycle(t *testing.T) {
 	}
 
 	// Execute after unload should fail
-	_, err = e.Execute(ctx, runtime.ExecutionRequest{SkillID: "lifecycle-test"})
-	if err != runtime.ErrSkillNotLoaded {
+	_, err = e.Execute(ctx, execution.ExecutionRequest{SkillID: "lifecycle-test"})
+	if err != execution.ErrSkillNotLoaded {
 		t.Errorf("Expected ErrSkillNotLoaded after unload, got %v", err)
 	}
 }

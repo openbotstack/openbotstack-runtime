@@ -1,5 +1,5 @@
 // Package worker implements async job queue for skill execution.
-package worker
+package workflow_executor
 
 import (
 	"context"

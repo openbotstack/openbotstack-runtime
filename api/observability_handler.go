@@ -5,16 +5,16 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/openbotstack/openbotstack-core/skill"
+	"github.com/openbotstack/openbotstack-core/registry/skills"
 )
 
 // SkillProvider provides access to loaded skills for the API.
 type SkillProvider interface {
 	List() []string
-	Get(id string) (skill.Skill, error)
+	Get(id string) (skills.Skill, error)
 }
 
-// SkillResponse is the JSON representation of a skill.
+// SkillResponse is the JSON representation of a skills.
 type SkillResponse struct {
 	ID           string      `json:"id"`
 	Name         string      `json:"name"`
@@ -27,7 +27,7 @@ type SkillResponse struct {
 }
 
 // skillTypeFromID infers skill type from metadata or ID convention.
-func skillTypeFromID(s skill.Skill) string {
+func skillTypeFromID(s skills.Skill) string {
 	// Check if the skill has Wasm bytes (indicates wasm type)
 	if ws, ok := s.(interface{ WasmBytes() []byte }); ok && len(ws.WasmBytes()) > 0 {
 		return "wasm"

@@ -3,7 +3,7 @@ package api
 import (
 	"context"
 
-	"github.com/openbotstack/openbotstack-runtime/audit"
+	audit "github.com/openbotstack/openbotstack-runtime/logging/execution_logs"
 )
 
 // AuditExecutionStore adapts AuditLogger to ExecutionStore.
@@ -19,7 +19,7 @@ func NewAuditExecutionStore(logger audit.AuditLogger) *AuditExecutionStore {
 // QueryExecutions returns recent execution records from audit logs.
 func (s *AuditExecutionStore) QueryExecutions(ctx context.Context, limit int) ([]ExecutionRecord, error) {
 	events, err := s.logger.Query(ctx, audit.QueryFilter{
-		Action: "skill.execute",
+		Action: "skills.execute",
 		Limit:  limit,
 	})
 	if err != nil {

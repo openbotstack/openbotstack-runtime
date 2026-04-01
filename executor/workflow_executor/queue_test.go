@@ -1,4 +1,4 @@
-package worker_test
+package workflow_executor_test
 
 import (
 	"context"
@@ -6,16 +6,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openbotstack/openbotstack-runtime/worker"
+	"github.com/openbotstack/openbotstack-runtime/executor/workflow_executor"
 )
 
 func TestJobQueueSubmit(t *testing.T) {
-	queue := worker.NewJobQueue(4)
+	queue := workflow_executor.NewJobQueue(4)
 	defer queue.Stop() //nolint:errcheck // test cleanup
 
-	job := worker.Job{
+	job := workflow_executor.Job{
 		ID:   "job-1",
-		Type: "skill.execute",
+		Type: "skills.execute",
 		Payload: map[string]interface{}{
 			"skill_id": "search",
 		},
@@ -28,19 +28,19 @@ func TestJobQueueSubmit(t *testing.T) {
 }
 
 func TestJobQueueProcess(t *testing.T) {
-	queue := worker.NewJobQueue(2)
+	queue := workflow_executor.NewJobQueue(2)
 	defer queue.Stop() //nolint:errcheck // test cleanup
 
 	var processed atomic.Int32
 
-	queue.SetHandler(func(ctx context.Context, job worker.Job) error {
+	queue.SetHandler(func(ctx context.Context, job workflow_executor.Job) error {
 		processed.Add(1)
 		return nil
 	})
 
 	// Submit jobs
 	for i := 0; i < 5; i++ {
-		_ = queue.Submit(context.Background(), worker.Job{
+		_ = queue.Submit(context.Background(), workflow_executor.Job{
 			ID:   "job-" + string(rune('0'+i)),
 			Type: "test",
 		})
@@ -55,13 +55,13 @@ func TestJobQueueProcess(t *testing.T) {
 }
 
 func TestJobQueueConcurrency(t *testing.T) {
-	queue := worker.NewJobQueue(4) // 4 workers
+	queue := workflow_executor.NewJobQueue(4) // 4 workers
 	defer queue.Stop()             //nolint:errcheck // test cleanup
 
 	var concurrent atomic.Int32
 	var maxConcurrent atomic.Int32
 
-	queue.SetHandler(func(ctx context.Context, job worker.Job) error {
+	queue.SetHandler(func(ctx context.Context, job workflow_executor.Job) error {
 		c := concurrent.Add(1)
 		if c > maxConcurrent.Load() {
 			maxConcurrent.Store(c)
@@ -73,7 +73,7 @@ func TestJobQueueConcurrency(t *testing.T) {
 
 	// Submit many jobs
 	for i := 0; i < 10; i++ {
-		_ = queue.Submit(context.Background(), worker.Job{ID: "c-" + string(rune('0'+i))})
+		_ = queue.Submit(context.Background(), workflow_executor.Job{ID: "c-" + string(rune('0'+i))})
 	}
 
 	time.Sleep(300 * time.Millisecond)
@@ -84,9 +84,9 @@ func TestJobQueueConcurrency(t *testing.T) {
 }
 
 func TestJobQueueStop(t *testing.T) {
-	queue := worker.NewJobQueue(2)
+	queue := workflow_executor.NewJobQueue(2)
 
-	_ = queue.Submit(context.Background(), worker.Job{ID: "stop-test"})
+	_ = queue.Submit(context.Background(), workflow_executor.Job{ID: "stop-test"})
 
 	err := queue.Stop()
 	if err != nil {
@@ -95,7 +95,7 @@ func TestJobQueueStop(t *testing.T) {
 }
 
 func TestJobQueueStatus(t *testing.T) {
-	queue := worker.NewJobQueue(2)
+	queue := workflow_executor.NewJobQueue(2)
 	defer queue.Stop() //nolint:errcheck // test cleanup
 
 	status := queue.Status()

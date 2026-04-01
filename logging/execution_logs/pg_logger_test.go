@@ -1,15 +1,15 @@
-package audit_test
+package execution_logs_test
 
 import (
 	"context"
 	"testing"
 	"time"
 
-	"github.com/openbotstack/openbotstack-runtime/audit"
+	audit "github.com/openbotstack/openbotstack-runtime/logging/execution_logs"
 )
 
 func TestAuditLoggerLog(t *testing.T) {
-	logger := audit.NewPGAuditLogger()
+	logger := audit.NewInMemoryAuditLogger()
 	ctx := context.Background()
 
 	event := audit.Event{
@@ -17,7 +17,7 @@ func TestAuditLoggerLog(t *testing.T) {
 		TenantID:  "tenant-1",
 		UserID:    "user-1",
 		RequestID: "req-1",
-		Action:    "skill.execute",
+		Action:    "skills.execute",
 		Resource:  "skill/search",
 		Outcome:   "success",
 		Timestamp: time.Now(),
@@ -30,13 +30,13 @@ func TestAuditLoggerLog(t *testing.T) {
 }
 
 func TestAuditLoggerQuery(t *testing.T) {
-	logger := audit.NewPGAuditLogger()
+	logger := audit.NewInMemoryAuditLogger()
 	ctx := context.Background()
 
 	events := []audit.Event{
-		{ID: "e1", TenantID: "t1", Action: "skill.execute", Timestamp: time.Now()},
+		{ID: "e1", TenantID: "t1", Action: "skills.execute", Timestamp: time.Now()},
 		{ID: "e2", TenantID: "t1", Action: "model.generate", Timestamp: time.Now()},
-		{ID: "e3", TenantID: "t2", Action: "skill.execute", Timestamp: time.Now()},
+		{ID: "e3", TenantID: "t2", Action: "skills.execute", Timestamp: time.Now()},
 	}
 
 	for _, e := range events {
@@ -56,12 +56,12 @@ func TestAuditLoggerQuery(t *testing.T) {
 }
 
 func TestAuditLoggerQueryByAction(t *testing.T) {
-	logger := audit.NewPGAuditLogger()
+	logger := audit.NewInMemoryAuditLogger()
 	ctx := context.Background()
 
 	events := []audit.Event{
-		{ID: "a1", TenantID: "t1", Action: "skill.execute", Timestamp: time.Now()},
-		{ID: "a2", TenantID: "t1", Action: "skill.execute", Timestamp: time.Now()},
+		{ID: "a1", TenantID: "t1", Action: "skills.execute", Timestamp: time.Now()},
+		{ID: "a2", TenantID: "t1", Action: "skills.execute", Timestamp: time.Now()},
 		{ID: "a3", TenantID: "t1", Action: "model.generate", Timestamp: time.Now()},
 	}
 
@@ -71,19 +71,19 @@ func TestAuditLoggerQueryByAction(t *testing.T) {
 
 	result, err := logger.Query(ctx, audit.QueryFilter{
 		TenantID: "t1",
-		Action:   "skill.execute",
+		Action:   "skills.execute",
 	})
 	if err != nil {
 		t.Fatalf("Query failed: %v", err)
 	}
 
 	if len(result) != 2 {
-		t.Errorf("Expected 2 skill.execute events, got %d", len(result))
+		t.Errorf("Expected 2 skills.execute events, got %d", len(result))
 	}
 }
 
 func TestAuditLoggerQueryByTimeRange(t *testing.T) {
-	logger := audit.NewPGAuditLogger()
+	logger := audit.NewInMemoryAuditLogger()
 	ctx := context.Background()
 
 	now := time.Now()
@@ -112,7 +112,7 @@ func TestAuditLoggerQueryByTimeRange(t *testing.T) {
 }
 
 func TestAuditLoggerCount(t *testing.T) {
-	logger := audit.NewPGAuditLogger()
+	logger := audit.NewInMemoryAuditLogger()
 	ctx := context.Background()
 
 	for i := 0; i < 5; i++ {

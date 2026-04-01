@@ -1,4 +1,4 @@
-// Package main implements an LLM-orchestrated meeting summarization skill.
+// Package main implements an LLM-orchestrated meeting summarization skills.
 //
 // This is an LLM skill - it uses an LLM provider internally but has
 // a deterministic interface with structured input/output.
@@ -11,13 +11,13 @@ import (
 	"strings"
 )
 
-// Input for the meeting summarize skill.
+// Input for the meeting summarize skills.
 type Input struct {
 	Transcript string `json:"transcript"`
 	MaxLength  int    `json:"max_length,omitempty"` // Optional, default 200
 }
 
-// Output from the meeting summarize skill.
+// Output from the meeting summarize skills.
 type Output struct {
 	Summary     string   `json:"summary"`
 	ActionItems []string `json:"action_items"`

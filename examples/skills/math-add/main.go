@@ -1,4 +1,4 @@
-// Package main implements a deterministic math.add skill.
+// Package main implements a deterministic math.add skills.
 //
 // This is a CODE skill - pure Go, no Wasm, deterministic.
 // Build:

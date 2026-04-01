@@ -8,9 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openbotstack/openbotstack-core/skill"
+	control_skills "github.com/openbotstack/openbotstack-core/control/skills"
+	"github.com/openbotstack/openbotstack-core/registry/skills"
 	"github.com/openbotstack/openbotstack-runtime/api"
-	"github.com/openbotstack/openbotstack-runtime/audit"
+	audit "github.com/openbotstack/openbotstack-runtime/logging/execution_logs"
 )
 
 // ==================== Mock SkillProvider ====================
@@ -24,8 +25,8 @@ type testSkill struct {
 func (s *testSkill) ID() string                      { return s.id }
 func (s *testSkill) Name() string                    { return s.name }
 func (s *testSkill) Description() string             { return s.description }
-func (s *testSkill) InputSchema() *skill.JSONSchema  { return nil }
-func (s *testSkill) OutputSchema() *skill.JSONSchema { return nil }
+func (s *testSkill) InputSchema() *control_skills.JSONSchema  { return nil }
+func (s *testSkill) OutputSchema() *control_skills.JSONSchema { return nil }
 func (s *testSkill) RequiredPermissions() []string   { return nil }
 func (s *testSkill) Timeout() time.Duration          { return 30 * time.Second }
 func (s *testSkill) Validate() error                 { return nil }
@@ -42,7 +43,7 @@ func (p *mockSkillProvider) List() []string {
 	return ids
 }
 
-func (p *mockSkillProvider) Get(id string) (skill.Skill, error) {
+func (p *mockSkillProvider) Get(id string) (skills.Skill, error) {
 	s, ok := p.skills[id]
 	if !ok {
 		return nil, nil
@@ -160,12 +161,12 @@ func TestSkillsEndpointMethodNotAllowed(t *testing.T) {
 // ==================== Executions Endpoint Tests ====================
 
 func TestExecutionsEndpoint(t *testing.T) {
-	logger := audit.NewPGAuditLogger()
+	logger := audit.NewInMemoryAuditLogger()
 
 	// Add some execution events
 	_ = logger.Log(context.Background(), audit.Event{
 		ID:       "exec-1",
-		Action:   "skill.execute",
+		Action:   "skills.execute",
 		Resource: "core/math.add",
 		Outcome:  "success",
 		Duration: 42 * time.Millisecond,
@@ -173,7 +174,7 @@ func TestExecutionsEndpoint(t *testing.T) {
 	})
 	_ = logger.Log(context.Background(), audit.Event{
 		ID:       "exec-2",
-		Action:   "skill.execute",
+		Action:   "skills.execute",
 		Resource: "core/text.wordcount",
 		Outcome:  "failure",
 		Duration: 100 * time.Millisecond,
@@ -236,7 +237,7 @@ func TestExecutionsEndpoint(t *testing.T) {
 }
 
 func TestExecutionsEndpointEmpty(t *testing.T) {
-	logger := audit.NewPGAuditLogger()
+	logger := audit.NewInMemoryAuditLogger()
 	execStore := api.NewAuditExecutionStore(logger)
 	handler := api.NewRouter(&mockAgent{})
 	handler.SetExecutionStore(execStore)

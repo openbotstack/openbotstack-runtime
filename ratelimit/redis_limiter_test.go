@@ -4,12 +4,12 @@ import (
 	"context"
 	"testing"
 
-	coreratelimit "github.com/openbotstack/openbotstack-core/ratelimit"
+	coreratelimit "github.com/openbotstack/openbotstack-core/access/ratelimit"
 	"github.com/openbotstack/openbotstack-runtime/ratelimit"
 )
 
 func TestRedisLimiterSetQuota(t *testing.T) {
-	limiter := ratelimit.NewRedisLimiter()
+	limiter := ratelimit.NewInMemoryLimiter()
 	ctx := context.Background()
 
 	config := &coreratelimit.QuotaConfig{
@@ -24,7 +24,7 @@ func TestRedisLimiterSetQuota(t *testing.T) {
 }
 
 func TestRedisLimiterAllow(t *testing.T) {
-	limiter := ratelimit.NewRedisLimiter()
+	limiter := ratelimit.NewInMemoryLimiter()
 	ctx := context.Background()
 
 	config := &coreratelimit.QuotaConfig{
@@ -52,7 +52,7 @@ func TestRedisLimiterAllow(t *testing.T) {
 }
 
 func TestRedisLimiterConsume(t *testing.T) {
-	limiter := ratelimit.NewRedisLimiter()
+	limiter := ratelimit.NewInMemoryLimiter()
 	ctx := context.Background()
 
 	config := &coreratelimit.QuotaConfig{
@@ -80,7 +80,7 @@ func TestRedisLimiterConsume(t *testing.T) {
 }
 
 func TestRedisLimiterInvalidKey(t *testing.T) {
-	limiter := ratelimit.NewRedisLimiter()
+	limiter := ratelimit.NewInMemoryLimiter()
 	ctx := context.Background()
 
 	key := coreratelimit.RateLimitKey{
@@ -94,7 +94,7 @@ func TestRedisLimiterInvalidKey(t *testing.T) {
 }
 
 func TestRedisLimiterReset(t *testing.T) {
-	limiter := ratelimit.NewRedisLimiter()
+	limiter := ratelimit.NewInMemoryLimiter()
 	ctx := context.Background()
 
 	config := &coreratelimit.QuotaConfig{

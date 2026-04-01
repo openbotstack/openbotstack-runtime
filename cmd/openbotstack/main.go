@@ -28,14 +28,24 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/openbotstack/openbotstack-runtime/agent"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
+
+
+	"github.com/openbotstack/openbotstack-core/assistant"
+	"github.com/openbotstack/openbotstack-core/control/agent"
 	"github.com/openbotstack/openbotstack-runtime/api"
-	"github.com/openbotstack/openbotstack-runtime/audit"
 	"github.com/openbotstack/openbotstack-runtime/config"
-	"github.com/openbotstack/openbotstack-runtime/executor"
-	"github.com/openbotstack/openbotstack-runtime/llm"
-	"github.com/openbotstack/openbotstack-runtime/wasm"
+	executor "github.com/openbotstack/openbotstack-runtime/executor/skill_executor"
+	audit "github.com/openbotstack/openbotstack-runtime/logging/execution_logs"
+	"github.com/openbotstack/openbotstack-runtime/memory"
+	"github.com/openbotstack/openbotstack-runtime/sandbox/wasm"
 	"github.com/openbotstack/openbotstack-runtime/web/webui"
+
+	"github.com/openbotstack/openbotstack-runtime/api/middleware"
+	"github.com/openbotstack/openbotstack-core/ai/providers"
+	"github.com/openbotstack/openbotstack-core/ai/router"
+	"github.com/openbotstack/openbotstack-core/control/skills"
 )
 
 var (
@@ -79,8 +89,8 @@ func main() {
 	}
 	defer wasmRuntime.Close() //nolint:errcheck // best-effort cleanup on shutdown
 
-	// Initialize Host API (LLM)
-	var llmClient *llm.Client
+	// Initialize Model Router
+	modelRouter := router.NewDefaultRouter()
 
 	// Determine provider
 	providerName := cfg.Providers.LLM.Default
@@ -93,18 +103,40 @@ func main() {
 	}
 
 	if providerConfig.APIKey != "" {
-		llmClient = llm.NewClient(providerConfig.BaseURL, providerConfig.APIKey, providerConfig.Model)
-		slog.Info("llm client initialized", "provider", providerName, "model", providerConfig.Model)
+		// Create the correct provider type based on configuration
+		var llmProvider providers.ModelProvider
+		switch providerName {
+		case "modelscope":
+			llmProvider = providers.NewModelScopeProvider(providerConfig.BaseURL, providerConfig.APIKey, providerConfig.Model)
+		default:
+			llmProvider = providers.NewOpenAIProvider(providerConfig.BaseURL, providerConfig.APIKey, providerConfig.Model)
+		}
+
+		if err := modelRouter.Register(llmProvider); err != nil {
+			slog.Error("failed to register provider", "error", err)
+		} else {
+			slog.Info("llm provider registered", "provider", providerName, "model", providerConfig.Model, "base_url", providerConfig.BaseURL)
+		}
 	} else {
 		slog.Warn("LLM API key not set, LLM features will be disabled")
 	}
 
 	hostFuncs := &wasm.HostFunctions{
 		LLMGenerate: func(ctx context.Context, prompt string) (string, error) {
-			if llmClient == nil {
-				return "LLM not configured", nil
+			mReq := skills.GenerateRequest{
+				Messages: []skills.Message{
+					{Role: "user", Content: prompt},
+				},
 			}
-			return llmClient.Generate(ctx, prompt)
+			prov, err := modelRouter.Route([]skills.CapabilityType{skills.CapTextGeneration}, skills.ModelConstraints{})
+			if err != nil {
+				return "LLM not configured or suitable provider not found", nil
+			}
+			resp, err := prov.Generate(ctx, mReq)
+			if err != nil {
+				return "", err
+			}
+			return resp.Content, nil
 		},
 		Log: func(ctx context.Context, level, msg string) {
 			slog.Info("wasm log", "level", level, "msg", msg)
@@ -112,7 +144,7 @@ func main() {
 	}
 
 	// Initialize Executor
-	exec := executor.NewDefaultExecutorWithRuntime(wasmRuntime)
+	exec := executor.NewDefaultExecutorWithRuntime(wasmRuntime, nil)
 
 	// Register Host Functions with Wasm Runtime (linked to our hostFuncs)
 	if err := wasmRuntime.RegisterHostFunctions(context.Background(), hostFuncs); err != nil {
@@ -131,19 +163,58 @@ func main() {
 
 	// Create Planner
 	// LLM configuration IS REQUIRED for production operation
-	if llmClient == nil {
-		slog.Error("LLM client not configured. Check config.yaml or OBS_LLM_API_KEY")
-		os.Exit(1)
+	planner := agent.NewLLMPlanner(modelRouter)
+	slog.Info("planner initialized with LLM router")
+
+	// Initialize Memory Store
+	var memoryStore memory.ShortTermStore
+	if redisURL := os.Getenv("REDIS_URL"); redisURL != "" {
+		opt, err := redis.ParseURL(redisURL)
+		if err != nil {
+			slog.Error("failed to parse redis url", "error", err)
+			os.Exit(1)
+		}
+		rdb := redis.NewClient(opt)
+		memoryStore = memory.NewRedisMemoryStore(rdb)
+		slog.Info("redis memory store initialized")
+	} else {
+		// Fallback to a simple in-memory implementation if REDIS_URL is not provided.
+		// For now, we'll just leave it nil so history is empty.
+		slog.Warn("no REDIS_URL provided, session history will be disabled")
 	}
-	planner := agent.NewLLMPlanner(llmClient)
-	slog.Info("planner initialized with LLM")
+
+	// Create Assistant Identity (Runtime)
+	// In a real system, these would be loaded from a database based on the request context.
+	// For now, we use defaults to satisfy the interface.
+	art := &assistant.AssistantRuntime{
+		AssistantID: "default",
+	}
 
 	// Create Agent (orchestrates Planner + Executor)
-	apiAgent := agent.NewDefaultAgent(planner, exec, exec)
+	apiAgent := agent.NewDefaultAgent(planner, exec, exec, art)
 	slog.Info("agent initialized", "loaded_skills", len(exec.List()))
 
 	// Initialize Audit Logger
-	auditLogger := audit.NewPGAuditLogger()
+	var auditLogger audit.AuditLogger
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL != "" {
+		slog.Info("connecting to database for audit logging")
+		pool, err := pgxpool.New(context.Background(), dbURL)
+		if err != nil {
+			slog.Error("failed to connect to database", "error", err)
+			os.Exit(1)
+		}
+		pgLogger := audit.NewPGAuditLogger(pool)
+		if err := pgLogger.Initialize(context.Background()); err != nil {
+			slog.Error("failed to initialize audit log schema", "error", err)
+			os.Exit(1)
+		}
+		auditLogger = pgLogger
+		slog.Info("postgresql audit logger initialized")
+	} else {
+		auditLogger = audit.NewInMemoryAuditLogger()
+		slog.Info("in-memory audit logger initialized (no DATABASE_URL provided)")
+	}
 
 	// Create combined router
 	mux := http.NewServeMux()
@@ -152,7 +223,25 @@ func main() {
 	apiRouter := api.NewRouter(apiAgent)
 	apiRouter.SetSkillProvider(exec)
 	apiRouter.SetExecutionStore(api.NewAuditExecutionStore(auditLogger))
+	apiRouter.SetHistoryProvider(&memoryHistoryProvider{store: memoryStore})
+
+	// Configure JWT middleware if secret is provided
+	if jwtSecret := os.Getenv("JWT_SECRET"); jwtSecret != "" {
+		slog.Info("jwt authentication enabled")
+		strict := os.Getenv("JWT_STRICT") == "true"
+		mw := middleware.JWTMiddleware(middleware.JWTMiddlewareConfig{
+			SecretKey: []byte(jwtSecret),
+			Strict:    strict,
+		})
+		apiRouter.SetAuthMiddleware(mw)
+	} else {
+		slog.Warn("no JWT_SECRET provided, authentication is disabled")
+	}
+
 	mux.Handle("/health", apiRouter)
+	mux.Handle("/healthz", apiRouter)
+	mux.Handle("/readyz", apiRouter)
+	mux.Handle("/metrics", apiRouter)
 	mux.Handle("/v1/", apiRouter)
 
 	// UI routes (embedded frontend)
@@ -165,10 +254,13 @@ func main() {
 		http.NotFound(w, r)
 	})
 
+	// Wrap with correlation ID middleware for structured logging
+	handler := api.CorrelationMiddleware(mux)
+
 	// Create server
 	srv := &http.Server{
 		Addr:         cfg.Server.Addr,
-		Handler:      mux,
+		Handler:      handler,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 60 * time.Second,
 		IdleTimeout:  120 * time.Second,
@@ -201,4 +293,37 @@ func main() {
 	}
 
 	fmt.Println("openbotstack stopped")
+}
+
+// memoryHistoryProvider adapts a memory.ShortTermStore to the api.HistoryProvider interface.
+type memoryHistoryProvider struct {
+	store memory.ShortTermStore
+}
+
+func (p *memoryHistoryProvider) GetSessionHistory(ctx context.Context, sessionID string) ([]api.Message, error) {
+	if p.store == nil {
+		return []api.Message{}, nil
+	}
+	entries, err := p.store.ListBySession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	messages := make([]api.Message, 0, len(entries))
+	for _, entry := range entries {
+		// By default assume user role unless we track it explicitly in tags
+		// We'll map "role:assistant" tag if present, else default to "user"
+		role := "user"
+		for _, tag := range entry.Tags {
+			if tag == "role:assistant" {
+				role = "assistant"
+				break
+			}
+		}
+		messages = append(messages, api.Message{
+			Role:    role,
+			Content: entry.Content,
+		})
+	}
+	return messages, nil
 }

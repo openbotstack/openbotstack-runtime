@@ -22,6 +22,7 @@ This repository implements the EXECUTION PLANE of OpenBotStack.
 - Make policy or permission decisions
 - Contain tenant or user configuration logic
 - Define long-term memory models
+- Interact directly with concrete LLM providers (e.g., openai, anthropic); all AI calls must be routed through the `openbotstack-core/model` ModelRouter abstraction.
 
 ## DESIGN RULES:
 - Execution is always invoked by the control plane

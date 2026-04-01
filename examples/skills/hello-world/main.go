@@ -89,10 +89,10 @@ func processMessage(message string) string {
 
 	switch {
 	case msg == "":
-		return "Hello! I'm the hello-world skill. How can I help you?"
+		return "Hello! I'm the hello-world skills. How can I help you?"
 
 	case strings.Contains(msg, "hello") || strings.Contains(msg, "hi"):
-		return "Hello! I'm the hello-world skill. How can I help you?"
+		return "Hello! I'm the hello-world skills. How can I help you?"
 
 	case strings.Contains(msg, "name"):
 		return "I'm the OpenBotStack hello-world skill!"

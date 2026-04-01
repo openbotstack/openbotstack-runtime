@@ -9,7 +9,7 @@ import (
 )
 
 func TestRedisMemoryStore(t *testing.T) {
-	store := memory.NewRedisMemoryStore()
+	store := memory.NewInMemoryStore()
 	ctx := context.Background()
 
 	entry := memory.Entry{
@@ -27,7 +27,7 @@ func TestRedisMemoryStore(t *testing.T) {
 }
 
 func TestRedisMemoryRetrieve(t *testing.T) {
-	store := memory.NewRedisMemoryStore()
+	store := memory.NewInMemoryStore()
 	ctx := context.Background()
 
 	entry := memory.Entry{
@@ -51,7 +51,7 @@ func TestRedisMemoryRetrieve(t *testing.T) {
 }
 
 func TestRedisMemoryRetrieveNotFound(t *testing.T) {
-	store := memory.NewRedisMemoryStore()
+	store := memory.NewInMemoryStore()
 	ctx := context.Background()
 
 	_, err := store.Retrieve(ctx, "nonexistent")
@@ -61,7 +61,7 @@ func TestRedisMemoryRetrieveNotFound(t *testing.T) {
 }
 
 func TestRedisMemoryListBySession(t *testing.T) {
-	store := memory.NewRedisMemoryStore()
+	store := memory.NewInMemoryStore()
 	ctx := context.Background()
 
 	entries := []memory.Entry{
@@ -85,7 +85,7 @@ func TestRedisMemoryListBySession(t *testing.T) {
 }
 
 func TestRedisMemoryDelete(t *testing.T) {
-	store := memory.NewRedisMemoryStore()
+	store := memory.NewInMemoryStore()
 	ctx := context.Background()
 
 	entry := memory.Entry{
@@ -107,7 +107,7 @@ func TestRedisMemoryDelete(t *testing.T) {
 }
 
 func TestRedisMemoryClearSession(t *testing.T) {
-	store := memory.NewRedisMemoryStore()
+	store := memory.NewInMemoryStore()
 	ctx := context.Background()
 
 	entries := []memory.Entry{

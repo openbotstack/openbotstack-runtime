@@ -1,4 +1,4 @@
-// Package main implements a deterministic tax calculator skill.
+// Package main implements a deterministic tax calculator skills.
 //
 // This skill demonstrates:
 //   - Pure code logic with NO LLM calls

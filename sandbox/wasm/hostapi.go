@@ -31,12 +31,12 @@ type HostFunctions struct {
 	outputBuffer []byte
 }
 
-// SetInput sets the input buffer for the skill.
+// SetInput sets the input buffer for the skills.
 func (hf *HostFunctions) SetInput(input []byte) {
 	hf.inputBuffer = input
 }
 
-// GetOutput returns the output buffer from the skill.
+// GetOutput returns the output buffer from the skills.
 func (hf *HostFunctions) GetOutput() []byte {
 	return hf.outputBuffer
 }

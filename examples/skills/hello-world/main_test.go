@@ -17,7 +17,7 @@ func TestExecuteEmptyInput(t *testing.T) {
 	var output SkillOutput
 	_ = json.Unmarshal(outputBuffer, &output)
 
-	if output.Message != "Hello! I'm the hello-world skill. How can I help you?" {
+	if output.Message != "Hello! I'm the hello-world skills. How can I help you?" {
 		t.Errorf("Unexpected response: %s", output.Message)
 	}
 }
@@ -32,7 +32,7 @@ func TestExecuteHello(t *testing.T) {
 	var output SkillOutput
 	_ = json.Unmarshal(GetOutput(), &output)
 
-	if output.Message != "Hello! I'm the hello-world skill. How can I help you?" {
+	if output.Message != "Hello! I'm the hello-world skills. How can I help you?" {
 		t.Errorf("Unexpected response: %s", output.Message)
 	}
 }
@@ -47,7 +47,7 @@ func TestExecuteHi(t *testing.T) {
 	var output SkillOutput
 	_ = json.Unmarshal(GetOutput(), &output)
 
-	if output.Message != "Hello! I'm the hello-world skill. How can I help you?" {
+	if output.Message != "Hello! I'm the hello-world skills. How can I help you?" {
 		t.Errorf("Unexpected response: %s", output.Message)
 	}
 }

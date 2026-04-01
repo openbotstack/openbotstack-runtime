@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openbotstack/openbotstack-runtime/wasm"
+	"github.com/openbotstack/openbotstack-runtime/sandbox/wasm"
 )
 
 // Minimal valid Wasm module (empty module)

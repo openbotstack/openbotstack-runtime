@@ -1,44 +1,106 @@
-// Package ratelimit implements Redis-backed token bucket rate limiting.
 package ratelimit
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"sync"
 	"time"
 
-	"github.com/openbotstack/openbotstack-core/ratelimit"
+	"github.com/redis/go-redis/v9"
+	"github.com/openbotstack/openbotstack-core/access/ratelimit"
 )
 
-// RedisLimiter implements RateLimiter using Redis (in-memory stub for now).
+var allowScript = redis.NewScript(`
+local tokensKey = KEYS[1]
+local timestampKey = KEYS[2]
+
+local rate = tonumber(ARGV[1])
+local capacity = tonumber(ARGV[2])
+local now = tonumber(ARGV[3])
+local requested = tonumber(ARGV[4])
+
+local fill_time = capacity / rate
+local ttl = math.floor(fill_time * 2)
+if ttl < 60 then
+    ttl = 60
+end
+
+local last_tokens = tonumber(redis.call("get", tokensKey))
+if last_tokens == nil then
+  last_tokens = capacity
+end
+
+local last_refreshed = tonumber(redis.call("get", timestampKey))
+if last_refreshed == nil then
+  last_refreshed = 0
+end
+
+local delta = math.max(0, now - last_refreshed)
+local filled_tokens = math.min(capacity, last_tokens + (delta * rate))
+local allowed = filled_tokens >= requested
+
+local new_tokens = filled_tokens
+if allowed then
+  new_tokens = filled_tokens - requested
+end
+
+redis.call("setex", tokensKey, ttl, new_tokens)
+redis.call("setex", timestampKey, ttl, now)
+
+return { allowed and 1 or 0, new_tokens }
+`)
+
+// RedisLimiter implements RateLimiter using Redis.
 type RedisLimiter struct {
-	mu      sync.RWMutex
-	buckets map[string]*tokenBucket
-	config  map[string]*ratelimit.QuotaConfig
+	client *redis.Client
+	prefix string
 }
 
-type tokenBucket struct {
-	tokens    int64
-	lastFill  time.Time
-	rateLimit int64 // tokens per minute
-}
-
-// NewRedisLimiter creates a new rate limiter.
-// TODO: Replace with actual Redis client.
-func NewRedisLimiter() *RedisLimiter {
+// NewRedisLimiter creates a new Redis rate limiter.
+func NewRedisLimiter(client *redis.Client) *RedisLimiter {
 	return &RedisLimiter{
-		buckets: make(map[string]*tokenBucket),
-		config:  make(map[string]*ratelimit.QuotaConfig),
+		client: client,
+		prefix: "ratelimit:",
 	}
 }
 
-// SetQuota sets the quota config for a tenant.
+// SetQuota stores the quota config in Redis.
 func (r *RedisLimiter) SetQuota(ctx context.Context, tenantID string, config *ratelimit.QuotaConfig) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	data, err := json.Marshal(config)
+	if err != nil {
+		return err
+	}
+	key := r.prefix + "config:" + tenantID
+	return r.client.Set(ctx, key, data, 0).Err()
+}
 
-	r.config[tenantID] = config
-	return nil
+func (r *RedisLimiter) getConfig(ctx context.Context, tenantID string) (*ratelimit.QuotaConfig, error) {
+	key := r.prefix + "config:" + tenantID
+	data, err := r.client.Get(ctx, key).Bytes()
+	if err != nil {
+		if err == redis.Nil {
+			return nil, nil // Default
+		}
+		return nil, err
+	}
+	var config ratelimit.QuotaConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, err
+	}
+	return &config, nil
+}
+
+func (r *RedisLimiter) getRate(ctx context.Context, key ratelimit.RateLimitKey) int64 {
+	rate := int64(1000)
+	config, _ := r.getConfig(ctx, key.TenantID)
+	if config != nil {
+		if key.UserID != "" {
+			rate = config.UserRequestsPerMinute
+		} else {
+			rate = config.TenantRequestsPerMinute
+		}
+	}
+	return rate
 }
 
 // Allow checks if the request is allowed.
@@ -47,111 +109,97 @@ func (r *RedisLimiter) Allow(ctx context.Context, key ratelimit.RateLimitKey) (*
 		return nil, ratelimit.ErrInvalidKey
 	}
 
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	rate := r.getRate(ctx, key)
+	// rate is per minute. So tokens per second is rate / 60.
+	ratePerSec := float64(rate) / 60.0
 
-	bucketKey := r.bucketKey(key)
-	bucket, exists := r.buckets[bucketKey]
+	return r.evaluate(ctx, key, ratePerSec, rate, 1)
+}
 
-	if !exists {
-		// Create new bucket with default rate
-		config := r.config[key.TenantID]
-		rate := int64(1000) // default
-		if config != nil {
-			if key.UserID != "" {
-				rate = config.UserRequestsPerMinute
-			} else {
-				rate = config.TenantRequestsPerMinute
-			}
-		}
-
-		bucket = &tokenBucket{
-			tokens:    rate,
-			lastFill:  time.Now(),
-			rateLimit: rate,
-		}
-		r.buckets[bucketKey] = bucket
+// Consume deducts tokens from the quota.
+func (r *RedisLimiter) Consume(ctx context.Context, key ratelimit.RateLimitKey, tokens int64) error {
+	if key.TenantID == "" {
+		return ratelimit.ErrInvalidKey
 	}
 
-	// Refill tokens based on elapsed time
-	elapsed := time.Since(bucket.lastFill)
-	refill := int64(elapsed.Minutes() * float64(bucket.rateLimit))
-	if refill > 0 {
-		bucket.tokens = min(bucket.tokens+refill, bucket.rateLimit)
-		bucket.lastFill = time.Now()
+	rate := r.getRate(ctx, key)
+	ratePerSec := float64(rate) / 60.0
+
+	res, err := r.evaluate(ctx, key, ratePerSec, rate, float64(tokens))
+	if err != nil {
+		return err
+	}
+	if !res.Allowed {
+		return ratelimit.ErrRateLimitExceeded
+	}
+	return nil
+}
+
+func (r *RedisLimiter) evaluate(ctx context.Context, key ratelimit.RateLimitKey, rate float64, capacity int64, requested float64) (*ratelimit.RateLimitResult, error) {
+	bucketKey := r.bucketKey(key)
+	tokensKey := bucketKey + ":tokens"
+	timestampKey := bucketKey + ":ts"
+
+	now := time.Now().Unix()
+
+	res, err := allowScript.Run(ctx, r.client, []string{tokensKey, timestampKey}, rate, capacity, now, requested).Result()
+	if err != nil {
+		return nil, fmt.Errorf("redis format error: %w", err)
+	}
+
+	resArr, ok := res.([]interface{})
+	if !ok || len(resArr) != 2 {
+		return nil, fmt.Errorf("unexpected allow script response")
+	}
+
+	allowed := resArr[0].(int64) == 1
+	var remaining float64
+	switch v := resArr[1].(type) {
+	case int64:
+		remaining = float64(v)
+	case float64:
+		remaining = v
 	}
 
 	result := &ratelimit.RateLimitResult{
-		Remaining: bucket.tokens,
+		Remaining: int64(remaining),
 		ResetAt:   time.Now().Add(time.Minute),
+		Allowed:   allowed,
 	}
 
-	if bucket.tokens > 0 {
-		result.Allowed = true
-	} else {
-		result.Allowed = false
+	if !allowed {
 		result.RetryAfter = time.Minute
 	}
 
 	return result, nil
 }
 
-// Consume deducts tokens from the quota.
-func (r *RedisLimiter) Consume(ctx context.Context, key ratelimit.RateLimitKey, tokens int64) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	bucketKey := r.bucketKey(key)
-	bucket, exists := r.buckets[bucketKey]
-
-	if !exists {
-		return ratelimit.ErrQuotaNotFound
-	}
-
-	if bucket.tokens < tokens {
-		return ratelimit.ErrRateLimitExceeded
-	}
-
-	bucket.tokens -= tokens
-	return nil
-}
-
 // Remaining returns the remaining quota.
 func (r *RedisLimiter) Remaining(ctx context.Context, key ratelimit.RateLimitKey) (int64, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	bucketKey := r.bucketKey(key)
-	bucket, exists := r.buckets[bucketKey]
-
-	if !exists {
-		return 0, ratelimit.ErrQuotaNotFound
+	if key.TenantID == "" {
+		return 0, ratelimit.ErrInvalidKey
 	}
 
-	return bucket.tokens, nil
+	rate := r.getRate(ctx, key)
+	ratePerSec := float64(rate) / 60.0
+
+	res, err := r.evaluate(ctx, key, ratePerSec, rate, 0)
+	if err != nil {
+		return 0, err
+	}
+	return res.Remaining, nil
 }
 
 // Reset resets the quota for a key.
 func (r *RedisLimiter) Reset(ctx context.Context, key ratelimit.RateLimitKey) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	bucketKey := r.bucketKey(key)
-	bucket, exists := r.buckets[bucketKey]
-
-	if !exists {
-		return ratelimit.ErrQuotaNotFound
-	}
-
-	bucket.tokens = bucket.rateLimit
-	bucket.lastFill = time.Now()
-	return nil
+	return r.client.Del(ctx, bucketKey+":tokens", bucketKey+":ts").Err()
 }
 
-// bucketKey generates the Redis key for a rate limit.
+// bucketKey generates the key for a rate limit.
 func (r *RedisLimiter) bucketKey(key ratelimit.RateLimitKey) string {
 	if key.UserID != "" {
-		return fmt.Sprintf("rate:user:%s:%s", key.TenantID, key.UserID)
+		return fmt.Sprintf("%suser:%s:%s", r.prefix, key.TenantID, key.UserID)
 	}
-	return fmt.Sprintf("rate:tenant:%s", key.TenantID)
+	return fmt.Sprintf("%stenant:%s", r.prefix, key.TenantID)
 }

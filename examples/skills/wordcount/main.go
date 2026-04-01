@@ -10,12 +10,12 @@ import (
 	"strings"
 )
 
-// Input for the word count skill.
+// Input for the word count skills.
 type Input struct {
 	Text string `json:"text"`
 }
 
-// Output from the word count skill.
+// Output from the word count skills.
 type Output struct {
 	Count int      `json:"count"`
 	Words []string `json:"words"`
