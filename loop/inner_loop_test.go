@@ -7,6 +7,7 @@ import (
 	"time"
 
 
+	"github.com/openbotstack/openbotstack-core/assistant"
 	"github.com/openbotstack/openbotstack-core/execution"
 	"github.com/openbotstack/openbotstack-core/planner"
 )
@@ -190,6 +191,90 @@ func TestInnerLoop_ContextCanceled(t *testing.T) {
 	}
 }
 
+func TestInnerLoop_AuditPersistenceOnCancel(t *testing.T) {
+	mockPlanner := &mockExecutionPlanner{}
+	mockPlanner.dynamicFunc = func(ctx context.Context, pc *planner.PlannerContext) (*execution.ExecutionPlan, error) {
+		return &execution.ExecutionPlan{
+			Steps: []execution.ExecutionStep{
+				{Type: execution.StepTypeTool, Name: "t1"},
+				{Type: execution.StepTypeTool, Name: "t2"},
+			},
+		}, nil
+	}
+
+	// Tool runner that cancels the context after the first call
+	ctx, cancel := context.WithCancel(context.Background())
+	mockRunner := &mockToolRunner{}
+	mockRunner.dynamicExecuteFunc = func(ctx context.Context, toolID string, parameters map[string]any, ec *execution.ExecutionContext) (*execution.StepResult, error) {
+		if toolID == "t1" {
+			cancel() // cancel context for subsequent steps
+		}
+		return &execution.StepResult{Output: "ok"}, nil
+	}
+
+	loop := NewDefaultInnerLoop(DefaultInnerConfig(), mockPlanner, mockRunner, &NoOpCompactor{}, &mockLogger{})
+
+	result, err := loop.Run(ctx, TaskInput{PlannerContext: &planner.PlannerContext{}}, &execution.ExecutionContext{})
+
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled error, got %v", err)
+	}
+
+	// Defect 3 Verification: TurnResults should contain the turn even if canceled during ACT
+	if len(result.TurnResults) == 0 {
+		t.Fatal("expected at least 1 turn result despite cancellation")
+	}
+
+	tr := result.TurnResults[0]
+	if len(tr.ActionsExecuted) != 1 || tr.ActionsExecuted[0] != "t1" {
+		t.Errorf("expected 1 action (t1) to be recorded, got %v", tr.ActionsExecuted)
+	}
+	if tr.StopReason != StopReasonContextCanceled {
+		t.Errorf("expected stop reason context_canceled in turn result, got %s", tr.StopReason)
+	}
+}
+
+func TestInnerLoop_ContextCompactionSync(t *testing.T) {
+	// A compactor that only keeps the last turn
+	slidingCompactor := &DefaultContextCompactor{maxRetainedTurns: 1}
+
+	mockPlanner := &mockExecutionPlanner{}
+	mockPlanner.dynamicFunc = func(ctx context.Context, pc *planner.PlannerContext) (*execution.ExecutionPlan, error) {
+		return &execution.ExecutionPlan{
+			Steps: []execution.ExecutionStep{{Type: execution.StepTypeTool, Name: "t1"}},
+		}, nil
+	}
+
+	mockRunner := &mockToolRunner{}
+	loop := NewDefaultInnerLoop(DefaultInnerConfig(), mockPlanner, mockRunner, slidingCompactor, &mockLogger{})
+
+	pCtx := &planner.PlannerContext{}
+	// Add original long-term memory
+	pCtx.MemoryContext = []assistant.SearchResult{{Content: []byte("original memory")}}
+
+	// Since we can't easily stop at turn 3 without StopEvaluator change, 
+	// we use a stopEvaluator override or just check PlannerContext inside the mockPlanner on Turn 3.
+	mockPlanner.dynamicFunc = func(ctx context.Context, pc *planner.PlannerContext) (*execution.ExecutionPlan, error) {
+		if mockPlanner.callCount == 2 {
+			// This is turn 3 (0-indexed callCount is 2). 
+			// Check if pc.MemoryContext was compacted correctly.
+			// Base (1) + Observation from Turn 2 (1) = 2 items total.
+			// If not compacted, it would be Base (1) + Obs1 + Obs2 = 3 items.
+			if len(pc.MemoryContext) != 2 {
+				t.Errorf("expected 2 memory context items (base + 1), got %d", len(pc.MemoryContext))
+			}
+			return &execution.ExecutionPlan{}, nil // stop
+		}
+		mockPlanner.callCount++
+		return &execution.ExecutionPlan{Steps: []execution.ExecutionStep{{Type: execution.StepTypeTool, Name: "t1"}}}, nil
+	}
+
+	_, err := loop.Run(context.Background(), TaskInput{PlannerContext: pCtx}, &execution.ExecutionContext{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 // =============================================================================
 // Mocks
 // =============================================================================
@@ -217,12 +302,16 @@ func (m *mockExecutionPlanner) Plan(ctx context.Context, pc *planner.PlannerCont
 }
 
 type mockToolRunner struct {
-	results []any
-	err     error
-	calls   int
+	results            []any
+	err                error
+	calls              int
+	dynamicExecuteFunc func(ctx context.Context, toolID string, parameters map[string]any, ec *execution.ExecutionContext) (*execution.StepResult, error)
 }
 
 func (m *mockToolRunner) Execute(ctx context.Context, toolID string, parameters map[string]any, ec *execution.ExecutionContext) (*execution.StepResult, error) {
+	if m.dynamicExecuteFunc != nil {
+		return m.dynamicExecuteFunc(ctx, toolID, parameters, ec)
+	}
 	if m.err != nil {
 		return nil, m.err
 	}

@@ -87,6 +87,7 @@ func DefaultInnerConfig() InnerLoopConfig {
 
 // TurnResult captures the outcome of a single reasoning turn in the inner loop.
 type TurnResult struct {
+	TurnNumber      int
 	PlanText        string
 	ActionsExecuted []string
 	Observations    []string

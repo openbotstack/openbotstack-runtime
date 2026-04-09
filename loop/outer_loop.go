@@ -97,6 +97,19 @@ func (l *DefaultOuterLoop) Run(ctx context.Context, tasks []TaskInput, ec *execu
 		result.Metrics.TotalTurns += innerRes.TurnCount
 		result.Metrics.TotalToolCalls += innerRes.ToolCallsUsed
 
+		// Defect 2 Fix: Check if inner loop hit a safety limit.
+		// If it hit MaxTurns/MaxToolCalls/MaxRuntime, we should halt the entire workflow
+		// to prevent cascading failures in dependent tasks.
+		if innerRes.StopReason != StopReasonPlannerStopped {
+			result.StopCondition = StopCondition{
+				Stopped: true,
+				Reason:  innerRes.StopReason,
+				Detail:  fmt.Sprintf("task %d stopped due to %s", taskIdx, innerRes.StopReason),
+			}
+			result.Metrics.TotalRuntime = time.Since(startTime)
+			return result, nil
+		}
+
 		if l.logger != nil {
 			_ = l.logger.LogStep(ctx, execution.ExecutionLogRecord{
 				StepName:  fmt.Sprintf("task_%d_end", taskIdx),

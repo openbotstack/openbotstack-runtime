@@ -203,7 +203,7 @@ func TestDualLoop_Integration(t *testing.T) {
 // TestDualLoop_Integration_MaxSessionTimeout checks if the outer loop bound takes precedence.
 func TestDualLoop_Integration_MaxSessionTimeout(t *testing.T) {
 	// Planner never stops voluntarily
-	plannerMock := &integrationPlanner{turnLimit: 100}
+	plannerMock := &integrationPlanner{turnLimit: 1}
 	
 	// Slow tool to trigger timeout quickly
 	slowToolRunner := &integrationToolRunner{}

@@ -25,7 +25,7 @@ func TestDefaultOuterLoop_ImplementsOuterLoop(t *testing.T) {
 func TestOuterLoop_SingleTaskSuccess(t *testing.T) {
 	mockInner := &mockInnerLoop{
 		results: []*TaskResult{
-			{TurnCount: 2, ToolCallsUsed: 1, FinalOutput: "done1"},
+			{TurnCount: 2, ToolCallsUsed: 1, FinalOutput: "done1", StopReason: StopReasonPlannerStopped},
 		},
 	}
 	mockCheckpoint := &mockOuterCheckpoint{saveErr: nil}
@@ -64,9 +64,9 @@ func TestOuterLoop_SingleTaskSuccess(t *testing.T) {
 func TestOuterLoop_MultiTaskSuccess(t *testing.T) {
 	mockInner := &mockInnerLoop{
 		results: []*TaskResult{
-			{TurnCount: 2, ToolCallsUsed: 1},
-			{TurnCount: 1, ToolCallsUsed: 0},
-			{TurnCount: 3, ToolCallsUsed: 2},
+			{TurnCount: 2, ToolCallsUsed: 1, StopReason: StopReasonPlannerStopped},
+			{TurnCount: 1, ToolCallsUsed: 0, StopReason: StopReasonPlannerStopped},
+			{TurnCount: 3, ToolCallsUsed: 2, StopReason: StopReasonPlannerStopped},
 		},
 	}
 
@@ -116,7 +116,7 @@ func TestOuterLoop_InnerLoopError_FailsWorkflow(t *testing.T) {
 }
 
 func TestOuterLoop_CheckpointError_FailsWorkflow(t *testing.T) {
-	mockInner := &mockInnerLoop{results: []*TaskResult{{TurnCount: 1}}}
+	mockInner := &mockInnerLoop{results: []*TaskResult{{TurnCount: 1, StopReason: StopReasonPlannerStopped}}}
 	expectedErr := errors.New("checkpoint failed")
 	mockCheckpoint := &mockOuterCheckpoint{saveErr: expectedErr}
 
@@ -136,7 +136,7 @@ func TestOuterLoop_CheckpointError_FailsWorkflow(t *testing.T) {
 }
 
 func TestOuterLoop_PolicyCheckpointError_FailsWorkflow(t *testing.T) {
-	mockInner := &mockInnerLoop{results: []*TaskResult{{TurnCount: 1}}}
+	mockInner := &mockInnerLoop{results: []*TaskResult{{TurnCount: 1, StopReason: StopReasonPlannerStopped}}}
 	expectedErr := errors.New("policy violation")
 	mockPolicy := &mockPolicyCheckpoint{checkErr: expectedErr}
 
@@ -158,7 +158,7 @@ func TestOuterLoop_PolicyCheckpointError_FailsWorkflow(t *testing.T) {
 func TestOuterLoop_MaxStepsReached(t *testing.T) {
 	mockInner := &mockInnerLoop{}
 	mockInner.dynamicFunc = func(ctx context.Context, task TaskInput, ec *execution.ExecutionContext) (*TaskResult, error) {
-		return &TaskResult{TurnCount: 1, ToolCallsUsed: 0}, nil
+		return &TaskResult{TurnCount: 1, ToolCallsUsed: 0, StopReason: StopReasonPlannerStopped}, nil
 	}
 
 	cfg := OuterLoopConfig{MaxWorkflowSteps: 2, MaxSessionRuntime: 1 * time.Minute}
@@ -184,7 +184,7 @@ func TestOuterLoop_MaxStepsReached(t *testing.T) {
 }
 
 func TestOuterLoop_ContextCanceled(t *testing.T) {
-	mockInner := &mockInnerLoop{results: []*TaskResult{{TurnCount: 1}}}
+	mockInner := &mockInnerLoop{results: []*TaskResult{{TurnCount: 1, StopReason: StopReasonPlannerStopped}}}
 	loop := NewDefaultOuterLoop(DefaultOuterConfig(), mockInner, &NoOpCheckpoint{}, &NoOpPolicyCheckpoint{}, &mockLogger{})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -197,6 +197,41 @@ func TestOuterLoop_ContextCanceled(t *testing.T) {
 	}
 	if result.StopCondition.Reason != StopReasonContextCanceled {
 		t.Errorf("expected StopReasonContextCanceled, got %s", result.StopCondition.Reason)
+	}
+}
+
+func TestDefaultOuterLoop_StopsOnInnerBoundary(t *testing.T) {
+	mockInner := &mockInnerLoop{
+		results: []*TaskResult{
+			{TurnCount: 3, ToolCallsUsed: 5, StopReason: StopReasonMaxTurns},
+			{TurnCount: 1, ToolCallsUsed: 0, StopReason: StopReasonPlannerStopped},
+		},
+	}
+
+	loop := NewDefaultOuterLoop(DefaultOuterConfig(), mockInner, &NoOpCheckpoint{}, &NoOpPolicyCheckpoint{}, &mockLogger{})
+	ctx := context.Background()
+	ec := execution.NewExecutionContext(ctx, "r", "a", "s", "t", "u")
+
+	tasks := []TaskInput{
+		{TaskDescription: "task that hits limit"},
+		{TaskDescription: "task that should never run"},
+	}
+
+	result, err := loop.Run(ctx, tasks, ec)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Defect 2 Verification: Outer loop should stop on inner boundary
+	if result.Metrics.WorkflowSteps != 1 {
+		t.Errorf("expected 1 step completed before stopping, got %d", result.Metrics.WorkflowSteps)
+	}
+	if result.StopCondition.Reason != StopReasonMaxTurns {
+		t.Errorf("expected stop reason %s, got %s", StopReasonMaxTurns, result.StopCondition.Reason)
+	}
+	if len(result.TaskResults) != 1 {
+		t.Errorf("expected 1 task result, got %d", len(result.TaskResults))
 	}
 }
 

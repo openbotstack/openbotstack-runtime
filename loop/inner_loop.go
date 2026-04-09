@@ -55,6 +55,11 @@ func (l *DefaultInnerLoop) Run(ctx context.Context, task TaskInput, ec *executio
 		TurnResults: make([]TurnResult, 0),
 	}
 
+	baseMemoryCount := 0
+	if task.PlannerContext != nil {
+		baseMemoryCount = len(task.PlannerContext.MemoryContext)
+	}
+
 	var turnsElapsed int
 	var toolCallsUsed int
 
@@ -71,6 +76,7 @@ func (l *DefaultInnerLoop) Run(ctx context.Context, task TaskInput, ec *executio
 		turnsElapsed++
 
 		turnResult := TurnResult{
+			TurnNumber:      turnsElapsed,
 			ActionsExecuted: make([]string, 0),
 			Observations:    make([]string, 0),
 		}
@@ -94,7 +100,13 @@ func (l *DefaultInnerLoop) Run(ctx context.Context, task TaskInput, ec *executio
 		var actErr error
 		for _, step := range plan.Steps {
 			if ctx.Err() != nil {
-				return result, ctx.Err() // bail out on context cancel
+				// Defect 3 Fix: Don't lose partial turn data
+				turnResult.StopReason = StopReasonContextCanceled
+				result.TurnResults = append(result.TurnResults, turnResult)
+				result.TurnCount = turnsElapsed
+				result.ToolCallsUsed = toolCallsUsed
+				result.Duration = time.Since(startTime)
+				return result, ctx.Err()
 			}
 
 			if step.Type == execution.StepTypeTool {
@@ -208,6 +220,22 @@ func (l *DefaultInnerLoop) Run(ctx context.Context, task TaskInput, ec *executio
 				}
 			} else {
 				result.TurnResults = compacted
+
+				// Defect 1 Fix: Synchronize MemoryContext with compacted turns
+				if task.PlannerContext != nil {
+					// Restore original long-term memory prefix
+					task.PlannerContext.MemoryContext = task.PlannerContext.MemoryContext[:baseMemoryCount]
+					// Re-inject observations only from the retained turns
+					for _, tr := range compacted {
+						if len(tr.Observations) > 0 {
+							obsStr := fmt.Sprintf("Turn %d observations: %v", tr.TurnNumber, tr.Observations)
+							task.PlannerContext.MemoryContext = append(task.PlannerContext.MemoryContext, assistant.SearchResult{
+								Content: []byte(obsStr),
+								Score:   1.0,
+							})
+						}
+					}
+				}
 			}
 		}
 	}
