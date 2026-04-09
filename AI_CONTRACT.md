@@ -16,6 +16,7 @@ This repository implements the EXECUTION PLANE of OpenBotStack.
 - Timeout, retry, and sandbox mechanisms
 - Execution logging and traces
 - Runtime-level error handling
+- `loop/` — **dual bounded loop kernel** (outer task loop + inner reasoning turn loop, ADR-012)
 
 ## IT MUST NOT:
 - Define assistant identity or persona
@@ -29,3 +30,6 @@ This repository implements the EXECUTION PLANE of OpenBotStack.
 - Runtime must be stateless between requests
 - All executions must emit structured audit events
 - Fail fast and fail safely
+- All loops MUST be bounded by explicit step/turn counters and wall-clock timeouts
+- No infinite loops, no unbounded reflection, no self-modifying behavior
+
