@@ -34,7 +34,13 @@ build: ## Build for current platform
 
 binary: web-build ## Build production binary for current platform
 	mkdir -p $(BUILD_DIR)
-	go build $(GO_FLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/openbotstack
+	go build \
+		-ldflags "-s -w \
+			-X main.version=$(shell git describe --tags --always 2>/dev/null || echo dev) \
+			-X main.commit=$(shell git rev-parse --short HEAD 2>/dev/null || echo none) \
+			-X main.branch=$(shell git branch --show-current 2>/dev/null || echo unknown) \
+			-X main.buildTime=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)" \
+		-o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/openbotstack
 	@echo "Built: $(BUILD_DIR)/$(BINARY_NAME)"
 
 build-all: web-build ## Build binaries for all supported platforms

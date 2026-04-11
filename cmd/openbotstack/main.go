@@ -52,6 +52,12 @@ var (
 	configPath = flag.String("config", "./config.yaml", "Path to config file")
 	listenAddr = flag.String("addr", ":8080", "Listen address")
 	runMode    = flag.String("mode", "all", "Run mode: all, api, worker")
+
+	// Build info injected via -ldflags
+	version   = "dev"
+	commit    = "none"
+	branch    = "unknown"
+	buildTime = "unknown"
 )
 
 func main() {
@@ -168,14 +174,15 @@ func main() {
 
 	// Initialize Memory Store
 	var memoryStore memory.ShortTermStore
+	var redisClient *redis.Client
 	if redisURL := os.Getenv("REDIS_URL"); redisURL != "" {
 		opt, err := redis.ParseURL(redisURL)
 		if err != nil {
 			slog.Error("failed to parse redis url", "error", err)
 			os.Exit(1)
 		}
-		rdb := redis.NewClient(opt)
-		memoryStore = memory.NewRedisMemoryStore(rdb)
+		redisClient = redis.NewClient(opt)
+		memoryStore = memory.NewRedisMemoryStore(redisClient)
 		slog.Info("redis memory store initialized")
 	} else {
 		// Fallback to a simple in-memory implementation if REDIS_URL is not provided.
@@ -225,6 +232,26 @@ func main() {
 	apiRouter.SetExecutionStore(api.NewAuditExecutionStore(auditLogger))
 	apiRouter.SetHistoryProvider(&memoryHistoryProvider{store: memoryStore})
 
+	// Wire build info
+	apiRouter.SetBuildInfo(api.BuildInfo{
+		Version:   version,
+		Commit:    commit,
+		Branch:    branch,
+		BuildTime: buildTime,
+	})
+
+	// Wire health checkers
+	var checkers []api.HealthChecker
+	if redisClient != nil {
+		checkers = append(checkers, api.NewRedisHealthChecker(func(ctx context.Context) error {
+			return redisClient.Ping(ctx).Err()
+		}))
+	}
+	if providerConfig.APIKey != "" {
+		checkers = append(checkers, api.NewProviderHealthChecker(providerConfig.BaseURL, providerConfig.APIKey))
+	}
+	apiRouter.SetHealthCheckers(checkers...)
+
 	// Configure JWT middleware if secret is provided
 	if jwtSecret := os.Getenv("JWT_SECRET"); jwtSecret != "" {
 		slog.Info("jwt authentication enabled")
@@ -242,6 +269,7 @@ func main() {
 	mux.Handle("/healthz", apiRouter)
 	mux.Handle("/readyz", apiRouter)
 	mux.Handle("/metrics", apiRouter)
+	mux.Handle("/version", apiRouter)
 	mux.Handle("/v1/", apiRouter)
 
 	// UI routes (embedded frontend)
