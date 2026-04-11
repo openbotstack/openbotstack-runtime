@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"runtime"
 	"strings"
@@ -112,6 +113,8 @@ func (c *ProviderHealthChecker) Check(ctx context.Context) ComponentHealth {
 			Error:      fmt.Sprintf("connection failed: %v", err),
 		}
 	}
+	// Drain body to allow connection reuse in the transport pool.
+	_, _ = io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
@@ -194,6 +197,8 @@ func (r *Router) handleReadyz(w http.ResponseWriter, req *http.Request) {
 		CheckedAt:  time.Now().UTC(),
 	}
 
+	// "degraded" returns 200 per spec: system is usable but some components are slow.
+	// Only "unhealthy" returns 503.
 	code := http.StatusOK
 	if status == "unhealthy" {
 		code = http.StatusServiceUnavailable
