@@ -56,14 +56,16 @@ type HistoryProvider interface {
 //   - Execute skills (that's the Executor's job)
 //   - Make any decisions about which skill to use
 type Router struct {
-	mux        *http.ServeMux
-	v1Mux      *http.ServeMux
-	v1Handler  http.Handler
-	agent      agent.Agent
-	skills     SkillProvider
-	execStore  ExecutionStore
-	history    HistoryProvider
-	metrics    *Metrics
+	mux            *http.ServeMux
+	v1Mux          *http.ServeMux
+	v1Handler      http.Handler
+	agent          agent.Agent
+	skills         SkillProvider
+	execStore      ExecutionStore
+	history        HistoryProvider
+	metrics        *Metrics
+	healthCheckers []HealthChecker
+	buildInfo      BuildInfo
 }
 
 // NewRouter creates a new API router with an Agent.
@@ -102,15 +104,26 @@ func (r *Router) SetHistoryProvider(hp HistoryProvider) {
 	r.history = hp
 }
 
+// SetHealthCheckers sets the health checkers for the /readyz endpoint.
+func (r *Router) SetHealthCheckers(checkers ...HealthChecker) {
+	r.healthCheckers = checkers
+}
+
+// SetBuildInfo sets the build info for the /readyz and /version endpoints.
+func (r *Router) SetBuildInfo(info BuildInfo) {
+	r.buildInfo = info
+}
+
 // ServeHTTP implements http.Handler.
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	r.mux.ServeHTTP(w, req)
 }
 
 func (r *Router) registerRoutes() {
-	r.mux.HandleFunc("/health", r.handleHealth)
-	r.mux.HandleFunc("/healthz", r.handleHealth)
-	r.mux.HandleFunc("/readyz", r.handleReady)
+	r.mux.HandleFunc("/health", r.handleHealthz)
+	r.mux.HandleFunc("/healthz", r.handleHealthz)
+	r.mux.HandleFunc("/readyz", r.handleReadyz)
+	r.mux.HandleFunc("/version", r.handleVersion)
 	r.mux.HandleFunc("/metrics", r.metrics.Handler())
 	
 	// Register v1 routes on v1Mux
@@ -125,17 +138,6 @@ func (r *Router) registerRoutes() {
 	}))
 
 	r.mux.HandleFunc("/", r.handleNotFound)
-}
-
-func (r *Router) handleHealth(w http.ResponseWriter, req *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "healthy"})
-}
-
-func (r *Router) handleReady(w http.ResponseWriter, req *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	// For now, always return ready. Later we can add checks for database/redis availability.
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ready"})
 }
 
 func (r *Router) handleChat(w http.ResponseWriter, req *http.Request) {
@@ -212,7 +214,8 @@ func (r *Router) handleSessions(w http.ResponseWriter, req *http.Request) {
 
 func (r *Router) handleNotFound(w http.ResponseWriter, req *http.Request) {
 	// Only trigger for truly unmatched paths
-	if req.URL.Path == "/" || req.URL.Path == "/health" || req.URL.Path == "/healthz" || req.URL.Path == "/readyz" ||
+	if req.URL.Path == "/" || req.URL.Path == "/health" || req.URL.Path == "/healthz" ||
+		req.URL.Path == "/readyz" || req.URL.Path == "/version" ||
 		strings.HasPrefix(req.URL.Path, "/v1/") {
 		return
 	}
