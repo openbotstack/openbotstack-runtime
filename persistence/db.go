@@ -29,8 +29,9 @@ func Open(dbPath string) (*DB, error) {
 		return nil, fmt.Errorf("set busy timeout: %w", err)
 	}
 
+	// SQLite: single writer constraint. WAL allows concurrent readers.
 	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(2)
+	db.SetMaxIdleConns(1)
 
 	return &DB{DB: db}, nil
 }
@@ -77,9 +78,9 @@ func (db *DB) Migrate() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_session_entries_session ON session_entries(session_id)`,
 	}
-	for _, s := range stmts {
+	for i, s := range stmts {
 		if _, err := db.Exec(s); err != nil {
-			return fmt.Errorf("migrate: %w", err)
+			return fmt.Errorf("migrate statement %d: %w", i, err)
 		}
 	}
 	return nil
