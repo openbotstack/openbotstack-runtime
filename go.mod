@@ -2,7 +2,7 @@ module github.com/openbotstack/openbotstack-runtime
 
 go 1.26.1
 
-replace github.com/openbotstack/openbotstack-core => /Users/mw/workspace/repo/github.com/openbotstack/openbotstack-core
+replace github.com/openbotstack/openbotstack-core => ../openbotstack-core
 
 require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
