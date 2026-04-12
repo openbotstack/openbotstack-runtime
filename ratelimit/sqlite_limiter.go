@@ -89,34 +89,55 @@ func refillBucket(ctx context.Context, tx *sql.Tx, key ratelimit.RateLimitKey, c
 }
 
 // Allow checks if the request is allowed without consuming quota.
+// This is a read-only operation — uses a simple SELECT like Remaining.
 func (l *SQLiteRateLimiter) Allow(ctx context.Context, key ratelimit.RateLimitKey) (*ratelimit.RateLimitResult, error) {
 	if key.TenantID == "" {
 		return nil, ratelimit.ErrInvalidKey
 	}
 
-	// Load quota BEFORE starting a transaction to avoid single-connection deadlock.
 	config, err := l.loadQuota(ctx, key.TenantID)
 	if err != nil {
 		return nil, err
 	}
 
-	tx, err := l.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback()
+	rate := rateForQuota(config, key)
+	bk := bucketKey(key)
 
-	tokens, _, _, err := refillBucket(ctx, tx, key, config)
+	var storedTokens, storedRateLimit int64
+	var storedLastFill string
+
+	err = l.db.QueryRowContext(ctx,
+		"SELECT tokens, last_fill, rate_limit FROM rate_limits WHERE key = ?", bk,
+	).Scan(&storedTokens, &storedLastFill, &storedRateLimit)
+
+	if err == sql.ErrNoRows {
+		// No bucket exists yet — full quota available.
+		return &ratelimit.RateLimitResult{
+			Allowed:   true,
+			Remaining: rate,
+			ResetAt:   time.Now().Add(time.Minute),
+		}, nil
+	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read rate limit bucket %s: %w", bk, err)
+	}
+
+	// Compute refill without writing back.
+	fillTime, perr := time.Parse(time.RFC3339Nano, storedLastFill)
+	if perr != nil {
+		return nil, fmt.Errorf("parse last_fill: %w", perr)
+	}
+	elapsed := time.Since(fillTime)
+	refill := int64(elapsed.Seconds() * float64(storedRateLimit) / 60.0)
+	if refill > 0 {
+		storedTokens = min(storedTokens+refill, storedRateLimit)
 	}
 
 	result := &ratelimit.RateLimitResult{
-		Remaining: tokens,
+		Remaining: storedTokens,
 		ResetAt:   time.Now().Add(time.Minute),
 	}
-
-	if tokens > 0 {
+	if storedTokens > 0 {
 		result.Allowed = true
 	} else {
 		result.Allowed = false
