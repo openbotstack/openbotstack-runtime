@@ -88,7 +88,7 @@ func refillBucket(ctx context.Context, tx *sql.Tx, key ratelimit.RateLimitKey, c
 	return storedTokens, fillTime, storedRateLimit, nil
 }
 
-// Allow checks if the request is allowed, consuming one token if so.
+// Allow checks if the request is allowed without consuming quota.
 func (l *SQLiteRateLimiter) Allow(ctx context.Context, key ratelimit.RateLimitKey) (*ratelimit.RateLimitResult, error) {
 	if key.TenantID == "" {
 		return nil, ratelimit.ErrInvalidKey
@@ -106,7 +106,7 @@ func (l *SQLiteRateLimiter) Allow(ctx context.Context, key ratelimit.RateLimitKe
 	}
 	defer tx.Rollback()
 
-	tokens, fillTime, _, err := refillBucket(ctx, tx, key, config)
+	tokens, _, _, err := refillBucket(ctx, tx, key, config)
 	if err != nil {
 		return nil, err
 	}
@@ -118,24 +118,9 @@ func (l *SQLiteRateLimiter) Allow(ctx context.Context, key ratelimit.RateLimitKe
 
 	if tokens > 0 {
 		result.Allowed = true
-		tokens--
-		result.Remaining = tokens
 	} else {
 		result.Allowed = false
 		result.RetryAfter = time.Minute
-	}
-
-	bk := bucketKey(key)
-	_, err = tx.ExecContext(ctx,
-		"UPDATE rate_limits SET tokens = ?, last_fill = ? WHERE key = ?",
-		tokens, fillTime.Format(time.RFC3339Nano), bk,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("update rate limit bucket %s: %w", bk, err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit: %w", err)
 	}
 
 	return result, nil
@@ -145,6 +130,9 @@ func (l *SQLiteRateLimiter) Allow(ctx context.Context, key ratelimit.RateLimitKe
 func (l *SQLiteRateLimiter) Consume(ctx context.Context, key ratelimit.RateLimitKey, tokens int64) error {
 	if key.TenantID == "" {
 		return ratelimit.ErrInvalidKey
+	}
+	if tokens <= 0 {
+		return nil
 	}
 
 	// Load quota BEFORE starting a transaction to avoid single-connection deadlock.
@@ -187,24 +175,42 @@ func (l *SQLiteRateLimiter) Remaining(ctx context.Context, key ratelimit.RateLim
 		return 0, ratelimit.ErrInvalidKey
 	}
 
-	// Load quota BEFORE starting a transaction to avoid single-connection deadlock.
 	config, err := l.loadQuota(ctx, key.TenantID)
 	if err != nil {
 		return 0, err
 	}
 
-	tx, err := l.db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback()
+	rate := rateForQuota(config, key)
+	bk := bucketKey(key)
 
-	tokens, _, _, err := refillBucket(ctx, tx, key, config)
+	var storedTokens, storedRateLimit int64
+	var storedLastFill string
+
+	err = l.db.QueryRowContext(ctx,
+		"SELECT tokens, last_fill, rate_limit FROM rate_limits WHERE key = ?", bk,
+	).Scan(&storedTokens, &storedLastFill, &storedRateLimit)
+
+	if err == sql.ErrNoRows {
+		// No bucket exists yet — full quota available.
+		return rate, nil
+	}
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("read rate limit bucket %s: %w", bk, err)
 	}
 
-	return tokens, nil
+	// Compute refill without writing back.
+	fillTime, perr := time.Parse(time.RFC3339Nano, storedLastFill)
+	if perr != nil {
+		return 0, fmt.Errorf("parse last_fill: %w", perr)
+	}
+
+	elapsed := time.Since(fillTime)
+	refill := int64(elapsed.Seconds() * float64(storedRateLimit) / 60.0)
+	if refill > 0 {
+		storedTokens = min(storedTokens+refill, storedRateLimit)
+	}
+
+	return storedTokens, nil
 }
 
 // Reset deletes the rate limit bucket so the next request starts fresh.

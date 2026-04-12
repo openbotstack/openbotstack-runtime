@@ -66,8 +66,9 @@ func TestAllowWithinLimit(t *testing.T) {
 	if !result.Allowed {
 		t.Error("expected Allowed=true")
 	}
-	if result.Remaining != 4 {
-		t.Errorf("Remaining = %d, want 4", result.Remaining)
+	// Allow is read-only: does not consume tokens
+	if result.Remaining != 5 {
+		t.Errorf("Remaining = %d, want 5 (Allow does not consume)", result.Remaining)
 	}
 }
 
@@ -79,9 +80,11 @@ func TestAllowOverLimit(t *testing.T) {
 	quotaStore := NewSQLiteQuotaStore(db.DB)
 	quotaStore.SetQuota(ctx, "t1", &ratelimit.QuotaConfig{TenantRequestsPerMinute: 2})
 
-	limiter.Allow(ctx, ratelimit.RateLimitKey{TenantID: "t1"})
-	limiter.Allow(ctx, ratelimit.RateLimitKey{TenantID: "t1"})
+	// Consume both tokens
+	limiter.Consume(ctx, ratelimit.RateLimitKey{TenantID: "t1"}, 1)
+	limiter.Consume(ctx, ratelimit.RateLimitKey{TenantID: "t1"}, 1)
 
+	// Allow should report not allowed
 	result, err := limiter.Allow(ctx, ratelimit.RateLimitKey{TenantID: "t1"})
 	if err != nil {
 		t.Fatalf("Allow: %v", err)
@@ -113,6 +116,20 @@ func TestConsume(t *testing.T) {
 	}
 }
 
+func TestConsumeExceedsLimit(t *testing.T) {
+	limiter, db := setupLimiter(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	quotaStore := NewSQLiteQuotaStore(db.DB)
+	quotaStore.SetQuota(ctx, "t1", &ratelimit.QuotaConfig{TenantRequestsPerMinute: 5})
+
+	err := limiter.Consume(ctx, ratelimit.RateLimitKey{TenantID: "t1"}, 10)
+	if !errors.Is(err, ratelimit.ErrRateLimitExceeded) {
+		t.Fatalf("expected ErrRateLimitExceeded, got: %v", err)
+	}
+}
+
 func TestRemaining(t *testing.T) {
 	limiter, db := setupLimiter(t)
 	defer db.Close()
@@ -138,7 +155,7 @@ func TestReset(t *testing.T) {
 	quotaStore := NewSQLiteQuotaStore(db.DB)
 	quotaStore.SetQuota(ctx, "t1", &ratelimit.QuotaConfig{TenantRequestsPerMinute: 5})
 
-	limiter.Allow(ctx, ratelimit.RateLimitKey{TenantID: "t1"})
+	limiter.Consume(ctx, ratelimit.RateLimitKey{TenantID: "t1"}, 3)
 
 	err := limiter.Reset(ctx, ratelimit.RateLimitKey{TenantID: "t1"})
 	if err != nil {
