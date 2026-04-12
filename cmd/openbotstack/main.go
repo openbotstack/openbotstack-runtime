@@ -28,10 +28,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/redis/go-redis/v9"
-
-
 	"github.com/openbotstack/openbotstack-core/assistant"
 	"github.com/openbotstack/openbotstack-core/control/agent"
 	"github.com/openbotstack/openbotstack-runtime/api"
@@ -39,6 +35,8 @@ import (
 	executor "github.com/openbotstack/openbotstack-runtime/executor/skill_executor"
 	audit "github.com/openbotstack/openbotstack-runtime/logging/execution_logs"
 	"github.com/openbotstack/openbotstack-runtime/memory"
+	"github.com/openbotstack/openbotstack-runtime/persistence"
+	"github.com/openbotstack/openbotstack-runtime/ratelimit"
 	"github.com/openbotstack/openbotstack-runtime/sandbox/wasm"
 	"github.com/openbotstack/openbotstack-runtime/web/webui"
 
@@ -52,12 +50,6 @@ var (
 	configPath = flag.String("config", "./config.yaml", "Path to config file")
 	listenAddr = flag.String("addr", ":8080", "Listen address")
 	runMode    = flag.String("mode", "all", "Run mode: all, api, worker")
-
-	// Build info injected via -ldflags
-	version   = "dev"
-	commit    = "none"
-	branch    = "unknown"
-	buildTime = "unknown"
 )
 
 func main() {
@@ -172,23 +164,26 @@ func main() {
 	planner := agent.NewLLMPlanner(modelRouter)
 	slog.Info("planner initialized with LLM router")
 
-	// Initialize Memory Store
-	var memoryStore memory.ShortTermStore
-	var redisClient *redis.Client
-	if redisURL := os.Getenv("REDIS_URL"); redisURL != "" {
-		opt, err := redis.ParseURL(redisURL)
-		if err != nil {
-			slog.Error("failed to parse redis url", "error", err)
-			os.Exit(1)
-		}
-		redisClient = redis.NewClient(opt)
-		memoryStore = memory.NewRedisMemoryStore(redisClient)
-		slog.Info("redis memory store initialized")
-	} else {
-		// Fallback to a simple in-memory implementation if REDIS_URL is not provided.
-		// For now, we'll just leave it nil so history is empty.
-		slog.Warn("no REDIS_URL provided, session history will be disabled")
+	// Initialize SQLite Persistence
+	dbPath := os.Getenv("OBS_DATABASE_PATH")
+	if dbPath == "" {
+		dbPath = "openbotstack.db"
 	}
+	pdb, err := persistence.Open(dbPath)
+	if err != nil {
+		slog.Error("failed to open database", "error", err)
+		os.Exit(1)
+	}
+	defer pdb.Close()
+	if err := pdb.Migrate(); err != nil {
+		slog.Error("failed to migrate database", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("sqlite database initialized", "path", dbPath)
+
+	// Initialize stores with SQLite
+	memoryStore := memory.NewSQLiteMemoryStore(pdb.DB)
+	_ = ratelimit.NewSQLiteQuotaStore(pdb.DB) // wired when rate limiting middleware is added
 
 	// Create Assistant Identity (Runtime)
 	// In a real system, these would be loaded from a database based on the request context.
@@ -202,26 +197,8 @@ func main() {
 	slog.Info("agent initialized", "loaded_skills", len(exec.List()))
 
 	// Initialize Audit Logger
-	var auditLogger audit.AuditLogger
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL != "" {
-		slog.Info("connecting to database for audit logging")
-		pool, err := pgxpool.New(context.Background(), dbURL)
-		if err != nil {
-			slog.Error("failed to connect to database", "error", err)
-			os.Exit(1)
-		}
-		pgLogger := audit.NewPGAuditLogger(pool)
-		if err := pgLogger.Initialize(context.Background()); err != nil {
-			slog.Error("failed to initialize audit log schema", "error", err)
-			os.Exit(1)
-		}
-		auditLogger = pgLogger
-		slog.Info("postgresql audit logger initialized")
-	} else {
-		auditLogger = audit.NewInMemoryAuditLogger()
-		slog.Info("in-memory audit logger initialized (no DATABASE_URL provided)")
-	}
+	auditLogger := audit.NewSQLiteAuditLogger(pdb.DB)
+	slog.Info("sqlite audit logger initialized")
 
 	// Create combined router
 	mux := http.NewServeMux()
@@ -231,26 +208,6 @@ func main() {
 	apiRouter.SetSkillProvider(exec)
 	apiRouter.SetExecutionStore(api.NewAuditExecutionStore(auditLogger))
 	apiRouter.SetHistoryProvider(&memoryHistoryProvider{store: memoryStore})
-
-	// Wire build info
-	apiRouter.SetBuildInfo(api.BuildInfo{
-		Version:   version,
-		Commit:    commit,
-		Branch:    branch,
-		BuildTime: buildTime,
-	})
-
-	// Wire health checkers
-	var checkers []api.HealthChecker
-	if redisClient != nil {
-		checkers = append(checkers, api.NewRedisHealthChecker(func(ctx context.Context) error {
-			return redisClient.Ping(ctx).Err()
-		}))
-	}
-	if providerConfig.APIKey != "" {
-		checkers = append(checkers, api.NewProviderHealthChecker(providerConfig.BaseURL, providerConfig.APIKey))
-	}
-	apiRouter.SetHealthCheckers(checkers...)
 
 	// Configure JWT middleware if secret is provided
 	if jwtSecret := os.Getenv("JWT_SECRET"); jwtSecret != "" {
@@ -269,7 +226,6 @@ func main() {
 	mux.Handle("/healthz", apiRouter)
 	mux.Handle("/readyz", apiRouter)
 	mux.Handle("/metrics", apiRouter)
-	mux.Handle("/version", apiRouter)
 	mux.Handle("/v1/", apiRouter)
 
 	// UI routes (embedded frontend)
