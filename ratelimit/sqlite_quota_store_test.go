@@ -58,6 +58,12 @@ func TestSetAndGetQuota(t *testing.T) {
 	if got.TenantRequestsPerMinute != 100 {
 		t.Errorf("TenantRequestsPerMinute = %d, want 100", got.TenantRequestsPerMinute)
 	}
+	if got.TenantTokensPerMinute != 5000 {
+		t.Errorf("TenantTokensPerMinute = %d, want 5000", got.TenantTokensPerMinute)
+	}
+	if got.UserRequestsPerMinute != 20 {
+		t.Errorf("UserRequestsPerMinute = %d, want 20", got.UserRequestsPerMinute)
+	}
 	if got.UserTokensPerMinute != 1000 {
 		t.Errorf("UserTokensPerMinute = %d, want 1000", got.UserTokensPerMinute)
 	}
@@ -71,10 +77,14 @@ func TestSetQuotaUpdates(t *testing.T) {
 	ctx := context.Background()
 
 	config1 := &ratelimit.QuotaConfig{TenantRequestsPerMinute: 50}
-	store.SetQuota(ctx, "t1", config1)
+	if err := store.SetQuota(ctx, "t1", config1); err != nil {
+		t.Fatalf("SetQuota 1: %v", err)
+	}
 
 	config2 := &ratelimit.QuotaConfig{TenantRequestsPerMinute: 200}
-	store.SetQuota(ctx, "t1", config2)
+	if err := store.SetQuota(ctx, "t1", config2); err != nil {
+		t.Fatalf("SetQuota 2: %v", err)
+	}
 
 	got, err := store.GetQuota(ctx, "t1")
 	if err != nil {
