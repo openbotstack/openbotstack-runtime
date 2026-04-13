@@ -37,6 +37,7 @@ import (
 	executor "github.com/openbotstack/openbotstack-runtime/executor/skill_executor"
 	audit "github.com/openbotstack/openbotstack-runtime/logging/execution_logs"
 	"github.com/openbotstack/openbotstack-runtime/memory"
+	"github.com/openbotstack/openbotstack-runtime/observability"
 	"github.com/openbotstack/openbotstack-runtime/persistence"
 	"github.com/openbotstack/openbotstack-runtime/ratelimit"
 	"github.com/openbotstack/openbotstack-runtime/sandbox/wasm"
@@ -46,6 +47,7 @@ import (
 	"github.com/openbotstack/openbotstack-core/ai/providers"
 	"github.com/openbotstack/openbotstack-core/ai/router"
 	"github.com/openbotstack/openbotstack-core/control/skills"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 var (
@@ -69,6 +71,14 @@ func main() {
 		Level: logLevel,
 	}))
 	slog.SetDefault(logger)
+
+	// Initialize OpenTelemetry (Prometheus metrics + optional tracing)
+	otelCleanup, err := observability.Setup(context.Background(), cfg.Observability, "dev")
+	if err != nil {
+		slog.Error("failed to initialize OpenTelemetry", "error", err)
+		os.Exit(1)
+	}
+	defer otelCleanup()
 
 	// CLI flags override config if explicitly set (simple check for now, can be improved)
 	if *listenAddr != ":8080" {
@@ -258,7 +268,9 @@ func main() {
 	mux.Handle("/health", apiRouter)
 	mux.Handle("/healthz", apiRouter)
 	mux.Handle("/readyz", apiRouter)
-	mux.Handle("/metrics", apiRouter)
+	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+			api.MetricsHandler().ServeHTTP(w, r)
+		})
 	mux.Handle("/v1/", apiRouter)
 
 	// Admin endpoints require auth (API Key or JWT) AND admin role
@@ -275,8 +287,20 @@ func main() {
 		http.NotFound(w, r)
 	})
 
-	// Wrap with correlation ID middleware for structured logging
-	handler := api.CorrelationMiddleware(mux)
+	// Correlation ID middleware for structured logging.
+	// Runs inside the OTel span so correlation_id can be attached to the span.
+	correlationHandler := api.CorrelationMiddleware(mux)
+
+	// OTel HTTP instrumentation (creates spans for each request).
+	// Must be the outermost middleware so the span exists when inner middleware runs.
+	// Execution order: otelhttp → CorrelationMiddleware → mux → auth → handlers
+	handler := otelhttp.NewHandler(correlationHandler, "openbotstack",
+		otelhttp.WithFilter(func(r *http.Request) bool {
+			// Skip health/metrics endpoints from tracing overhead.
+			path := r.URL.Path
+			return path != "/health" && path != "/healthz" && path != "/readyz" && path != "/metrics"
+		}),
+	)
 
 	// Create server
 	srv := &http.Server{

@@ -7,6 +7,8 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -46,6 +48,14 @@ func CorrelationMiddleware(next http.Handler) http.Handler {
 
 		// Create a logger that always includes the correlation_id attribute.
 		logger := slog.With("correlation_id", correlationID)
+
+		// Attach correlation_id to the current OTel span so traces can be
+		// cross-referenced with application logs.
+		span := trace.SpanFromContext(r.Context())
+		if span.IsRecording() {
+			span.SetAttributes(attribute.String("correlation_id", correlationID))
+		}
+
 		logger.Info("request started",
 			"method", r.Method,
 			"path", r.URL.Path,

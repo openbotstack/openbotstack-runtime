@@ -4,12 +4,13 @@ import (
 	"fmt"
 	"net/http"
 	"sync/atomic"
+
+	"github.com/openbotstack/openbotstack-runtime/observability"
 )
 
 // Metrics holds simple counters for Prometheus-style exposition.
-// This is a lightweight stub — a full implementation would use
-// prometheus/client_golang, but keeping zero external dependencies
-// for the initial stub.
+// Retained for backward compatibility; the /metrics endpoint now
+// delegates to the OpenTelemetry Prometheus handler via MetricsHandler().
 type Metrics struct {
 	requestsTotal   atomic.Int64
 	requestsErrored atomic.Int64
@@ -30,8 +31,9 @@ func (m *Metrics) IncErrors() {
 	m.requestsErrored.Add(1)
 }
 
-// Handler returns an http.HandlerFunc that exposes metrics in
-// Prometheus text exposition format.
+// Handler returns an http.HandlerFunc that exposes the legacy atomic
+// counters in Prometheus text exposition format.  For production use
+// prefer MetricsHandler() which delegates to the OTel Prometheus exporter.
 func (m *Metrics) Handler() http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
@@ -42,4 +44,10 @@ func (m *Metrics) Handler() http.HandlerFunc {
 		fmt.Fprintf(w, "# TYPE openbotstack_requests_errored_total counter\n")
 		fmt.Fprintf(w, "openbotstack_requests_errored_total %d\n", m.requestsErrored.Load())
 	}
+}
+
+// MetricsHandler returns an http.Handler that serves Prometheus-format
+// metrics via the OpenTelemetry SDK.
+func MetricsHandler() http.Handler {
+	return observability.PrometheusHandler()
 }
