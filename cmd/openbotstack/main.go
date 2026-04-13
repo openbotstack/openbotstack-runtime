@@ -80,6 +80,12 @@ func main() {
 	}
 	defer otelCleanup()
 
+	// Initialize OTel metric instruments (counters, histograms)
+	if err := observability.InitMetrics(); err != nil {
+		slog.Error("failed to initialize OTel metrics", "error", err)
+		os.Exit(1)
+	}
+
 	// CLI flags override config if explicitly set (simple check for now, can be improved)
 	if *listenAddr != ":8080" {
 		cfg.Server.Addr = *listenAddr
@@ -291,10 +297,13 @@ func main() {
 	// Runs inside the OTel span so correlation_id can be attached to the span.
 	correlationHandler := api.CorrelationMiddleware(mux)
 
+	// OTel HTTP metrics middleware (records request counts and durations).
+	metricsHandler := observability.MetricsMiddleware(correlationHandler)
+
 	// OTel HTTP instrumentation (creates spans for each request).
 	// Must be the outermost middleware so the span exists when inner middleware runs.
-	// Execution order: otelhttp → CorrelationMiddleware → mux → auth → handlers
-	handler := otelhttp.NewHandler(correlationHandler, "openbotstack",
+	// Execution order: otelhttp → MetricsMiddleware → CorrelationMiddleware → mux → auth → handlers
+	handler := otelhttp.NewHandler(metricsHandler, "openbotstack",
 		otelhttp.WithFilter(func(r *http.Request) bool {
 			// Skip health/metrics endpoints from tracing overhead.
 			path := r.URL.Path
