@@ -3,6 +3,7 @@ package persistence
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -71,17 +72,72 @@ func (db *DB) Migrate() error {
 		`CREATE TABLE IF NOT EXISTS session_entries (
 			id         TEXT PRIMARY KEY,
 			session_id TEXT NOT NULL,
+			tenant_id  TEXT NOT NULL DEFAULT '',
 			content    TEXT NOT NULL,
 			tags       TEXT NOT NULL DEFAULT '[]',
 			created_at TEXT NOT NULL DEFAULT '',
 			ttl        INTEGER NOT NULL DEFAULT 0
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_session_entries_session ON session_entries(session_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_session_entries_tenant ON session_entries(tenant_id)`,
+		`CREATE TABLE IF NOT EXISTS tenants (
+			id         TEXT PRIMARY KEY,
+			name       TEXT NOT NULL,
+			created_at TEXT NOT NULL DEFAULT ''
+		)`,
+		`CREATE TABLE IF NOT EXISTS users (
+			id         TEXT PRIMARY KEY,
+			tenant_id  TEXT NOT NULL,
+			name       TEXT NOT NULL,
+			role       TEXT NOT NULL DEFAULT 'member',
+			created_at TEXT NOT NULL DEFAULT '',
+			FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_users_tenant ON users(tenant_id)`,
+		`CREATE TABLE IF NOT EXISTS api_keys (
+			id         TEXT PRIMARY KEY,
+			tenant_id  TEXT NOT NULL,
+			user_id    TEXT NOT NULL,
+			key_prefix TEXT NOT NULL,
+			key_hash   TEXT NOT NULL UNIQUE,
+			name       TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL DEFAULT '',
+			expires_at TEXT NOT NULL DEFAULT '',
+			revoked    INTEGER NOT NULL DEFAULT 0,
+			FOREIGN KEY (tenant_id) REFERENCES tenants(id),
+			FOREIGN KEY (user_id) REFERENCES users(id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash)`,
+		`CREATE INDEX IF NOT EXISTS idx_api_keys_tenant ON api_keys(tenant_id)`,
 	}
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("migrate begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
 	for i, s := range stmts {
-		if _, err := db.Exec(s); err != nil {
+		if _, err := tx.Exec(s); err != nil {
 			return fmt.Errorf("migrate statement %d: %w", i, err)
 		}
+	}
+	return tx.Commit()
+}
+
+// MigrateTenantColumn adds tenant_id to session_entries if it does not already exist.
+// This handles upgrades from schemas that predate multi-tenancy.
+func (db *DB) MigrateTenantColumn() error {
+	_, err := db.Exec("ALTER TABLE session_entries ADD COLUMN tenant_id TEXT NOT NULL DEFAULT ''")
+	if err != nil {
+		// SQLite returns "duplicate column name" if column already exists
+		if strings.Contains(err.Error(), "duplicate column name") {
+			return nil
+		}
+		return fmt.Errorf("add tenant_id column: %w", err)
+	}
+	// Add index if column was just added
+	if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_session_entries_tenant ON session_entries(tenant_id)"); err != nil {
+		return fmt.Errorf("create tenant index after migration: %w", err)
 	}
 	return nil
 }

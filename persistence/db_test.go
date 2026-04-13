@@ -28,7 +28,7 @@ func TestMigrateCreatesTables(t *testing.T) {
 		t.Fatalf("Migrate: %v", err)
 	}
 
-	tables := []string{"audit_logs", "quotas", "rate_limits", "session_entries"}
+	tables := []string{"audit_logs", "quotas", "rate_limits", "session_entries", "tenants", "users", "api_keys"}
 	for _, table := range tables {
 		var name string
 		err := db.QueryRow(
@@ -54,5 +54,50 @@ func TestMigrateIdempotent(t *testing.T) {
 	}
 	if err := db.Migrate(); err != nil {
 		t.Fatalf("second Migrate: %v", err)
+	}
+}
+
+func TestMigrateTenantColumn(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	// MigrateTenantColumn should be a no-op since Migrate already includes tenant_id.
+	if err := db.MigrateTenantColumn(); err != nil {
+		t.Fatalf("MigrateTenantColumn: %v", err)
+	}
+
+	// Verify tenant_id column exists and is TEXT.
+	var cid int
+	var name, colType string
+	err = db.QueryRow(
+		"SELECT cid, name, type FROM pragma_table_info('session_entries') WHERE name = 'tenant_id'",
+	).Scan(&cid, &name, &colType)
+	if err != nil {
+		t.Fatalf("tenant_id column not found: %v", err)
+	}
+	if colType != "TEXT" {
+		t.Errorf("tenant_id type = %q, want TEXT", colType)
+	}
+}
+
+func TestMigrateTenantColumnBeforeMigrate(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	// Calling MigrateTenantColumn before Migrate should return an error
+	// because the session_entries table does not exist yet.
+	err = db.MigrateTenantColumn()
+	if err == nil {
+		t.Fatal("expected error when calling MigrateTenantColumn before Migrate, got nil")
 	}
 }
