@@ -21,10 +21,12 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -55,18 +57,18 @@ var (
 func main() {
 	flag.Parse()
 
-	// Setup structured logging
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}))
-	slog.SetDefault(logger)
-
 	// Load Configuration
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		slog.Error("failed to load config", "error", err)
-		os.Exit(1)
+		log.Fatal("failed to load config", "error", err)
 	}
+
+	// Setup structured logging with configurable log level
+	logLevel := parseLogLevel(cfg.Observability.LogLevel)
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: logLevel,
+	}))
+	slog.SetDefault(logger)
 
 	// CLI flags override config if explicitly set (simple check for now, can be improved)
 	if *listenAddr != ":8080" {
@@ -345,4 +347,18 @@ func (p *memoryHistoryProvider) GetSessionHistory(ctx context.Context, sessionID
 		})
 	}
 	return messages, nil
+}
+
+// parseLogLevel converts a log level string to slog.Level.
+func parseLogLevel(s string) slog.Level {
+	switch strings.ToLower(s) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
 }

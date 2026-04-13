@@ -7,9 +7,16 @@ import (
 )
 
 type Config struct {
-	Server    ServerConfig    `yaml:"server"`
-	Redis     RedisConfig     `yaml:"redis"`
-	Providers ProvidersConfig `yaml:"providers"`
+	Server       ServerConfig       `yaml:"server"`
+	Redis        RedisConfig        `yaml:"redis"`
+	Providers    ProvidersConfig    `yaml:"providers"`
+	Observability ObservabilityConfig `yaml:"observability"`
+}
+
+type ObservabilityConfig struct {
+	LogLevel     string `yaml:"log_level"`     // debug, info, warn, error
+	OtelEnabled  bool   `yaml:"otel_enabled"`  // enable OpenTelemetry
+	OtelEndpoint string `yaml:"otel_endpoint"` // OTLP gRPC endpoint
 }
 
 type ServerConfig struct {
@@ -52,6 +59,9 @@ func Load(path string) (*Config, error) {
 				},
 			},
 		},
+		Observability: ObservabilityConfig{
+			LogLevel: "info",
+		},
 	}
 
 	// Load from file if exists
@@ -89,6 +99,11 @@ func Load(path string) (*Config, error) {
 	if val := os.Getenv("OBS_LLM_MODEL"); val != "" {
 		cfg.Providers.LLM.OpenAI.Model = val
 		cfg.Providers.LLM.ModelScope.Model = val
+	}
+
+	// Observability overrides
+	if val := os.Getenv("OBS_LOG_LEVEL"); val != "" {
+		cfg.Observability.LogLevel = val
 	}
 
 	return cfg, nil
