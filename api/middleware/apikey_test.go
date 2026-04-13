@@ -277,7 +277,7 @@ func TestRequireAdmin(t *testing.T) {
 
 			req := httptest.NewRequest("GET", "/test", nil)
 			if tt.role != "" {
-				ctx := withUserRole(req.Context(), tt.role)
+				ctx := WithUserRole(req.Context(), tt.role)
 				req = req.WithContext(ctx)
 			}
 

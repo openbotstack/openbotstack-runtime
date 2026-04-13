@@ -83,7 +83,7 @@ func APIKeyMiddleware(config APIKeyMiddlewareConfig) func(http.Handler) http.Han
 				TenantID: tenantID,
 				Name:     userName,
 			}
-			ctx := withUserRole(WithUser(r.Context(), user), userRole)
+			ctx := WithUserRole(WithUser(r.Context(), user), userRole)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -91,7 +91,8 @@ func APIKeyMiddleware(config APIKeyMiddlewareConfig) func(http.Handler) http.Han
 
 type roleContextKey struct{}
 
-func withUserRole(ctx context.Context, role string) context.Context {
+// WithUserRole adds a user role to the context.
+func WithUserRole(ctx context.Context, role string) context.Context {
 	return context.WithValue(ctx, roleContextKey{}, role)
 }
 

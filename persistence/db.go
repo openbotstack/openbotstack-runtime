@@ -29,6 +29,10 @@ func Open(dbPath string) (*DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("set busy timeout: %w", err)
 	}
+	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("enable foreign keys: %w", err)
+	}
 
 	// SQLite: single writer constraint. WAL allows concurrent readers.
 	db.SetMaxOpenConns(1)
