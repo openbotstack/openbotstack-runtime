@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/openbotstack/openbotstack-runtime/api/middleware"
 )
 
 // SQLiteMemoryStore implements ShortTermStore using SQLite.
@@ -16,6 +18,15 @@ type SQLiteMemoryStore struct {
 // NewSQLiteMemoryStore creates a new SQLite-backed memory store.
 func NewSQLiteMemoryStore(db *sql.DB) *SQLiteMemoryStore {
 	return &SQLiteMemoryStore{db: db}
+}
+
+// tenantFromCtx extracts the tenant_id from the authenticated user in context.
+// Returns "" if no user is present, allowing backward compatibility with pre-auth data.
+func tenantFromCtx(ctx context.Context) string {
+	if user, ok := middleware.UserFromContext(ctx); ok {
+		return user.TenantID
+	}
+	return ""
 }
 
 // Store saves a memory entry, replacing any existing entry with the same ID.
@@ -29,10 +40,12 @@ func (s *SQLiteMemoryStore) Store(ctx context.Context, entry Entry) error {
 		ttlSeconds = int64(entry.TTL.Seconds())
 	}
 
+	tenantID := tenantFromCtx(ctx)
+
 	_, err = s.db.ExecContext(ctx, `
-		INSERT OR REPLACE INTO session_entries (id, session_id, content, tags, created_at, ttl)
-		VALUES (?, ?, ?, ?, ?, ?)`,
-		entry.ID, entry.SessionID, entry.Content, string(tagsJSON),
+		INSERT OR REPLACE INTO session_entries (id, session_id, tenant_id, content, tags, created_at, ttl)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		entry.ID, entry.SessionID, tenantID, entry.Content, string(tagsJSON),
 		entry.CreatedAt.UTC().Format(time.RFC3339Nano), ttlSeconds,
 	)
 	if err != nil {
@@ -46,17 +59,24 @@ func (s *SQLiteMemoryStore) Retrieve(ctx context.Context, id string) (*Entry, er
 	var e Entry
 	var tagsJSON, createdAtStr string
 	var ttlSeconds int64
+	var entryTenantID string
 
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, session_id, content, tags, created_at, ttl
+		SELECT id, session_id, tenant_id, content, tags, created_at, ttl
 		FROM session_entries WHERE id = ?`, id,
-	).Scan(&e.ID, &e.SessionID, &e.Content, &tagsJSON, &createdAtStr, &ttlSeconds)
+	).Scan(&e.ID, &e.SessionID, &entryTenantID, &e.Content, &tagsJSON, &createdAtStr, &ttlSeconds)
 
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("retrieve entry %s: %w", id, err)
+	}
+
+	// Verify tenant isolation
+	expectedTenant := tenantFromCtx(ctx)
+	if expectedTenant != "" && entryTenantID != expectedTenant {
+		return nil, ErrNotFound
 	}
 
 	if ttlSeconds > 0 {
@@ -77,11 +97,19 @@ func (s *SQLiteMemoryStore) Retrieve(ctx context.Context, id string) (*Entry, er
 
 // ListBySession returns all non-expired entries for a session, ordered by created_at.
 func (s *SQLiteMemoryStore) ListBySession(ctx context.Context, sessionID string) ([]Entry, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, session_id, content, tags, created_at, ttl
-		FROM session_entries WHERE session_id = ?
-		ORDER BY created_at`, sessionID,
-	)
+	tenantID := tenantFromCtx(ctx)
+	query := `
+		SELECT id, session_id, tenant_id, content, tags, created_at, ttl
+		FROM session_entries WHERE session_id = ?`
+	args := []interface{}{sessionID}
+
+	if tenantID != "" {
+		query += ` AND tenant_id = ?`
+		args = append(args, tenantID)
+	}
+	query += ` ORDER BY created_at`
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list session %s: %w", sessionID, err)
 	}
@@ -94,7 +122,8 @@ func (s *SQLiteMemoryStore) ListBySession(ctx context.Context, sessionID string)
 		var e Entry
 		var tagsJSON, createdAtStr string
 		var ttlSeconds int64
-		if err := rows.Scan(&e.ID, &e.SessionID, &e.Content, &tagsJSON,
+		var entryTenantID string
+		if err := rows.Scan(&e.ID, &e.SessionID, &entryTenantID, &e.Content, &tagsJSON,
 			&createdAtStr, &ttlSeconds); err != nil {
 			return nil, fmt.Errorf("scan entry: %w", err)
 		}
@@ -122,7 +151,14 @@ func (s *SQLiteMemoryStore) ListBySession(ctx context.Context, sessionID string)
 
 // Delete removes a memory entry by ID, returning ErrNotFound if it doesn't exist.
 func (s *SQLiteMemoryStore) Delete(ctx context.Context, id string) error {
-	result, err := s.db.ExecContext(ctx, "DELETE FROM session_entries WHERE id = ?", id)
+	tenantID := tenantFromCtx(ctx)
+	query := "DELETE FROM session_entries WHERE id = ?"
+	args := []interface{}{id}
+	if tenantID != "" {
+		query += " AND tenant_id = ?"
+		args = append(args, tenantID)
+	}
+	result, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("delete entry %s: %w", id, err)
 	}
@@ -135,7 +171,14 @@ func (s *SQLiteMemoryStore) Delete(ctx context.Context, id string) error {
 
 // ClearSession removes all entries for a session.
 func (s *SQLiteMemoryStore) ClearSession(ctx context.Context, sessionID string) error {
-	_, err := s.db.ExecContext(ctx, "DELETE FROM session_entries WHERE session_id = ?", sessionID)
+	tenantID := tenantFromCtx(ctx)
+	query := "DELETE FROM session_entries WHERE session_id = ?"
+	args := []interface{}{sessionID}
+	if tenantID != "" {
+		query += " AND tenant_id = ?"
+		args = append(args, tenantID)
+	}
+	_, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("clear session %s: %w", sessionID, err)
 	}
