@@ -35,6 +35,12 @@ type JWTMiddlewareConfig struct {
 func JWTMiddleware(config JWTMiddlewareConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Skip if user already authenticated by API Key middleware
+			if _, ok := UserFromContext(r.Context()); ok {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
 				if config.Strict {
@@ -80,7 +86,8 @@ func JWTMiddleware(config JWTMiddlewareConfig) func(http.Handler) http.Handler {
 			}
 
 			user := extractUserFromClaims(claims)
-			ctx := WithUser(r.Context(), user)
+			role, _ := claims["role"].(string)
+			ctx := WithUserRole(WithUser(r.Context(), user), role)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

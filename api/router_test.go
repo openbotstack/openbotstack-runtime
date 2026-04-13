@@ -9,8 +9,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/openbotstack/openbotstack-core/access/auth"
 	"github.com/openbotstack/openbotstack-core/control/agent"
 	"github.com/openbotstack/openbotstack-runtime/api"
+	"github.com/openbotstack/openbotstack-runtime/api/middleware"
 )
 
 // mockAgent implements agent.Agent for testing.
@@ -171,5 +173,91 @@ func TestChatEndpointMethodNotAllowed(t *testing.T) {
 
 	if rr.Code != http.StatusMethodNotAllowed {
 		t.Errorf("Expected status 405, got %d", rr.Code)
+	}
+}
+
+// captureAgent captures the MessageRequest for inspection.
+type captureAgent struct {
+	captured *agent.MessageRequest
+}
+
+func (c *captureAgent) HandleMessage(ctx context.Context, req agent.MessageRequest) (*agent.MessageResponse, error) {
+	c.captured = &req
+	return &agent.MessageResponse{
+		SessionID: req.SessionID,
+		Message:   "ok",
+	}, nil
+}
+
+func TestChatEndpointUsesAuthenticatedIdentity(t *testing.T) {
+	ca := &captureAgent{}
+	router := api.NewRouter(ca)
+
+	// Set auth middleware that injects a user into context
+	router.SetAuthMiddleware(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			user := &auth.User{ID: "auth-user", TenantID: "auth-tenant"}
+			ctx := middleware.WithUser(r.Context(), user)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	})
+
+	// Request body has different tenant/user than the authenticated one
+	body := api.ChatRequest{
+		TenantID:  "body-tenant",
+		UserID:    "body-user",
+		SessionID: "session-1",
+		Message:   "Hello",
+	}
+	bodyBytes, _ := json.Marshal(body)
+
+	req := httptest.NewRequest("POST", "/v1/chat", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", rr.Code)
+	}
+
+	// Authenticated identity should override request body
+	if ca.captured.TenantID != "auth-tenant" {
+		t.Errorf("TenantID = %q, want %q (from auth context)", ca.captured.TenantID, "auth-tenant")
+	}
+	if ca.captured.UserID != "auth-user" {
+		t.Errorf("UserID = %q, want %q (from auth context)", ca.captured.UserID, "auth-user")
+	}
+}
+
+func TestChatEndpointNoAuthUsesBodyIdentity(t *testing.T) {
+	ca := &captureAgent{}
+	router := api.NewRouter(ca)
+	// No auth middleware set
+
+	body := api.ChatRequest{
+		TenantID:  "body-tenant",
+		UserID:    "body-user",
+		SessionID: "session-1",
+		Message:   "Hello",
+	}
+	bodyBytes, _ := json.Marshal(body)
+
+	req := httptest.NewRequest("POST", "/v1/chat", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", rr.Code)
+	}
+
+	// Without auth, body values should be used as-is
+	if ca.captured.TenantID != "body-tenant" {
+		t.Errorf("TenantID = %q, want %q (from request body)", ca.captured.TenantID, "body-tenant")
+	}
+	if ca.captured.UserID != "body-user" {
+		t.Errorf("UserID = %q, want %q (from request body)", ca.captured.UserID, "body-user")
 	}
 }

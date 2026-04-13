@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/openbotstack/openbotstack-core/control/agent"
+	"github.com/openbotstack/openbotstack-runtime/api/middleware"
 )
 
 // ChatRequest is the input for chat endpoint.
@@ -163,6 +164,12 @@ func (r *Router) handleChat(w http.ResponseWriter, req *http.Request) {
 		UserID:    chatReq.UserID,
 		SessionID: chatReq.SessionID,
 		Message:   chatReq.Message,
+	}
+
+	// Authenticated identity overrides request body
+	if user, ok := middleware.UserFromContext(req.Context()); ok {
+		agentReq.TenantID = user.TenantID
+		agentReq.UserID = user.ID
 	}
 
 	agentResp, err := r.agent.HandleMessage(req.Context(), agentReq)

@@ -179,7 +179,26 @@ func main() {
 		slog.Error("failed to migrate database", "error", err)
 		os.Exit(1)
 	}
+	if err := pdb.MigrateTenantColumn(); err != nil {
+		slog.Error("failed to migrate tenant column", "error", err)
+		os.Exit(1)
+	}
 	slog.Info("sqlite database initialized", "path", dbPath)
+
+	// Seed default tenant, admin user, and API key if no tenants exist
+	if os.Getenv("OBS_SEED_DEFAULTS") != "false" {
+		seedKey, err := pdb.SeedDefaults()
+		if err != nil {
+			slog.Error("failed to seed defaults", "error", err)
+			os.Exit(1)
+		}
+		if seedKey != "" {
+			fmt.Println("⚠️  Default admin API Key (save this, it won't be shown again):")
+			fmt.Printf("    %s\n", seedKey)
+			fmt.Println()
+			fmt.Println("    Tenant: default  User: admin  Role: admin")
+		}
+	}
 
 	// Initialize stores with SQLite
 	memoryStore := memory.NewSQLiteMemoryStore(pdb.DB)
@@ -209,24 +228,40 @@ func main() {
 	apiRouter.SetExecutionStore(api.NewAuditExecutionStore(auditLogger))
 	apiRouter.SetHistoryProvider(&memoryHistoryProvider{store: memoryStore})
 
-	// Configure JWT middleware if secret is provided
+	// Configure composite auth: API Key first, then JWT fallback
+	apiKeyMW := middleware.APIKeyMiddleware(middleware.APIKeyMiddlewareConfig{
+		DB:     pdb.DB,
+		Strict: os.Getenv("OBS_AUTH_STRICT") == "true",
+	})
+
+	var authMW func(http.Handler) http.Handler
+	authMW = apiKeyMW // Start with API Key middleware
+
 	if jwtSecret := os.Getenv("JWT_SECRET"); jwtSecret != "" {
-		slog.Info("jwt authentication enabled")
-		strict := os.Getenv("JWT_STRICT") == "true"
-		mw := middleware.JWTMiddleware(middleware.JWTMiddlewareConfig{
+		jwtMW := middleware.JWTMiddleware(middleware.JWTMiddlewareConfig{
 			SecretKey: []byte(jwtSecret),
-			Strict:    strict,
+			Strict:    os.Getenv("JWT_STRICT") == "true",
 		})
-		apiRouter.SetAuthMiddleware(mw)
+		// Compose: API Key first, then JWT as fallback
+		// If API Key already set user, JWT middleware skips (check in jwt.go)
+		authMW = func(next http.Handler) http.Handler {
+			return apiKeyMW(jwtMW(next))
+		}
+		slog.Info("composite auth enabled (API Key + JWT)")
 	} else {
-		slog.Warn("no JWT_SECRET provided, authentication is disabled")
+		slog.Info("API Key authentication enabled")
 	}
+	apiRouter.SetAuthMiddleware(authMW)
 
 	mux.Handle("/health", apiRouter)
 	mux.Handle("/healthz", apiRouter)
 	mux.Handle("/readyz", apiRouter)
 	mux.Handle("/metrics", apiRouter)
 	mux.Handle("/v1/", apiRouter)
+
+	// Admin endpoints require auth (API Key or JWT) AND admin role
+	adminRouter := api.NewAdminRouter(pdb.DB)
+	mux.Handle("/v1/admin/", authMW(adminRouter.Handler()))
 
 	// UI routes (embedded frontend)
 	mux.Handle("/ui/", http.StripPrefix("/ui", webui.Handler()))
