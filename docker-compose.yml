@@ -1,77 +1,100 @@
-# OpenBotStack Local Development Stack
+# OpenBotStack Runtime - Docker Compose
 #
 # Usage:
-#   docker-compose up -d
+#   docker compose up -d          # Start the service
+#   docker compose logs -f        # Follow logs
 #   open http://localhost:8080/ui/
 #
 # Stop:
-#   docker-compose down
+#   docker compose down
+#
+# Build from the parent directory (../) to include openbotstack-core:
+#   docker compose build
+#
+# Note: Build context is set to the parent directory so that the replace
+# directive in go.mod (../openbotstack-core) resolves correctly.
 
 services:
-  # OpenBotStack runtime
   openbotstack:
     build:
-      context: .
-      dockerfile: Dockerfile
-    # Or use pre-built image:
+      context: ..
+      dockerfile: openbotstack-runtime/Dockerfile
+    # Or use a pre-built image:
     # image: ghcr.io/openbotstack/openbotstack:latest
     ports:
       - "8080:8080"
     environment:
-      - OBS_ADDR=:8080
-      - OBS_REDIS_URL=redis://redis:6379
-      - OBS_LOG_LEVEL=info
-      - OBS_LOG_FORMAT=json
-      # LLM provider (set your API key)
+      # Server
+      - OBS_SERVER_ADDR=:8080
+      # LLM provider (REQUIRED - set your API key)
       - OBS_LLM_PROVIDER=openai
       - OBS_LLM_API_KEY=${OPENAI_API_KEY:-}
-    depends_on:
-      redis:
-        condition: service_healthy
+      # Override model (optional)
+      # - OBS_LLM_MODEL=gpt-4o
+      # Override base URL (optional, for self-hosted providers)
+      # - OBS_LLM_URL=https://api.openai.com/v1
+      # Logging
+      - OBS_LOG_LEVEL=info
+      # Database
+      - OBS_DATABASE_PATH=/app/data/openbotstack.db
+      # Memory
+      - OBS_DATA_DIR=/app/data/memory
+      # Skills
+      - OBS_SKILLS_PATH=/app/examples/skills
+      # Auth (see DEPLOYMENT.md for details)
+      - OBS_AUTH_STRICT=false
+      # Set JWT_SECRET to enable JWT authentication alongside API keys
+      # - JWT_SECRET=your-secure-random-secret
+      # - JWT_STRICT=false
+      # Seed default admin on first run (set to "false" to disable)
+      - OBS_SEED_DEFAULTS=true
+      # TLS (optional - see DEPLOYMENT.md for reverse proxy setup)
+      # - OBS_TLS_CERT_FILE=/etc/tls/tls.crt
+      # - OBS_TLS_KEY_FILE=/etc/tls/tls.key
+    volumes:
+      # Persist SQLite database and memory data
+      - openbotstack-data:/app/data
+      # Optional: mount custom config
+      # - ./config.yaml:/etc/openbotstack/config.yaml:ro
+      # Optional: mount TLS certificates
+      # - ./tls:/etc/tls:ro
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
       interval: 10s
       timeout: 5s
+      start_period: 5s
       retries: 3
     restart: unless-stopped
+    # Resource limits (adjust for your workload)
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
-  # Redis for short-term memory
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis-data:/data
-    healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-    restart: unless-stopped
-  # Milvus for long-term memory (optional)
-  # Uncomment if you need vector storage
-  #
-  # milvus:
-  #   image: milvusdb/milvus:v2.3-latest
+  # -----------------------------------------------------------------------
+  # Optional: PostgreSQL + pgvector for vector semantic search
+  # Uncomment and set OBS_VECTOR_DB_URL to enable
+  # -----------------------------------------------------------------------
+  # postgres:
+  #   image: pgvector/pgvector:pg16
   #   ports:
-  #     - "19530:19530"
-  #   volumes:
-  #     - milvus-data:/var/lib/milvus
+  #     - "5432:5432"
   #   environment:
-  #     - ETCD_ENDPOINTS=etcd:2379
-  #   depends_on:
-  #     - etcd
+  #     POSTGRES_DB: openbotstack
+  #     POSTGRES_USER: openbotstack
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+  #   volumes:
+  #     - pgdata:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U openbotstack"]
+  #     interval: 5s
+  #     timeout: 3s
+  #     retries: 5
+  #   restart: unless-stopped
   #
-  # etcd:
-  #   image: quay.io/coreos/etcd:v3.5.5
-  #   environment:
-  #     - ETCD_AUTO_COMPACTION_MODE=revision
-  #     - ETCD_AUTO_COMPACTION_RETENTION=1000
-  #     - ETCD_QUOTA_BACKEND_BYTES=4294967296
-  #   volumes:
-  #     - etcd-data:/etcd
+  # To use with openbotstack, add to environment:
+  #   OBS_VECTOR_DB_URL: postgres://openbotstack:changeme@postgres:5432/openbotstack?sslmode=disable
 
 volumes:
-  redis-data:
-    # milvus-data:
-    # etcd-data:
+  openbotstack-data:
+  # pgdata:
