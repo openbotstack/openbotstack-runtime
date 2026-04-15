@@ -242,7 +242,7 @@ func TestSandboxedHTTPClientWithSSRF_BlocksLocalhost(t *testing.T) {
 	// Start a server on localhost
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("should not reach"))
+		_, _ = w.Write([]byte("should not reach"))
 	}))
 	defer server.Close()
 

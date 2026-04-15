@@ -38,7 +38,9 @@ func buildBinary(t *testing.T) string {
 	// Build on demand
 	t.Log("Building binary for integration test...")
 	buildDir := filepath.Dir(absBinaryPath)
-	os.MkdirAll(buildDir, 0o755)
+	if err := os.MkdirAll(buildDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
 
 	buildCmd := exec.Command("go", "build", "-o", absBinaryPath, "./cmd/openbotstack")
 	buildCmd.Dir = absRepoRoot

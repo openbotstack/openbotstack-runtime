@@ -72,9 +72,15 @@ func TestListBySession(t *testing.T) {
 	ctx := context.Background()
 	store := NewSQLiteMemoryStore(db.DB)
 
-	store.Store(ctx, Entry{ID: "e1", SessionID: "s1", Content: "first", CreatedAt: time.Now()})
-	store.Store(ctx, Entry{ID: "e2", SessionID: "s1", Content: "second", CreatedAt: time.Now()})
-	store.Store(ctx, Entry{ID: "e3", SessionID: "s2", Content: "other", CreatedAt: time.Now()})
+	if err := store.Store(ctx, Entry{ID: "e1", SessionID: "s1", Content: "first", CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("Store e1: %v", err)
+	}
+	if err := store.Store(ctx, Entry{ID: "e2", SessionID: "s1", Content: "second", CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("Store e2: %v", err)
+	}
+	if err := store.Store(ctx, Entry{ID: "e3", SessionID: "s2", Content: "other", CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("Store e3: %v", err)
+	}
 
 	entries, err := store.ListBySession(ctx, "s1")
 	if err != nil {
@@ -137,9 +143,11 @@ func TestTTLExpiry(t *testing.T) {
 	// Insert expired entry directly
 	past := time.Now().Add(-2 * time.Hour)
 	ttlSeconds := int64(3600)
-	db.Exec(`INSERT INTO session_entries (id, session_id, tenant_id, content, tags, created_at, ttl)
+	if _, err := db.Exec(`INSERT INTO session_entries (id, session_id, tenant_id, content, tags, created_at, ttl)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		"expired", "s1", "", "old data", "[]", past.UTC().Format(time.RFC3339Nano), ttlSeconds)
+		"expired", "s1", "", "old data", "[]", past.UTC().Format(time.RFC3339Nano), ttlSeconds); err != nil {
+		t.Fatalf("insert expired entry: %v", err)
+	}
 
 	_, err := store.Retrieve(ctx, "expired")
 	if !errors.Is(err, ErrNotFound) {

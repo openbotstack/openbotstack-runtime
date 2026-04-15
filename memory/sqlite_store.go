@@ -82,12 +82,12 @@ func (s *SQLiteMemoryStore) Retrieve(ctx context.Context, id string) (*Entry, er
 	if ttlSeconds > 0 {
 		createdAt, _ := time.Parse(time.RFC3339Nano, createdAtStr)
 		if time.Since(createdAt) > time.Duration(ttlSeconds)*time.Second {
-			s.db.ExecContext(ctx, "DELETE FROM session_entries WHERE id = ?", id)
+			_, _ = s.db.ExecContext(ctx, "DELETE FROM session_entries WHERE id = ?", id)
 			return nil, ErrNotFound
 		}
 	}
 
-	json.Unmarshal([]byte(tagsJSON), &e.Tags)
+	_ = json.Unmarshal([]byte(tagsJSON), &e.Tags)
 	e.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAtStr)
 	if ttlSeconds > 0 {
 		e.TTL = time.Duration(ttlSeconds) * time.Second
@@ -113,7 +113,7 @@ func (s *SQLiteMemoryStore) ListBySession(ctx context.Context, sessionID string)
 	if err != nil {
 		return nil, fmt.Errorf("list session %s: %w", sessionID, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var entries []Entry
 	var expiredIDs []string
@@ -137,13 +137,13 @@ func (s *SQLiteMemoryStore) ListBySession(ctx context.Context, sessionID string)
 			e.TTL = time.Duration(ttlSeconds) * time.Second
 		}
 
-		json.Unmarshal([]byte(tagsJSON), &e.Tags)
+		_ = json.Unmarshal([]byte(tagsJSON), &e.Tags)
 		e.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAtStr)
 		entries = append(entries, e)
 	}
 
 	for _, id := range expiredIDs {
-		s.db.ExecContext(ctx, "DELETE FROM session_entries WHERE id = ?", id)
+		_, _ = s.db.ExecContext(ctx, "DELETE FROM session_entries WHERE id = ?", id)
 	}
 
 	return entries, rows.Err()

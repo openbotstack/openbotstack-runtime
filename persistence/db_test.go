@@ -10,7 +10,7 @@ func TestOpenInMemory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open in-memory: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	if err := db.Ping(); err != nil {
 		t.Fatalf("Ping: %v", err)
@@ -22,7 +22,7 @@ func TestMigrateCreatesTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	if err := db.Migrate(); err != nil {
 		t.Fatalf("Migrate: %v", err)
@@ -47,7 +47,7 @@ func TestMigrateIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	if err := db.Migrate(); err != nil {
 		t.Fatalf("first Migrate: %v", err)
@@ -62,7 +62,7 @@ func TestMigrateTenantColumn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	if err := db.Migrate(); err != nil {
 		t.Fatalf("Migrate: %v", err)
@@ -92,7 +92,7 @@ func TestMigrateTenantColumnBeforeMigrate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Calling MigrateTenantColumn before Migrate should return an error
 	// because the session_entries table does not exist yet.

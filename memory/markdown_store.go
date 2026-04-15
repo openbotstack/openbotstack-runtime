@@ -81,7 +81,7 @@ func (s *MarkdownMemoryStore) AppendMessage(ctx context.Context, msg agent.Sessi
 	if err != nil {
 		return fmt.Errorf("memory: failed to open session file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	data, err := io.ReadAll(f)
 	if err != nil {
@@ -214,7 +214,7 @@ func (s *MarkdownMemoryStore) StoreSummary(ctx context.Context, tenantID, userID
 	sessionFilePath := s.sessionPath(tenantID, userID, sessionID)
 	if sd, err := os.ReadFile(sessionFilePath); err == nil {
 		if m, _, _ := ParseFrontmatter(sd); m != nil {
-			fmt.Sscanf(m["message_count"], "%d", &msgCount)
+			_, _ = fmt.Sscanf(m["message_count"], "%d", &msgCount)
 		}
 	}
 
@@ -313,6 +313,6 @@ func validateID(id, kind string) error {
 // incrementCount parses and increments a count string.
 func incrementCount(s string) string {
 	var n int
-	fmt.Sscanf(s, "%d", &n)
+	_, _ = fmt.Sscanf(s, "%d", &n)
 	return fmt.Sprintf("%d", n+1)
 }

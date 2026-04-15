@@ -202,7 +202,7 @@ func main() {
 		slog.Error("failed to open database", "error", err)
 		os.Exit(1)
 	}
-	defer pdb.Close()
+	defer func() { _ = pdb.Close() }()
 	if err := pdb.Migrate(); err != nil {
 		slog.Error("failed to migrate database", "error", err)
 		os.Exit(1)

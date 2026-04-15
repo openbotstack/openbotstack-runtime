@@ -80,8 +80,14 @@ func TestVectorConfigDefaults(t *testing.T) {
 }
 
 func TestVectorConfigEnvOverride(t *testing.T) {
-	os.Setenv("OBS_VECTOR_DB_URL", "postgres://user:pass@localhost:5432/testdb")
-	defer os.Unsetenv("OBS_VECTOR_DB_URL")
+	if err := os.Setenv("OBS_VECTOR_DB_URL", "postgres://user:pass@localhost:5432/testdb"); err != nil {
+		t.Fatalf("Setenv: %v", err)
+	}
+	defer func() {
+		if err := os.Unsetenv("OBS_VECTOR_DB_URL"); err != nil {
+			t.Fatalf("Unsetenv: %v", err)
+		}
+	}()
 
 	cfg, err := Load("")
 	if err != nil {

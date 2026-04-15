@@ -129,11 +129,13 @@ func TestRetrieveSimilar_KeywordMatch(t *testing.T) {
 		{"assistant", "Kyoto is cloudy with 20°C."},
 	}
 	for _, m := range msgs {
-		store.AppendMessage(ctx, agent.SessionMessage{
+		if err := store.AppendMessage(ctx, agent.SessionMessage{
 			TenantID: "t1", UserID: "u1", SessionID: "s1",
 			Role: m.role, Content: m.content,
 			Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
-		})
+		}); err != nil {
+			t.Fatalf("AppendMessage: %v", err)
+		}
 	}
 
 	bridge := NewMarkdownMemoryBridge(store, nil)
@@ -169,11 +171,13 @@ func TestRetrieveSimilar_NoMatch(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	store.AppendMessage(ctx, agent.SessionMessage{
+	if err := store.AppendMessage(ctx, agent.SessionMessage{
 		TenantID: "t1", UserID: "u1", SessionID: "s1",
 		Role: "user", Content: "Hello world",
 		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
-	})
+	}); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
 
 	bridge := NewMarkdownMemoryBridge(store, nil)
 	scopeCtx := ScopeWithMemory(ctx, MemoryScope{TenantID: "t1", UserID: "u1", SessionID: "s1"})
@@ -211,16 +215,20 @@ func TestRetrieveByTag_BestEffort(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	store.AppendMessage(ctx, agent.SessionMessage{
+	if err := store.AppendMessage(ctx, agent.SessionMessage{
 		TenantID: "t1", UserID: "u1", SessionID: "s1",
 		Role: "user", Content: "I love golang programming",
 		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
-	})
-	store.AppendMessage(ctx, agent.SessionMessage{
+	}); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
+	if err := store.AppendMessage(ctx, agent.SessionMessage{
 		TenantID: "t1", UserID: "u1", SessionID: "s1",
 		Role: "assistant", Content: "Golang is great for systems programming",
 		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
-	})
+	}); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
 
 	bridge := NewMarkdownMemoryBridge(store, nil)
 	scopeCtx := ScopeWithMemory(ctx, MemoryScope{TenantID: "t1", UserID: "u1", SessionID: "s1"})
@@ -282,13 +290,17 @@ func TestSummarize_WithStoreAndSummarizer(t *testing.T) {
 
 	// Pre-store some messages so summarizer has content
 	ctx := context.Background()
-	store.AppendMessage(ctx, agent.SessionMessage{
+	if err := store.AppendMessage(ctx, agent.SessionMessage{
 		TenantID: "t1", UserID: "u1", SessionID: "s1",
 		Role: "user", Content: "Hello from test",
 		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
-	})
+	}); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
 	// Store a summary directly
-	store.StoreSummary(ctx, "t1", "u1", "s1", "Pre-existing summary of conversation")
+	if err := store.StoreSummary(ctx, "t1", "u1", "s1", "Pre-existing summary of conversation"); err != nil {
+		t.Fatalf("StoreSummary: %v", err)
+	}
 
 	// Use nil summarizer — but non-nil store triggers the GetSummary path
 	// when entries are passed with a valid scope context
@@ -369,11 +381,13 @@ func TestRetrieveSimilar_VectorSearchWithMock(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	store.AppendMessage(ctx, agent.SessionMessage{
+	if err := store.AppendMessage(ctx, agent.SessionMessage{
 		TenantID: "t1", UserID: "u1", SessionID: "s1",
 		Role: "user", Content: "keyword fallback content",
 		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
-	})
+	}); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
 
 	vectorStore := &mockVectorStoreForBridge{
 		results: []SearchResult{
@@ -431,16 +445,20 @@ func TestRetrieveSimilar_FallbackToKeyword(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	store.AppendMessage(ctx, agent.SessionMessage{
+	if err := store.AppendMessage(ctx, agent.SessionMessage{
 		TenantID: "t1", UserID: "u1", SessionID: "s1",
 		Role: "user", Content: "The weather in Tokyo is sunny today",
 		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
-	})
-	store.AppendMessage(ctx, agent.SessionMessage{
+	}); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
+	if err := store.AppendMessage(ctx, agent.SessionMessage{
 		TenantID: "t1", UserID: "u1", SessionID: "s1",
 		Role: "assistant", Content: "Great weather for sightseeing!",
 		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
-	})
+	}); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
 
 	// Vector store returns error → triggers keyword fallback
 	vectorStore := &mockVectorStoreForBridge{
@@ -487,11 +505,13 @@ func TestRetrieveSimilar_EmbeddingFailureFallsBack(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	store.AppendMessage(ctx, agent.SessionMessage{
+	if err := store.AppendMessage(ctx, agent.SessionMessage{
 		TenantID: "t1", UserID: "u1", SessionID: "s1",
 		Role: "user", Content: "Test content for keyword search",
 		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
-	})
+	}); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
 
 	// Embedding provider fails → triggers keyword fallback
 	embeddingSvc := NewEmbeddingService(
@@ -523,11 +543,13 @@ func TestRetrieveSimilar_VectorReturnsEmpty(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	store.AppendMessage(ctx, agent.SessionMessage{
+	if err := store.AppendMessage(ctx, agent.SessionMessage{
 		TenantID: "t1", UserID: "u1", SessionID: "s1",
 		Role: "user", Content: "keyword match content",
 		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
-	})
+	}); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
 
 	// Vector store returns empty results → falls back to keyword
 	vectorStore := &mockVectorStoreForBridge{results: nil}

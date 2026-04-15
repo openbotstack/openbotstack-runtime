@@ -63,7 +63,7 @@ func (l *SQLiteAuditLogger) Query(ctx context.Context, filter QueryFilter) ([]Ev
 	if err != nil {
 		return nil, fmt.Errorf("query audit logs: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var events []Event
 	for rows.Next() {
@@ -76,7 +76,7 @@ func (l *SQLiteAuditLogger) Query(ctx context.Context, filter QueryFilter) ([]Ev
 			return nil, fmt.Errorf("scan event: %w", err)
 		}
 		e.Duration = time.Duration(durationMs) * time.Millisecond
-		json.Unmarshal([]byte(metadataJSON), &e.Metadata)
+		_ = json.Unmarshal([]byte(metadataJSON), &e.Metadata)
 		e.Timestamp, _ = time.Parse(time.RFC3339Nano, timestampStr)
 		events = append(events, e)
 	}

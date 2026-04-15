@@ -27,7 +27,9 @@ func setupTestDB(t *testing.T) (*persistence.DB, string) {
 
 	// Generate a test key
 	keyBytes := make([]byte, 16)
-	rand.Read(keyBytes)
+	if _, err := rand.Read(keyBytes); err != nil {
+		t.Fatalf("rand.Read: %v", err)
+	}
 	fullKey := "obs_" + hex.EncodeToString(keyBytes)
 	hash := sha256.Sum256([]byte(fullKey))
 	hashHex := hex.EncodeToString(hash[:])
@@ -35,10 +37,16 @@ func setupTestDB(t *testing.T) (*persistence.DB, string) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 
 	// Insert test data
-	db.Exec("INSERT INTO tenants (id, name, created_at) VALUES (?, ?, ?)", "t1", "Test", now)
-	db.Exec("INSERT INTO users (id, tenant_id, name, role, created_at) VALUES (?, ?, ?, ?, ?)", "u1", "t1", "TestUser", "admin", now)
-	db.Exec("INSERT INTO api_keys (id, tenant_id, user_id, key_prefix, key_hash, name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		"k1", "t1", "u1", prefix, hashHex, "test", now)
+	if _, err := db.Exec("INSERT INTO tenants (id, name, created_at) VALUES (?, ?, ?)", "t1", "Test", now); err != nil {
+		t.Fatalf("insert tenant: %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO users (id, tenant_id, name, role, created_at) VALUES (?, ?, ?, ?, ?)", "u1", "t1", "TestUser", "admin", now); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO api_keys (id, tenant_id, user_id, key_prefix, key_hash, name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		"k1", "t1", "u1", prefix, hashHex, "test", now); err != nil {
+		t.Fatalf("insert api key: %v", err)
+	}
 
 	return db, fullKey
 }

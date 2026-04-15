@@ -57,8 +57,12 @@ func TestQueryByTimeRange(t *testing.T) {
 	past := time.Now().Add(-2 * time.Hour)
 	recent := time.Now()
 
-	logger.Log(ctx, Event{ID: "old", TenantID: "t1", Action: "test", Timestamp: past})
-	logger.Log(ctx, Event{ID: "new", TenantID: "t1", Action: "test", Timestamp: recent})
+	if err := logger.Log(ctx, Event{ID: "old", TenantID: "t1", Action: "test", Timestamp: past}); err != nil {
+		t.Fatalf("Log old: %v", err)
+	}
+	if err := logger.Log(ctx, Event{ID: "new", TenantID: "t1", Action: "test", Timestamp: recent}); err != nil {
+		t.Fatalf("Log new: %v", err)
+	}
 
 	from := time.Now().Add(-1 * time.Hour)
 	results, err := logger.Query(ctx, QueryFilter{TenantID: "t1", From: from})
@@ -79,8 +83,12 @@ func TestQueryByRequestID(t *testing.T) {
 	ctx := context.Background()
 
 	logger := NewSQLiteAuditLogger(db.DB)
-	logger.Log(ctx, Event{ID: "e1", TenantID: "t1", RequestID: "req-123", Action: "test", Timestamp: time.Now()})
-	logger.Log(ctx, Event{ID: "e2", TenantID: "t1", RequestID: "req-456", Action: "test", Timestamp: time.Now()})
+	if err := logger.Log(ctx, Event{ID: "e1", TenantID: "t1", RequestID: "req-123", Action: "test", Timestamp: time.Now()}); err != nil {
+		t.Fatalf("Log e1: %v", err)
+	}
+	if err := logger.Log(ctx, Event{ID: "e2", TenantID: "t1", RequestID: "req-456", Action: "test", Timestamp: time.Now()}); err != nil {
+		t.Fatalf("Log e2: %v", err)
+	}
 
 	results, err := logger.Query(ctx, QueryFilter{RequestID: "req-123"})
 	if err != nil {

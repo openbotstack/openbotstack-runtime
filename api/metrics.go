@@ -37,12 +37,12 @@ func (m *Metrics) IncErrors() {
 func (m *Metrics) Handler() http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-		fmt.Fprintf(w, "# HELP openbotstack_requests_total Total number of HTTP requests received.\n")
-		fmt.Fprintf(w, "# TYPE openbotstack_requests_total counter\n")
-		fmt.Fprintf(w, "openbotstack_requests_total %d\n", m.requestsTotal.Load())
-		fmt.Fprintf(w, "# HELP openbotstack_requests_errored_total Total number of HTTP requests that resulted in errors.\n")
-		fmt.Fprintf(w, "# TYPE openbotstack_requests_errored_total counter\n")
-		fmt.Fprintf(w, "openbotstack_requests_errored_total %d\n", m.requestsErrored.Load())
+		_, _ = fmt.Fprintf(w, "# HELP openbotstack_requests_total Total number of HTTP requests received.\n")
+		_, _ = fmt.Fprintf(w, "# TYPE openbotstack_requests_total counter\n")
+		_, _ = fmt.Fprintf(w, "openbotstack_requests_total %d\n", m.requestsTotal.Load())
+		_, _ = fmt.Fprintf(w, "# HELP openbotstack_requests_errored_total Total number of HTTP requests that resulted in errors.\n")
+		_, _ = fmt.Fprintf(w, "# TYPE openbotstack_requests_errored_total counter\n")
+		_, _ = fmt.Fprintf(w, "openbotstack_requests_errored_total %d\n", m.requestsErrored.Load())
 	}
 }
 

@@ -132,7 +132,9 @@ func TestConsumeExceedsLimit(t *testing.T) {
 	ctx := context.Background()
 
 	quotaStore := NewSQLiteQuotaStore(db.DB)
-	quotaStore.SetQuota(ctx, "t1", &ratelimit.QuotaConfig{TenantRequestsPerMinute: 5})
+	if err := quotaStore.SetQuota(ctx, "t1", &ratelimit.QuotaConfig{TenantRequestsPerMinute: 5}); err != nil {
+		t.Fatalf("SetQuota: %v", err)
+	}
 
 	err := limiter.Consume(ctx, ratelimit.RateLimitKey{TenantID: "t1"}, 10)
 	if !errors.Is(err, ratelimit.ErrRateLimitExceeded) {
@@ -190,11 +192,15 @@ func TestTokenRefill(t *testing.T) {
 	ctx := context.Background()
 
 	quotaStore := NewSQLiteQuotaStore(db.DB)
-	quotaStore.SetQuota(ctx, "t1", &ratelimit.QuotaConfig{TenantRequestsPerMinute: 60})
+	if err := quotaStore.SetQuota(ctx, "t1", &ratelimit.QuotaConfig{TenantRequestsPerMinute: 60}); err != nil {
+		t.Fatalf("SetQuota: %v", err)
+	}
 
 	pastTime := time.Now().Add(-30 * time.Second).UTC().Format(time.RFC3339Nano)
-	db.Exec(`INSERT INTO rate_limits (key, tokens, last_fill, rate_limit, window_start)
-		VALUES (?, 0, ?, 60, ?)`, "tenant:t1", pastTime, pastTime)
+	if _, err := db.Exec(`INSERT INTO rate_limits (key, tokens, last_fill, rate_limit, window_start)
+		VALUES (?, 0, ?, 60, ?)`, "tenant:t1", pastTime, pastTime); err != nil {
+		t.Fatalf("insert rate limit: %v", err)
+	}
 
 	limiter := NewSQLiteRateLimiter(db.DB, quotaStore)
 	remaining, err := limiter.Remaining(ctx, ratelimit.RateLimitKey{TenantID: "t1"})

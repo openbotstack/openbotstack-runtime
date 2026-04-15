@@ -129,7 +129,7 @@ func PrometheusHandler() http.Handler {
 	if exp == nil {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			w.Write([]byte("# OTel not initialized\n"))
+			_, _ = w.Write([]byte("# OTel not initialized\n"))
 		})
 	}
 	return promhttp.Handler()

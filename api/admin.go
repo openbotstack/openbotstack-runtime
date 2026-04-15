@@ -117,7 +117,7 @@ func (ar *AdminRouter) listTenants(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to list tenants")
 		return
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []map[string]string
 	for rows.Next() {
@@ -227,7 +227,7 @@ func (ar *AdminRouter) listUsers(w http.ResponseWriter, r *http.Request, tenantI
 		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to list users")
 		return
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []map[string]string
 	for rows.Next() {
@@ -366,7 +366,7 @@ func (ar *AdminRouter) listAPIKeys(w http.ResponseWriter, r *http.Request, userI
 		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to list keys")
 		return
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []map[string]interface{}
 	for rows.Next() {
@@ -430,5 +430,5 @@ func (ar *AdminRouter) handleRevokeKey(w http.ResponseWriter, r *http.Request) {
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	_ = json.NewEncoder(w).Encode(v)
 }

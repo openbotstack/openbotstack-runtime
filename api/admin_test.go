@@ -241,7 +241,9 @@ func TestListAPIKeys(t *testing.T) {
 		"name": "test-key",
 	})
 	var createBody map[string]string
-	json.NewDecoder(createResp.Body).Decode(&createBody)
+	if err := json.NewDecoder(createResp.Body).Decode(&createBody); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
 	fullKey := createBody["key"]
 
 	// Now list keys
@@ -288,7 +290,9 @@ func TestRevokeKey(t *testing.T) {
 		"name": "test-key",
 	})
 	var createBody map[string]string
-	json.NewDecoder(createResp.Body).Decode(&createBody)
+	if err := json.NewDecoder(createResp.Body).Decode(&createBody); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
 	keyID := createBody["id"]
 
 	// Revoke the key
@@ -324,7 +328,9 @@ func TestRevokedKeyCannotAuth(t *testing.T) {
 		"name": "test-key",
 	})
 	var createBody map[string]string
-	json.NewDecoder(createResp.Body).Decode(&createBody)
+	if err := json.NewDecoder(createResp.Body).Decode(&createBody); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
 	fullKey := createBody["key"]
 	keyID := createBody["id"]
 
@@ -473,7 +479,9 @@ func TestCreatedAPIKeyCanAuthenticate(t *testing.T) {
 		"name": "test-key",
 	})
 	var createBody map[string]string
-	json.NewDecoder(createResp.Body).Decode(&createBody)
+	if err := json.NewDecoder(createResp.Body).Decode(&createBody); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
 	fullKey := createBody["key"]
 
 	// Verify the key works with APIKeyMiddleware
