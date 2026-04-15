@@ -32,7 +32,7 @@ func setupLimiter(t *testing.T) (*SQLiteRateLimiter, *persistence.DB) {
 
 func TestAllowInvalidKey(t *testing.T) {
 	limiter, db := setupLimiter(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	_, err := limiter.Allow(context.Background(), ratelimit.RateLimitKey{})
 	if !errors.Is(err, ratelimit.ErrInvalidKey) {
@@ -42,7 +42,7 @@ func TestAllowInvalidKey(t *testing.T) {
 
 func TestAllowQuotaNotFound(t *testing.T) {
 	limiter, db := setupLimiter(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	key := ratelimit.RateLimitKey{TenantID: "unknown"}
 	_, err := limiter.Allow(context.Background(), key)
@@ -53,7 +53,7 @@ func TestAllowQuotaNotFound(t *testing.T) {
 
 func TestAllowWithinLimit(t *testing.T) {
 	limiter, db := setupLimiter(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ctx := context.Background()
 
 	quotaStore := NewSQLiteQuotaStore(db.DB)
@@ -76,7 +76,7 @@ func TestAllowWithinLimit(t *testing.T) {
 
 func TestAllowOverLimit(t *testing.T) {
 	limiter, db := setupLimiter(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ctx := context.Background()
 
 	quotaStore := NewSQLiteQuotaStore(db.DB)
@@ -104,7 +104,7 @@ func TestAllowOverLimit(t *testing.T) {
 
 func TestConsume(t *testing.T) {
 	limiter, db := setupLimiter(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ctx := context.Background()
 
 	quotaStore := NewSQLiteQuotaStore(db.DB)
@@ -128,7 +128,7 @@ func TestConsume(t *testing.T) {
 
 func TestConsumeExceedsLimit(t *testing.T) {
 	limiter, db := setupLimiter(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ctx := context.Background()
 
 	quotaStore := NewSQLiteQuotaStore(db.DB)
@@ -144,7 +144,7 @@ func TestConsumeExceedsLimit(t *testing.T) {
 
 func TestRemaining(t *testing.T) {
 	limiter, db := setupLimiter(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ctx := context.Background()
 
 	quotaStore := NewSQLiteQuotaStore(db.DB)
@@ -163,7 +163,7 @@ func TestRemaining(t *testing.T) {
 
 func TestReset(t *testing.T) {
 	limiter, db := setupLimiter(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ctx := context.Background()
 
 	quotaStore := NewSQLiteQuotaStore(db.DB)
@@ -188,7 +188,7 @@ func TestReset(t *testing.T) {
 
 func TestTokenRefill(t *testing.T) {
 	db := setupLimiterTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ctx := context.Background()
 
 	quotaStore := NewSQLiteQuotaStore(db.DB)

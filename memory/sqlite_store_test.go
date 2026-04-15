@@ -30,7 +30,7 @@ func ctxWithTenant(tenantID string) context.Context {
 
 func TestStoreAndRetrieve(t *testing.T) {
 	db := setupMemoryTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ctx := context.Background()
 
 	store := NewSQLiteMemoryStore(db.DB)
@@ -57,7 +57,7 @@ func TestStoreAndRetrieve(t *testing.T) {
 
 func TestRetrieveNotFound(t *testing.T) {
 	db := setupMemoryTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	store := NewSQLiteMemoryStore(db.DB)
 
 	_, err := store.Retrieve(context.Background(), "nonexistent")
@@ -68,7 +68,7 @@ func TestRetrieveNotFound(t *testing.T) {
 
 func TestListBySession(t *testing.T) {
 	db := setupMemoryTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ctx := context.Background()
 	store := NewSQLiteMemoryStore(db.DB)
 
@@ -93,11 +93,13 @@ func TestListBySession(t *testing.T) {
 
 func TestDelete(t *testing.T) {
 	db := setupMemoryTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ctx := context.Background()
 	store := NewSQLiteMemoryStore(db.DB)
 
-	store.Store(ctx, Entry{ID: "e1", SessionID: "s1", Content: "data", CreatedAt: time.Now()})
+	if err := store.Store(ctx, Entry{ID: "e1", SessionID: "s1", Content: "data", CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
 
 	if err := store.Delete(ctx, "e1"); err != nil {
 		t.Fatalf("Delete: %v", err)
@@ -111,13 +113,19 @@ func TestDelete(t *testing.T) {
 
 func TestClearSession(t *testing.T) {
 	db := setupMemoryTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ctx := context.Background()
 	store := NewSQLiteMemoryStore(db.DB)
 
-	store.Store(ctx, Entry{ID: "e1", SessionID: "s1", Content: "a", CreatedAt: time.Now()})
-	store.Store(ctx, Entry{ID: "e2", SessionID: "s1", Content: "b", CreatedAt: time.Now()})
-	store.Store(ctx, Entry{ID: "e3", SessionID: "s2", Content: "c", CreatedAt: time.Now()})
+	if err := store.Store(ctx, Entry{ID: "e1", SessionID: "s1", Content: "a", CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("Store e1: %v", err)
+	}
+	if err := store.Store(ctx, Entry{ID: "e2", SessionID: "s1", Content: "b", CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("Store e2: %v", err)
+	}
+	if err := store.Store(ctx, Entry{ID: "e3", SessionID: "s2", Content: "c", CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("Store e3: %v", err)
+	}
 
 	if err := store.ClearSession(ctx, "s1"); err != nil {
 		t.Fatalf("ClearSession: %v", err)
@@ -136,7 +144,7 @@ func TestClearSession(t *testing.T) {
 
 func TestTTLExpiry(t *testing.T) {
 	db := setupMemoryTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ctx := context.Background()
 	store := NewSQLiteMemoryStore(db.DB)
 
@@ -159,7 +167,7 @@ func TestTTLExpiry(t *testing.T) {
 
 func TestTenantIsolation_StoreAndRetrieve(t *testing.T) {
 	db := setupMemoryTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	store := NewSQLiteMemoryStore(db.DB)
 
 	ctxA := ctxWithTenant("tenant-a")
@@ -193,7 +201,7 @@ func TestTenantIsolation_StoreAndRetrieve(t *testing.T) {
 
 func TestTenantIsolation_ListBySession(t *testing.T) {
 	db := setupMemoryTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	store := NewSQLiteMemoryStore(db.DB)
 
 	ctxA := ctxWithTenant("tenant-a")
@@ -233,7 +241,7 @@ func TestTenantIsolation_ListBySession(t *testing.T) {
 
 func TestTenantIsolation_Delete(t *testing.T) {
 	db := setupMemoryTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	store := NewSQLiteMemoryStore(db.DB)
 
 	ctxA := ctxWithTenant("tenant-a")
@@ -270,7 +278,7 @@ func TestTenantIsolation_Delete(t *testing.T) {
 
 func TestTenantIsolation_ClearSession(t *testing.T) {
 	db := setupMemoryTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	store := NewSQLiteMemoryStore(db.DB)
 
 	ctxA := ctxWithTenant("tenant-a")
@@ -307,7 +315,7 @@ func TestTenantIsolation_ClearSession(t *testing.T) {
 
 func TestNoAuthContext(t *testing.T) {
 	db := setupMemoryTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	store := NewSQLiteMemoryStore(db.DB)
 
 	// No auth context - tenantFromCtx returns ""

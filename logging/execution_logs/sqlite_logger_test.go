@@ -22,7 +22,7 @@ func setupAuditTestDB(t *testing.T) *persistence.DB {
 
 func TestLogAndQuery(t *testing.T) {
 	db := setupAuditTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ctx := context.Background()
 
 	logger := NewSQLiteAuditLogger(db.DB)
@@ -49,7 +49,7 @@ func TestLogAndQuery(t *testing.T) {
 
 func TestQueryByTimeRange(t *testing.T) {
 	db := setupAuditTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ctx := context.Background()
 
 	logger := NewSQLiteAuditLogger(db.DB)
@@ -79,7 +79,7 @@ func TestQueryByTimeRange(t *testing.T) {
 
 func TestQueryByRequestID(t *testing.T) {
 	db := setupAuditTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ctx := context.Background()
 
 	logger := NewSQLiteAuditLogger(db.DB)
@@ -101,13 +101,19 @@ func TestQueryByRequestID(t *testing.T) {
 
 func TestCount(t *testing.T) {
 	db := setupAuditTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ctx := context.Background()
 
 	logger := NewSQLiteAuditLogger(db.DB)
-	logger.Log(ctx, Event{ID: "e1", TenantID: "t1", Action: "a", Timestamp: time.Now()})
-	logger.Log(ctx, Event{ID: "e2", TenantID: "t1", Action: "b", Timestamp: time.Now()})
-	logger.Log(ctx, Event{ID: "e3", TenantID: "t2", Action: "a", Timestamp: time.Now()})
+	if err := logger.Log(ctx, Event{ID: "e1", TenantID: "t1", Action: "a", Timestamp: time.Now()}); err != nil {
+		t.Fatalf("Log e1: %v", err)
+	}
+	if err := logger.Log(ctx, Event{ID: "e2", TenantID: "t1", Action: "b", Timestamp: time.Now()}); err != nil {
+		t.Fatalf("Log e2: %v", err)
+	}
+	if err := logger.Log(ctx, Event{ID: "e3", TenantID: "t2", Action: "a", Timestamp: time.Now()}); err != nil {
+		t.Fatalf("Log e3: %v", err)
+	}
 
 	count, err := logger.Count(ctx, QueryFilter{TenantID: "t1"})
 	if err != nil {
@@ -120,7 +126,7 @@ func TestCount(t *testing.T) {
 
 func TestQueryEmptyResult(t *testing.T) {
 	db := setupAuditTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	logger := NewSQLiteAuditLogger(db.DB)
 	results, err := logger.Query(context.Background(), QueryFilter{TenantID: "nonexistent"})

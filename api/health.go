@@ -115,7 +115,7 @@ func (c *ProviderHealthChecker) Check(ctx context.Context) ComponentHealth {
 	}
 	// Drain body to allow connection reuse in the transport pool.
 	_, _ = io.Copy(io.Discard, resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return ComponentHealth{Status: "healthy", DurationMs: durationMs}

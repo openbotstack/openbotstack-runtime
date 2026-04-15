@@ -23,7 +23,7 @@ func setupQuotaTestDB(t *testing.T) *persistence.DB {
 
 func TestGetQuotaNotFound(t *testing.T) {
 	db := setupQuotaTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	store := NewSQLiteQuotaStore(db.DB)
 	_, err := store.GetQuota(context.Background(), "nonexistent")
@@ -34,7 +34,7 @@ func TestGetQuotaNotFound(t *testing.T) {
 
 func TestSetAndGetQuota(t *testing.T) {
 	db := setupQuotaTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	store := NewSQLiteQuotaStore(db.DB)
 	ctx := context.Background()
@@ -71,7 +71,7 @@ func TestSetAndGetQuota(t *testing.T) {
 
 func TestSetQuotaUpdates(t *testing.T) {
 	db := setupQuotaTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	store := NewSQLiteQuotaStore(db.DB)
 	ctx := context.Background()

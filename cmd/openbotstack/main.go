@@ -277,7 +277,7 @@ func main() {
 			pgPool.Close()
 			os.Exit(1)
 		}
-		defer pgPool.Close()
+		defer pgPool.Close() //nolint:errcheck // cleanup on shutdown
 
 		vectorStore := memory.NewPgVectorStore(pgPool, cfg.Vector.Dimensions)
 		if err := vectorStore.Migrate(context.Background()); err != nil {

@@ -11,7 +11,7 @@ func TestSeedDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	if err := db.Migrate(); err != nil {
 		t.Fatalf("Migrate: %v", err)
@@ -94,7 +94,7 @@ func TestSeedDefaultsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	if err := db.Migrate(); err != nil {
 		t.Fatalf("Migrate: %v", err)

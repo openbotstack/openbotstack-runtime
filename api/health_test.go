@@ -43,7 +43,9 @@ func TestHealthzEndpoint(t *testing.T) {
 		t.Errorf("Expected 200, got %d", w.Code)
 	}
 	var body map[string]string
-	json.NewDecoder(w.Body).Decode(&body)
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
 	if body["status"] != "healthy" {
 		t.Errorf("Expected 'healthy', got '%s'", body["status"])
 	}
@@ -65,7 +67,9 @@ func TestReadyzAllHealthy(t *testing.T) {
 		t.Errorf("Expected 200, got %d", w.Code)
 	}
 	var report HealthReport
-	json.NewDecoder(w.Body).Decode(&report)
+	if err := json.NewDecoder(w.Body).Decode(&report); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
 	if report.Status != "healthy" {
 		t.Errorf("Expected 'healthy', got '%s'", report.Status)
 	}
@@ -90,7 +94,9 @@ func TestReadyzUnhealthyComponent(t *testing.T) {
 		t.Errorf("Expected 503, got %d", w.Code)
 	}
 	var report HealthReport
-	json.NewDecoder(w.Body).Decode(&report)
+	if err := json.NewDecoder(w.Body).Decode(&report); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
 	if report.Status != "unhealthy" {
 		t.Errorf("Expected 'unhealthy', got '%s'", report.Status)
 	}

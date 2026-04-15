@@ -147,7 +147,7 @@ func TestFullSystem(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
 	}))
-	defer mockLLM.Close()
+	defer mockLLM.Close() //nolint:errcheck // test cleanup
 
 	// 3. Start Server with Env Vars pointing to Mock LLM
 	ctx, cancel := context.WithCancel(context.Background())

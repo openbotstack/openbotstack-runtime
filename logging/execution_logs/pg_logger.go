@@ -109,7 +109,7 @@ func (l *PGAuditLogger) Query(ctx context.Context, filter QueryFilter) ([]Event,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck // Close on sql.Rows has no return value
 
 	var events []Event
 	for rows.Next() {
