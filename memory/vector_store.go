@@ -159,7 +159,7 @@ func (s *PgVectorStore) Search(ctx context.Context, query []float32, opts Search
 	if err != nil {
 		return nil, fmt.Errorf("vector search: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck // Close on sql.Rows has no return value
+	defer rows.Close() //nolint:errcheck // pgx.Rows.Close() has no return value
 
 	var results []SearchResult
 	for rows.Next() {
