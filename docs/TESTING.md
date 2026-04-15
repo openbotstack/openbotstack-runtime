@@ -3,98 +3,91 @@
 ## Quick Reference
 
 ```bash
-# Run all unit tests (125+ tests)
+# Run all unit tests (440+ tests)
 make test
 
-# Run integration tests (requires API Key)
-export MODELSCOPE_API_KEY=your_key
-make test-integration
+# Run with race detector
+make test-race
 
-# Run specific categories
-make test-wasm       # Wasm runtime
-make test-executor   # Skill executor
-make test-skills     # Skill examples
-```
+# Run with coverage
+make test-cover
 
-## Integration Tests
-
-Integration tests run against real external services (ModelScope LLM).
-They are guarded by `//go:build integration` tags.
-
-### Prerequisites
-- ModelScope API Key
-- Internet connection
-
-### Running
-```bash
-export MODELSCOPE_API_KEY=ms-...
-make test-integration
+# Run specific packages
+go test -v ./api/...
+go test -v ./api/middleware/...
+go test -v ./memory/...
+go test -v ./sandbox/...
+go test -v ./integration/...
 ```
 
 ## Test Categories
 
-### Core Runtime Tests
+### API Layer
 
-| Package | Tests | Description |
-|---------|-------|-------------|
-| wasm | 19 | Wasm runtime, module loading, execution, Host API |
-| executor | 19 | Skill lifecycle, execution, Wasm integration |
-| api | 8 | HTTP handlers, routing |
-| audit | 6 | Audit logging |
-| memory | 4 | Redis/Milvus adapters |
-| ratelimit | 5 | Rate limiting |
-| worker | 4 | Background workers |
-| e2e | 3 | End-to-end tests |
+| Package | Description |
+|---------|-------------|
+| api | Router, Chat, SSE streaming, Skills, Executions, Sessions, Health, Errors |
+| api/middleware | CORS, Rate Limiting, API Key Auth, JWT Auth, Admin Role, Error Helper |
+
+### Memory Layer
+
+| Package | Description |
+|---------|-------------|
+| memory | Markdown store, SQLite store, Summarizer, Bridge, Async indexer, Embedding service, Checkpoints |
+
+### Execution Layer
+
+| Package | Description |
+|---------|-------------|
+| sandbox/wasm | Wasm runtime, Host API, Sandboxed HTTP |
+| executor | Skill lifecycle, execution, workflow queue |
+| ratelimit | SQLite rate limiter, quota store |
+| persistence | SQLite database, migrations, seeding |
+| config | Configuration loading, env vars |
+| loop | Outer/inner loop, checkpoints, stop conditions, context compaction |
+| context | Context assembler |
+| toolrunner | Tool runner, invocation pipeline |
+| observability | OTel SDK, Prometheus metrics |
 
 ### Skill Example Tests
 
-| Skill | Type | Tests | Description |
-|-------|------|-------|-------------|
-| hello-world | Deterministic | 9 | Basic input/output |
-| sentiment | LLM-Assisted | 6 | Sentiment analysis |
-| tax-calculator | Deterministic | 9 | Tax calculation |
+| Skill | Type | Description |
+|-------|------|-------------|
+| hello-world | Deterministic | Basic input/output |
+| sentiment | LLM-Assisted | Sentiment analysis |
+| tax-calculator | Deterministic | Tax calculation |
+| math-add | Deterministic | Math operations |
+| wordcount | Deterministic | Word counting |
+| meeting-summarize | Declarative | Meeting summarization |
 
-## Wasm Execution Tests
+### Integration Tests
 
-Real Wasm execution is verified by:
+| File | Description |
+|------|-------------|
+| full_system_test.go | Full system test with mock LLM, auto-builds binary |
+| error_test.go | JSON error response format validation |
+| streaming_test.go | SSE streaming format and error handling |
 
-```go
-// wasm/runtime_integration_test.go
-TestRuntimeExecuteWithStartExport   // ✅ Executes _start
-TestRuntimeExecuteWithExecuteExport // ✅ Executes execute
-TestRuntimeExecuteInvalidWasm       // ✅ Error handling
-TestRuntimeConcurrent               // ✅ 10 concurrent executions
+## Running Integration Tests
 
-// executor/executor_test.go  
-TestExecuteWithRealWasm              // ✅ End-to-end skill execution
-TestExecuteWithLoadSkillWithWasm     // ✅ Load + execute workflow
-```
+Integration tests require the server to be running. The binary is built automatically.
 
-## Host API Tests
+```bash
+# Run integration tests (auto-builds binary)
+go test -v ./integration/ -timeout 120s
 
-```go
-// wasm/hostapi_test.go
-TestHostFunctionsInputOutput  // Input/output buffer management
-TestHostFunctionsLLMGenerate  // LLM integration (Unit)
-TestHostFunctionsKV           // Key-value store
-TestHostFunctionsLog          // Structured logging
-
-// llm/client_integration_test.go (Integration)
-TestModelScopeIntegration     // ✅ Real LLM call
-TestModelScopeSentimentAnalysis // ✅ Real sentiment analysis
+# Or use the existing full system test
+go test -v ./integration/ -run TestFullSystem
 ```
 
 ## CI Integration
 
-GitHub Actions should run:
+GitHub Actions configuration:
 
 ```yaml
-- name: Test Unit
-  run: make test-race test-cover
+- name: Test
+  run: make test-race
 
-- name: Test Integration
-  if: env.MODELSCOPE_API_KEY != ''
-  run: make test-integration
-  env:
-    MODELSCOPE_API_KEY: ${{ secrets.MODELSCOPE_API_KEY }}
+- name: Integration Test
+  run: go test -v ./integration/ -timeout 120s
 ```
