@@ -1,0 +1,16 @@
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - ineffassign
+
+issues:
+  # Exclude test files from errcheck
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
