@@ -19,3 +19,9 @@ observability:
   log_level: "info"
   otel_enabled: false
   otel_endpoint: ""
+
+memory:
+  data_dir: "./data"
+  summary_threshold: 20
+  summary_enabled: true
+  max_history_messages: 50

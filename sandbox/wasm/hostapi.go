@@ -62,8 +62,15 @@ func RegisterHostFunctions(ctx context.Context, r wazero.Runtime, hf *HostFuncti
 			if len(hf.inputBuffer) == 0 {
 				return 0
 			}
-			m.Memory().Write(ptr, hf.inputBuffer)
-			return uint32(len(hf.inputBuffer))
+			memSize := m.Memory().Size()
+			n := uint32(len(hf.inputBuffer))
+			if ptr >= memSize || ptr+n < ptr || ptr+n > memSize {
+				return 0xFFFFFFFF
+			}
+			if ok := m.Memory().Write(ptr, hf.inputBuffer); !ok {
+				return 0xFFFFFFFF
+			}
+			return n
 		}).
 		Export("get_input").
 		// set_output copies output data from guest memory
@@ -89,8 +96,16 @@ func RegisterHostFunctions(ctx context.Context, r wazero.Runtime, hf *HostFuncti
 				return 0
 			}
 
-			m.Memory().Write(resultPtr, []byte(result))
-			return uint32(len(result))
+			resultBytes := []byte(result)
+			memSize := m.Memory().Size()
+			n := uint32(len(resultBytes))
+			if resultPtr >= memSize || resultPtr+n < resultPtr || resultPtr+n > memSize {
+				return 0xFFFFFFFF
+			}
+			if ok := m.Memory().Write(resultPtr, resultBytes); !ok {
+				return 0xFFFFFFFF
+			}
+			return n
 		}).
 		Export("llm_generate").
 		// kv_get retrieves a value
@@ -106,8 +121,15 @@ func RegisterHostFunctions(ctx context.Context, r wazero.Runtime, hf *HostFuncti
 				return 0
 			}
 
-			m.Memory().Write(valuePtr, value)
-			return uint32(len(value))
+			memSize := m.Memory().Size()
+			n := uint32(len(value))
+			if valuePtr >= memSize || valuePtr+n < valuePtr || valuePtr+n > memSize {
+				return 0xFFFFFFFF
+			}
+			if ok := m.Memory().Write(valuePtr, value); !ok {
+				return 0xFFFFFFFF
+			}
+			return n
 		}).
 		Export("kv_get").
 		// kv_set stores a value
@@ -139,7 +161,68 @@ func RegisterHostFunctions(ctx context.Context, r wazero.Runtime, hf *HostFuncti
 			}
 		}).
 		Export("log").
-		Instantiate(ctx)
+			// http_fetch performs a sandboxed HTTP request.
+			// Response layout at respPtr: [4 bytes status code (little-endian)] [body bytes].
+			// Return value: upper 16 bits = HTTP status code, lower 16 bits = body length.
+			NewFunctionBuilder().
+			WithFunc(func(ctx context.Context, m api.Module, urlPtr, urlLen, methodPtr, methodLen, bodyPtr, bodyLen, respPtr uint32) uint32 {
+				if hf.HTTPFetch == nil {
+					return 0
+				}
+
+				urlBytes, ok := m.Memory().Read(urlPtr, urlLen)
+				if !ok {
+					return 0
+				}
+				methodBytes, ok := m.Memory().Read(methodPtr, methodLen)
+				if !ok {
+					return 0
+				}
+				var body []byte
+				if bodyLen > 0 {
+					bodyBytes, ok := m.Memory().Read(bodyPtr, bodyLen)
+					if !ok {
+						return 0
+					}
+					body = bodyBytes
+				}
+
+				respBody, statusCode, err := hf.HTTPFetch(ctx, string(urlBytes), string(methodBytes), body)
+				if err != nil {
+					return 0
+				}
+
+				// Cap response body to 1MB to prevent host panic on unbounded Memory.Write
+				const maxRespSize = 1 << 20
+				if len(respBody) > maxRespSize {
+					respBody = respBody[:maxRespSize]
+				}
+
+				// Validate buffer bounds before writing to prevent silent data loss.
+				// Memory.Write returns false on out-of-bounds but we check explicitly
+				// to avoid ambiguity with the return value 0 used for other errors.
+				memSize := m.Memory().Size()
+				required := uint32(4 + len(respBody))
+				if respPtr >= memSize || respPtr+required < respPtr || respPtr+required > memSize {
+					return 0xFFFFFFFF // sentinel: buffer overflow
+				}
+
+				// Write status code as 4 bytes (little-endian) at respPtr
+				if ok := m.Memory().Write(respPtr, []byte{
+					byte(statusCode), byte(statusCode >> 8),
+					byte(statusCode >> 16), byte(statusCode >> 24),
+				}); !ok {
+					return 0xFFFFFFFF
+				}
+				// Write body after status code
+				if ok := m.Memory().Write(respPtr+4, respBody); !ok {
+					return 0xFFFFFFFF
+				}
+
+				return (uint32(statusCode&0xFFFF) << 16) | uint32(len(respBody)&0xFFFF)
+			}).
+			Export("http_fetch").
+			Instantiate(ctx)
 
 	return err
 }
