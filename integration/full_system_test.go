@@ -25,14 +25,34 @@ const (
 	serverURL  = "http://localhost:8888"
 )
 
-func TestFullSystem(t *testing.T) {
-	// 1. Setup: Ensure binary exists
+func buildBinary(t *testing.T) string {
+	t.Helper()
 	absBinaryPath, _ := filepath.Abs(binaryPath)
 	absRepoRoot, _ := filepath.Abs(repoRoot)
 
-	if _, err := os.Stat(absBinaryPath); os.IsNotExist(err) {
-		t.Fatalf("Binary not found at %s (abs: %s). Run 'make binary' first.", binaryPath, absBinaryPath)
+	// Try existing binary first
+	if info, err := os.Stat(absBinaryPath); err == nil && !info.IsDir() {
+		return absBinaryPath
 	}
+
+	// Build on demand
+	t.Log("Building binary for integration test...")
+	buildDir := filepath.Dir(absBinaryPath)
+	os.MkdirAll(buildDir, 0o755)
+
+	buildCmd := exec.Command("go", "build", "-o", absBinaryPath, "./cmd/openbotstack")
+	buildCmd.Dir = absRepoRoot
+	buildCmd.Stdout = os.Stdout
+	buildCmd.Stderr = os.Stderr
+	if err := buildCmd.Run(); err != nil {
+		t.Fatalf("Failed to build binary: %v", err)
+	}
+	return absBinaryPath
+}
+
+func TestFullSystem(t *testing.T) {
+	// 1. Setup: Ensure binary exists (auto-build if needed)
+	absBinaryPath := buildBinary(t)
 
 	// 2. Mock LLM Server
 	mockLLM := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -131,6 +151,7 @@ func TestFullSystem(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	absRepoRoot, _ := filepath.Abs(repoRoot)
 	cmd := exec.CommandContext(ctx, absBinaryPath, "--addr=:8888")
 	cmd.Dir = absRepoRoot
 	cmd.Stdout = os.Stdout
