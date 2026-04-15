@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"github.com/openbotstack/openbotstack-core/registry/skills"
@@ -41,7 +42,13 @@ func skillTypeFromID(s skills.Skill) string {
 
 func (r *Router) handleSkills(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		slog.WarnContext(req.Context(), "request validation error",
+			"method", req.Method,
+			"path", req.URL.Path,
+			"status", http.StatusMethodNotAllowed,
+			"error", "method not allowed",
+		)
+		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
 		return
 	}
 
@@ -100,7 +107,13 @@ type ExecutionRecord struct {
 
 func (r *Router) handleExecutions(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		slog.WarnContext(req.Context(), "request validation error",
+			"method", req.Method,
+			"path", req.URL.Path,
+			"status", http.StatusMethodNotAllowed,
+			"error", "method not allowed",
+		)
+		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
 		return
 	}
 
@@ -112,7 +125,13 @@ func (r *Router) handleExecutions(w http.ResponseWriter, req *http.Request) {
 
 	records, err := r.execStore.QueryExecutions(req.Context(), 50)
 	if err != nil {
-		http.Error(w, "failed to query executions", http.StatusInternalServerError)
+		slog.ErrorContext(req.Context(), "handler error",
+			"method", req.Method,
+			"path", req.URL.Path,
+			"status", http.StatusInternalServerError,
+			"error", err,
+		)
+		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to query executions")
 		return
 	}
 

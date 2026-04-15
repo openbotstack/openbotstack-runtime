@@ -4,6 +4,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -143,19 +144,37 @@ func (r *Router) registerRoutes() {
 
 func (r *Router) handleChat(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		slog.WarnContext(req.Context(), "request validation error",
+			"method", req.Method,
+			"path", req.URL.Path,
+			"status", http.StatusMethodNotAllowed,
+			"error", "method not allowed",
+		)
+		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
 		return
 	}
 
 	var chatReq ChatRequest
 	if err := json.NewDecoder(req.Body).Decode(&chatReq); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		slog.WarnContext(req.Context(), "request validation error",
+			"method", req.Method,
+			"path", req.URL.Path,
+			"status", http.StatusBadRequest,
+			"error", "invalid request body",
+		)
+		writeAPIError(w, http.StatusBadRequest, ErrInvalidRequest, "invalid request body")
 		return
 	}
 
 	// Delegate entirely to Agent - NO skill selection logic here
 	if r.agent == nil {
-		http.Error(w, "agent not configured", http.StatusServiceUnavailable)
+		slog.ErrorContext(req.Context(), "handler error",
+			"method", req.Method,
+			"path", req.URL.Path,
+			"status", http.StatusServiceUnavailable,
+			"error", "agent not configured",
+		)
+		writeAPIError(w, http.StatusServiceUnavailable, ErrAgentNotConfigured, "agent not configured")
 		return
 	}
 
@@ -175,7 +194,13 @@ func (r *Router) handleChat(w http.ResponseWriter, req *http.Request) {
 	agentResp, err := r.agent.HandleMessage(req.Context(), agentReq)
 	if err != nil {
 		// Agent handles errors gracefully, but in case of critical failure
-		http.Error(w, "internal error: "+err.Error(), http.StatusInternalServerError)
+		slog.ErrorContext(req.Context(), "handler error",
+			"method", req.Method,
+			"path", req.URL.Path,
+			"status", http.StatusInternalServerError,
+			"error", err,
+		)
+		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "internal error")
 		return
 	}
 
@@ -194,7 +219,13 @@ func (r *Router) handleSessions(w http.ResponseWriter, req *http.Request) {
 	path := strings.TrimPrefix(req.URL.Path, "/v1/sessions/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 2 || parts[1] != "history" {
-		http.Error(w, "not found", http.StatusNotFound)
+		slog.WarnContext(req.Context(), "request validation error",
+			"method", req.Method,
+			"path", req.URL.Path,
+			"status", http.StatusNotFound,
+			"error", "not found",
+		)
+		writeAPIError(w, http.StatusNotFound, ErrNotFound, "not found")
 		return
 	}
 
@@ -205,7 +236,13 @@ func (r *Router) handleSessions(w http.ResponseWriter, req *http.Request) {
 		var err error
 		messages, err = r.history.GetSessionHistory(req.Context(), sessionID)
 		if err != nil {
-			http.Error(w, "failed to get session history", http.StatusInternalServerError)
+			slog.ErrorContext(req.Context(), "handler error",
+				"method", req.Method,
+				"path", req.URL.Path,
+				"status", http.StatusInternalServerError,
+				"error", err,
+			)
+			writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to get session history")
 			return
 		}
 	}
