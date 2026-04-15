@@ -23,7 +23,7 @@ func setupAdminTest(t *testing.T) (*persistence.DB, http.Handler) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { _ = db.Close() })
 	if err := db.Migrate(); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}

@@ -208,9 +208,15 @@ func TestTenantIsolation_ListBySession(t *testing.T) {
 	ctxB := ctxWithTenant("tenant-b")
 
 	// Store entries for tenant A and tenant B in the same session
-	store.Store(ctxA, Entry{ID: "e1", SessionID: "s1", Content: "tenant-a-first", CreatedAt: time.Now()})
-	store.Store(ctxB, Entry{ID: "e2", SessionID: "s1", Content: "tenant-b-data", CreatedAt: time.Now()})
-	store.Store(ctxA, Entry{ID: "e3", SessionID: "s1", Content: "tenant-a-second", CreatedAt: time.Now()})
+	if err := store.Store(ctxA, Entry{ID: "e1", SessionID: "s1", Content: "tenant-a-first", CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("Store e1: %v", err)
+	}
+	if err := store.Store(ctxB, Entry{ID: "e2", SessionID: "s1", Content: "tenant-b-data", CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("Store e2: %v", err)
+	}
+	if err := store.Store(ctxA, Entry{ID: "e3", SessionID: "s1", Content: "tenant-a-second", CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("Store e3: %v", err)
+	}
 
 	// List as tenant A - should only see tenant A entries
 	entriesA, err := store.ListBySession(ctxA, "s1")

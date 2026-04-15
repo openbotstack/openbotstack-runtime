@@ -132,7 +132,9 @@ func TestVersionEndpoint(t *testing.T) {
 		t.Errorf("Expected 200, got %d", w.Code)
 	}
 	var info BuildInfo
-	json.NewDecoder(w.Body).Decode(&info)
+	if err := json.NewDecoder(w.Body).Decode(&info); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
 	if info.Version != "1.0.0" {
 		t.Errorf("Expected version '1.0.0', got '%s'", info.Version)
 	}
@@ -153,7 +155,9 @@ func TestVersionEndpointDevDefaults(t *testing.T) {
 		t.Errorf("Expected 200, got %d", w.Code)
 	}
 	var info BuildInfo
-	json.NewDecoder(w.Body).Decode(&info)
+	if err := json.NewDecoder(w.Body).Decode(&info); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
 	if info.Version != "" {
 		t.Errorf("Expected empty version for dev, got '%s'", info.Version)
 	}
