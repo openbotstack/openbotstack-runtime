@@ -37,9 +37,12 @@ import (
 	executor "github.com/openbotstack/openbotstack-runtime/executor/skill_executor"
 	audit "github.com/openbotstack/openbotstack-runtime/logging/execution_logs"
 	"github.com/openbotstack/openbotstack-runtime/memory"
+	contextassembler "github.com/openbotstack/openbotstack-runtime/context"
 	"github.com/openbotstack/openbotstack-runtime/observability"
 	"github.com/openbotstack/openbotstack-runtime/persistence"
 	"github.com/openbotstack/openbotstack-runtime/ratelimit"
+	"github.com/openbotstack/openbotstack-runtime/toolrunner"
+	"github.com/openbotstack/openbotstack-runtime/toolrunner/tool_invocation"
 	"github.com/openbotstack/openbotstack-runtime/sandbox/wasm"
 	"github.com/openbotstack/openbotstack-runtime/web/webui"
 
@@ -47,6 +50,7 @@ import (
 	"github.com/openbotstack/openbotstack-core/ai/providers"
 	"github.com/openbotstack/openbotstack-core/ai/router"
 	"github.com/openbotstack/openbotstack-core/control/skills"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
@@ -220,7 +224,8 @@ func main() {
 
 	// Initialize stores with SQLite
 	memoryStore := memory.NewSQLiteMemoryStore(pdb.DB)
-	_ = ratelimit.NewSQLiteQuotaStore(pdb.DB) // wired when rate limiting middleware is added
+	quotaStore := ratelimit.NewSQLiteQuotaStore(pdb.DB)
+	rateLimiter := ratelimit.NewSQLiteRateLimiter(pdb.DB, quotaStore)
 
 	// Create Assistant Identity (Runtime)
 	// In a real system, these would be loaded from a database based on the request context.
@@ -231,6 +236,83 @@ func main() {
 
 	// Create Agent (orchestrates Planner + Executor)
 	apiAgent := agent.NewDefaultAgent(planner, exec, exec, art)
+
+	// Initialize Markdown Memory Store (3+1 layered model)
+	markdownStore, err := memory.NewMarkdownMemoryStore(cfg.Memory.DataDir)
+	if err != nil {
+		slog.Error("failed to create markdown memory store", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("markdown memory store initialized", "data_dir", cfg.Memory.DataDir)
+
+	// Wrap with summarizer if enabled
+	var convStore agent.ConversationStore = markdownStore
+	if cfg.Memory.SummaryEnabled {
+		summarizer := memory.NewConversationSummarizer(markdownStore, modelRouter, cfg.Memory.SummaryThreshold)
+		convStore = memory.NewSummarizingConversationStore(markdownStore, summarizer)
+		slog.Info("conversation summarization enabled", "threshold", cfg.Memory.SummaryThreshold)
+	}
+	apiAgent.SetConversationStore(convStore)
+	apiAgent.SetMaxHistoryMessages(cfg.Memory.MaxHistoryMessages)
+
+	// Initialize MemoryManager Bridge (markdown-first, optional vector search)
+	memoryBridge := memory.NewMarkdownMemoryBridge(markdownStore, nil)
+
+	// Initialize optional vector search layer (requires PostgreSQL + pgvector)
+	if cfg.Vector.Enabled && cfg.Vector.DatabaseURL != "" {
+		pgPool, err := pgxpool.New(context.Background(), cfg.Vector.DatabaseURL)
+		if err != nil {
+			slog.Error("failed to parse vector database URL", "error", err)
+			os.Exit(1)
+		}
+		// Validate the connection actually works (pgxpool.New doesn't ping)
+		if err := pgPool.Ping(context.Background()); err != nil {
+			slog.Error("failed to connect to vector database", "error", err)
+			pgPool.Close()
+			os.Exit(1)
+		}
+		defer pgPool.Close()
+
+		vectorStore := memory.NewPgVectorStore(pgPool, cfg.Vector.Dimensions)
+		if err := vectorStore.Migrate(context.Background()); err != nil {
+			slog.Error("failed to migrate vector store", "error", err)
+			os.Exit(1)
+		}
+
+		embeddingSvc := memory.NewEmbeddingService(modelRouter, cfg.Vector.Model, cfg.Vector.Dimensions)
+		memoryBridge.SetVectorStore(vectorStore)
+		memoryBridge.SetEmbeddingService(embeddingSvc)
+
+		// Wire async indexer into message pipeline
+		indexer := memory.NewAsyncEmbeddingIndexer(embeddingSvc, vectorStore)
+		_ = indexer // Will be wired into conversation store wrapper
+		slog.Info("vector search enabled",
+			"model", cfg.Vector.Model,
+			"dimensions", cfg.Vector.Dimensions,
+		)
+	} else {
+		slog.Info("vector search disabled (keyword matching only)")
+	}
+
+	// Initialize ContextAssembler (persona + memory -> prompt enrichment)
+	contextAssembler := contextassembler.NewRuntimeContextAssembler(exec, memoryBridge)
+	apiAgent.SetContextAssembler(contextAssembler)
+	slog.Info("context assembler initialized")
+
+	// Wire Tool Invocation Pipeline for Wasm skill HTTP access.
+	// WireHTTPFetch must be called AFTER RegisterHostFunctions because both share
+	// the same hostFuncs pointer. The Wasm host module closures dereference hf at
+	// call time, so setting HTTPFetch here is visible to already-registered functions.
+	httpAllowlist := wasm.NewHTTPAllowlist(cfg.Sandbox.HTTPAllowlist)
+	sandboxedClient := wasm.NewSandboxedHTTPClientWithSSRF(httpAllowlist, nil)
+	registryClient := toolrunner.NewRegistryClient(cfg.Sandbox.ToolRegistryURL)
+	toolPipeline := tool_invocation.NewToolInvocationPipeline(sandboxedClient, registryClient, 30*time.Second)
+	tool_invocation.WireHTTPFetch(hostFuncs, toolPipeline)
+	slog.Info("tool invocation pipeline wired",
+		"allowlist", cfg.Sandbox.HTTPAllowlist,
+		"registry_url", cfg.Sandbox.ToolRegistryURL,
+	)
+
 	slog.Info("agent initialized", "loaded_skills", len(exec.List()))
 
 	// Initialize Audit Logger
@@ -277,7 +359,8 @@ func main() {
 	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 			api.MetricsHandler().ServeHTTP(w, r)
 		})
-	mux.Handle("/v1/", apiRouter)
+	rateLimitMW := middleware.RateLimitMiddleware(rateLimiter)
+	mux.Handle("/v1/", rateLimitMW(apiRouter))
 
 	// Admin endpoints require auth (API Key or JWT) AND admin role
 	adminRouter := api.NewAdminRouter(pdb.DB)
@@ -300,10 +383,19 @@ func main() {
 	// OTel HTTP metrics middleware (records request counts and durations).
 	metricsHandler := observability.MetricsMiddleware(correlationHandler)
 
+	// CORS middleware for web UI compatibility.
+	// Allows all origins for development; restrict via config for production.
+	corsHandler := middleware.CORSMiddleware(middleware.CORSConfig{
+		AllowedOrigins:   []string{"*"},
+		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
+		AllowedHeaders:   []string{"Content-Type", "X-API-Key", "Authorization"},
+		AllowCredentials: true,
+	})(metricsHandler)
+
 	// OTel HTTP instrumentation (creates spans for each request).
 	// Must be the outermost middleware so the span exists when inner middleware runs.
-	// Execution order: otelhttp → MetricsMiddleware → CorrelationMiddleware → mux → auth → handlers
-	handler := otelhttp.NewHandler(metricsHandler, "openbotstack",
+	// Execution order: otelhttp → CORS → MetricsMiddleware → CorrelationMiddleware → mux → auth → RateLimit → handlers
+	handler := otelhttp.NewHandler(corsHandler, "openbotstack",
 		otelhttp.WithFilter(func(r *http.Request) bool {
 			// Skip health/metrics endpoints from tracing overhead.
 			path := r.URL.Path
@@ -326,10 +418,19 @@ func main() {
 
 	// Start server in goroutine
 	go func() {
-		slog.Info("server listening", "addr", cfg.Server.Addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("server error", "error", err)
-			os.Exit(1)
+		if cfg.TLS.CertFile != "" && cfg.TLS.KeyFile != "" {
+			slog.Info("server listening with TLS", "addr", cfg.Server.Addr,
+				"cert", cfg.TLS.CertFile)
+			if err := srv.ListenAndServeTLS(cfg.TLS.CertFile, cfg.TLS.KeyFile); err != nil && err != http.ErrServerClosed {
+				slog.Error("server error", "error", err)
+				os.Exit(1)
+			}
+		} else {
+			slog.Info("server listening", "addr", cfg.Server.Addr)
+			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				slog.Error("server error", "error", err)
+				os.Exit(1)
+			}
 		}
 	}()
 

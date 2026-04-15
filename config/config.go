@@ -6,11 +6,65 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+type MemoryConfig struct {
+	DataDir            string `yaml:"data_dir"`              // default: "./data"
+	SummaryThreshold   int    `yaml:"summary_threshold"`     // default: 20 messages
+	SummaryEnabled     bool   `yaml:"summary_enabled"`       // default: true
+	MaxHistoryMessages int    `yaml:"max_history_messages"`  // default: 50
+}
+
+// SandboxConfig controls Wasm skill sandbox behavior.
+type SandboxConfig struct {
+	// HTTPAllowlist controls which URLs Wasm skills may access.
+	// Patterns: "https://api.example.com", "*.example.com", "*" (allow all).
+	// Default: ["*"] for development; restrict for production.
+	HTTPAllowlist []string `yaml:"http_allowlist"`
+
+	// ToolRegistryURL is the base URL for the tool registry service.
+	// Default: "http://localhost:8080"
+	ToolRegistryURL string `yaml:"tool_registry_url"`
+}
+
+// VectorConfig controls optional vector search capabilities.
+type VectorConfig struct {
+	// Enabled enables vector semantic search. Requires PostgreSQL + pgvector.
+	// Default: false (system uses keyword matching).
+	Enabled bool `yaml:"enabled"`
+
+	// DatabaseURL is the PostgreSQL connection string.
+	// e.g. "postgres://user:pass@localhost:5432/openbotstack?sslmode=disable"
+	// Env override: OBS_VECTOR_DB_URL
+	DatabaseURL string `yaml:"database_url"`
+
+	// Model is the embedding model name.
+	// Default: "text-embedding-3-small"
+	Model string `yaml:"model"`
+
+	// Dimensions is the embedding vector dimension.
+	// Default: 512
+	Dimensions int `yaml:"dimensions"`
+}
+
+// TLSConfig controls TLS/HTTPS configuration.
+type TLSConfig struct {
+	// CertFile is the path to the TLS certificate file (PEM format).
+	// Env override: OBS_TLS_CERT_FILE
+	CertFile string `yaml:"cert_file"`
+
+	// KeyFile is the path to the TLS private key file (PEM format).
+	// Env override: OBS_TLS_KEY_FILE
+	KeyFile string `yaml:"key_file"`
+}
+
 type Config struct {
-	Server       ServerConfig       `yaml:"server"`
-	Redis        RedisConfig        `yaml:"redis"`
-	Providers    ProvidersConfig    `yaml:"providers"`
+	Server        ServerConfig        `yaml:"server"`
+	TLS           TLSConfig           `yaml:"tls"`
+	Redis         RedisConfig         `yaml:"redis"`
+	Providers     ProvidersConfig     `yaml:"providers"`
 	Observability ObservabilityConfig `yaml:"observability"`
+	Memory        MemoryConfig        `yaml:"memory"`
+	Sandbox       SandboxConfig       `yaml:"sandbox"`
+	Vector        VectorConfig        `yaml:"vector"`
 }
 
 type ObservabilityConfig struct {
@@ -62,6 +116,16 @@ func Load(path string) (*Config, error) {
 		Observability: ObservabilityConfig{
 			LogLevel: "info",
 		},
+		Memory: MemoryConfig{
+			DataDir:            "./data",
+			SummaryThreshold:   20,
+			SummaryEnabled:     true,
+			MaxHistoryMessages: 50,
+		},
+		Sandbox: SandboxConfig{
+			HTTPAllowlist:   []string{"*"},
+			ToolRegistryURL: "http://localhost:8080",
+		},
 	}
 
 	// Load from file if exists
@@ -104,6 +168,25 @@ func Load(path string) (*Config, error) {
 	// Observability overrides
 	if val := os.Getenv("OBS_LOG_LEVEL"); val != "" {
 		cfg.Observability.LogLevel = val
+	}
+
+	// Memory overrides
+	if val := os.Getenv("OBS_DATA_DIR"); val != "" {
+		cfg.Memory.DataDir = val
+	}
+
+	// Vector overrides
+	if val := os.Getenv("OBS_VECTOR_DB_URL"); val != "" {
+		cfg.Vector.DatabaseURL = val
+		cfg.Vector.Enabled = true
+	}
+
+	// TLS overrides
+	if val := os.Getenv("OBS_TLS_CERT_FILE"); val != "" {
+		cfg.TLS.CertFile = val
+	}
+	if val := os.Getenv("OBS_TLS_KEY_FILE"); val != "" {
+		cfg.TLS.KeyFile = val
 	}
 
 	return cfg, nil
