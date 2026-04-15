@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 )
 
@@ -77,6 +78,7 @@ func NewSSEHandler(w http.ResponseWriter) *SSEHandler {
 }
 
 // WriteEvent writes a single SSE event.
+// Multi-line data is split into multiple "data:" lines per the SSE specification.
 func (h *SSEHandler) WriteEvent(event SSEEvent) error {
 	if event.ID != "" {
 		_, _ = fmt.Fprintf(h.w, "id: %s\n", event.ID)
@@ -84,7 +86,10 @@ func (h *SSEHandler) WriteEvent(event SSEEvent) error {
 	if event.Event != "" {
 		_, _ = fmt.Fprintf(h.w, "event: %s\n", event.Event)
 	}
-	_, _ = fmt.Fprintf(h.w, "data: %s\n\n", event.Data)
+	for _, line := range strings.Split(event.Data, "\n") {
+		_, _ = fmt.Fprintf(h.w, "data: %s\n", line)
+	}
+	_, _ = fmt.Fprintln(h.w)
 
 	if h.flusher != nil {
 		h.flusher.Flush()

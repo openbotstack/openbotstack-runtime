@@ -84,6 +84,24 @@ func TestSSEHandlerWrite(t *testing.T) {
 	}
 }
 
+func TestSSEHandlerWrite_MultiLineData(t *testing.T) {
+	rr := httptest.NewRecorder()
+	handler := api.NewSSEHandler(rr)
+
+	err := handler.WriteEvent(api.SSEEvent{
+		Event: "message",
+		Data:  "line1\nline2\nline3",
+	})
+	if err != nil {
+		t.Fatalf("WriteEvent failed: %v", err)
+	}
+
+	body := rr.Body.String()
+	if !strings.Contains(body, "data: line1\ndata: line2\ndata: line3") {
+		t.Errorf("expected multi-line data split into separate data: lines, got: %s", body)
+	}
+}
+
 func TestSSEHandlerStreaming(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()

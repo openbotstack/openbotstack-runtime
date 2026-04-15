@@ -9,8 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openbotstack/openbotstack-core/access/auth"
 	"github.com/openbotstack/openbotstack-core/control/agent"
 	"github.com/openbotstack/openbotstack-runtime/api"
+	"github.com/openbotstack/openbotstack-runtime/api/middleware"
 )
 
 // ==================== Edge Case Tests ====================
@@ -278,5 +280,38 @@ func TestConcurrentRequests(t *testing.T) {
 		case <-timeout:
 			t.Fatal("Timeout waiting for concurrent requests")
 		}
+	}
+}
+
+// ==================== Auth Identity Override Tests ====================
+
+func TestChatStreamEndpointUsesAuthenticatedIdentity(t *testing.T) {
+	ca := &captureAgent{}
+	router := api.NewRouter(ca)
+
+	// Set auth middleware that injects a user into context
+	router.SetAuthMiddleware(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			user := &auth.User{ID: "auth-user", TenantID: "auth-tenant"}
+			ctx := middleware.WithUser(r.Context(), user)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	})
+
+	// Request body has different tenant/user than the authenticated one
+	body := strings.NewReader(`{"message":"hi","tenant_id":"body-tenant","user_id":"body-user"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/stream", body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if ca.captured == nil {
+		t.Fatal("captureAgent was not called")
+	}
+	if ca.captured.TenantID != "auth-tenant" {
+		t.Errorf("TenantID = %q, want %q", ca.captured.TenantID, "auth-tenant")
+	}
+	if ca.captured.UserID != "auth-user" {
+		t.Errorf("UserID = %q, want %q", ca.captured.UserID, "auth-user")
 	}
 }
