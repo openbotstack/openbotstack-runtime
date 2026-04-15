@@ -166,7 +166,7 @@ func (l *SQLiteRateLimiter) Consume(ctx context.Context, key ratelimit.RateLimit
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	current, fillTime, _, err := refillBucket(ctx, tx, key, config)
 	if err != nil {

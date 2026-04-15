@@ -78,7 +78,7 @@ func TestErrorCodes_AreConsistent(t *testing.T) {
 	}
 	for _, code := range codes {
 		for _, c := range code {
-			if !((c >= 'A' && c <= 'Z') || c == '_' || (c >= '0' && c <= '9')) {
+			if (c < 'A' || c > 'Z') && c != '_' && (c < '0' || c > '9') {
 				t.Errorf("error code %q contains non-UPPER_SNAKE_CASE char: %c", code, c)
 			}
 		}

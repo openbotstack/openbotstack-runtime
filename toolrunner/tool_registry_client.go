@@ -53,7 +53,7 @@ func (c *RegistryClient) Invoke(ctx *ToolContext, toolName string, arguments map
 	if err != nil {
 		return nil, fmt.Errorf("tool invocation failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("tool registry returned error: %s", resp.Status)

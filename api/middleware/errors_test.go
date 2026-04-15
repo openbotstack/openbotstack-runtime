@@ -43,7 +43,7 @@ func TestMiddlewareErrorCodes(t *testing.T) {
 	codes := []string{ErrUnauthorized, ErrForbidden, ErrRateLimited, ErrInternal}
 	for _, code := range codes {
 		for _, c := range code {
-			if !((c >= 'A' && c <= 'Z') || c == '_' || (c >= '0' && c <= '9')) {
+			if (c < 'A' || c > 'Z') && c != '_' && (c < '0' || c > '9') {
 				t.Errorf("error code %q has non-UPPER_SNAKE_CASE char: %c", code, c)
 			}
 		}

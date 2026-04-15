@@ -37,7 +37,7 @@ func (db *DB) SeedDefaults() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("seed begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	_, err = tx.Exec(`INSERT INTO tenants (id, name, created_at) VALUES (?, ?, ?)`,
 		"default", "Default Tenant", now)

@@ -46,7 +46,7 @@ func TestRegistryClient_Invoke(t *testing.T) {
 		}{
 			Output: mockOutput,
 		}
-		json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -73,7 +73,7 @@ func TestRegistryClient_Invoke_Error(t *testing.T) {
 		}{
 			Error: "tool execution failed",
 		}
-		json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -100,7 +100,7 @@ func TestRegistryToolRunner_Execute(t *testing.T) {
 		}{
 			Output: mockOutput,
 		}
-		json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 

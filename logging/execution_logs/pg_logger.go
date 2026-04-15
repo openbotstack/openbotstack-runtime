@@ -186,7 +186,6 @@ func buildQuery(base string, f QueryFilter) (string, []any) {
 	if !f.To.IsZero() {
 		query += fmt.Sprintf(" AND timestamp <= $%d", argID)
 		args = append(args, f.To)
-		argID++
 	}
 	return query, args
 }

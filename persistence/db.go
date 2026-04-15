@@ -22,15 +22,15 @@ func Open(dbPath string) (*DB, error) {
 	}
 
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("set WAL mode: %w", err)
 	}
 	if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("set busy timeout: %w", err)
 	}
 	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("enable foreign keys: %w", err)
 	}
 
@@ -118,7 +118,7 @@ func (db *DB) Migrate() error {
 	if err != nil {
 		return fmt.Errorf("migrate begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	for i, s := range stmts {
 		if _, err := tx.Exec(s); err != nil {

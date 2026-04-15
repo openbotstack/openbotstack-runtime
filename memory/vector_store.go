@@ -142,17 +142,17 @@ func (s *PgVectorStore) Search(ctx context.Context, query []float32, opts Search
 	argIdx := 3
 
 	if opts.UserID != "" {
-		sb.WriteString(fmt.Sprintf(` AND user_id = $%d`, argIdx))
+		fmt.Fprintf(&sb, ` AND user_id = $%d`, argIdx)
 		args = append(args, opts.UserID)
 		argIdx++
 	}
 	if opts.SessionID != "" {
-		sb.WriteString(fmt.Sprintf(` AND session_id = $%d`, argIdx))
+		fmt.Fprintf(&sb, ` AND session_id = $%d`, argIdx)
 		args = append(args, opts.SessionID)
 		argIdx++
 	}
 
-	sb.WriteString(fmt.Sprintf(` ORDER BY embedding <=> $1::vector LIMIT $%d`, argIdx))
+	fmt.Fprintf(&sb, ` ORDER BY embedding <=> $1::vector LIMIT $%d`, argIdx)
 	args = append(args, opts.Limit)
 
 	rows, err := s.pool.Query(ctx, sb.String(), args...)

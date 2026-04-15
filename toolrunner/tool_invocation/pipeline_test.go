@@ -15,7 +15,7 @@ func TestInvoke_HTTPTool(t *testing.T) {
 	// Create test server
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	}))
 	defer ts.Close()
 
@@ -131,7 +131,7 @@ func TestInvoke_MissingName(t *testing.T) {
 func TestWireHTTPFetch(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("response body"))
+		_, _ = w.Write([]byte("response body"))
 	}))
 	defer ts.Close()
 
@@ -163,7 +163,7 @@ func TestInvoke_HTTPTool_WithSSRF(t *testing.T) {
 	// httptest server binds to 127.0.0.1, so SSRF protection should block it
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("should not reach"))
+		_, _ = w.Write([]byte("should not reach"))
 	}))
 	defer server.Close()
 

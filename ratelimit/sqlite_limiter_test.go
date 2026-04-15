@@ -57,7 +57,9 @@ func TestAllowWithinLimit(t *testing.T) {
 	ctx := context.Background()
 
 	quotaStore := NewSQLiteQuotaStore(db.DB)
-	quotaStore.SetQuota(ctx, "t1", &ratelimit.QuotaConfig{TenantRequestsPerMinute: 5})
+	if err := quotaStore.SetQuota(ctx, "t1", &ratelimit.QuotaConfig{TenantRequestsPerMinute: 5}); err != nil {
+		t.Fatalf("SetQuota: %v", err)
+	}
 
 	result, err := limiter.Allow(ctx, ratelimit.RateLimitKey{TenantID: "t1"})
 	if err != nil {
@@ -78,11 +80,17 @@ func TestAllowOverLimit(t *testing.T) {
 	ctx := context.Background()
 
 	quotaStore := NewSQLiteQuotaStore(db.DB)
-	quotaStore.SetQuota(ctx, "t1", &ratelimit.QuotaConfig{TenantRequestsPerMinute: 2})
+	if err := quotaStore.SetQuota(ctx, "t1", &ratelimit.QuotaConfig{TenantRequestsPerMinute: 2}); err != nil {
+		t.Fatalf("SetQuota: %v", err)
+	}
 
 	// Consume both tokens
-	limiter.Consume(ctx, ratelimit.RateLimitKey{TenantID: "t1"}, 1)
-	limiter.Consume(ctx, ratelimit.RateLimitKey{TenantID: "t1"}, 1)
+	if err := limiter.Consume(ctx, ratelimit.RateLimitKey{TenantID: "t1"}, 1); err != nil {
+		t.Fatalf("Consume 1: %v", err)
+	}
+	if err := limiter.Consume(ctx, ratelimit.RateLimitKey{TenantID: "t1"}, 1); err != nil {
+		t.Fatalf("Consume 2: %v", err)
+	}
 
 	// Allow should report not allowed
 	result, err := limiter.Allow(ctx, ratelimit.RateLimitKey{TenantID: "t1"})
@@ -100,7 +108,9 @@ func TestConsume(t *testing.T) {
 	ctx := context.Background()
 
 	quotaStore := NewSQLiteQuotaStore(db.DB)
-	quotaStore.SetQuota(ctx, "t1", &ratelimit.QuotaConfig{TenantRequestsPerMinute: 10})
+	if err := quotaStore.SetQuota(ctx, "t1", &ratelimit.QuotaConfig{TenantRequestsPerMinute: 10}); err != nil {
+		t.Fatalf("SetQuota: %v", err)
+	}
 
 	err := limiter.Consume(ctx, ratelimit.RateLimitKey{TenantID: "t1"}, 3)
 	if err != nil {
@@ -136,7 +146,9 @@ func TestRemaining(t *testing.T) {
 	ctx := context.Background()
 
 	quotaStore := NewSQLiteQuotaStore(db.DB)
-	quotaStore.SetQuota(ctx, "t1", &ratelimit.QuotaConfig{TenantRequestsPerMinute: 100})
+	if err := quotaStore.SetQuota(ctx, "t1", &ratelimit.QuotaConfig{TenantRequestsPerMinute: 100}); err != nil {
+		t.Fatalf("SetQuota: %v", err)
+	}
 
 	remaining, err := limiter.Remaining(ctx, ratelimit.RateLimitKey{TenantID: "t1"})
 	if err != nil {
@@ -153,9 +165,13 @@ func TestReset(t *testing.T) {
 	ctx := context.Background()
 
 	quotaStore := NewSQLiteQuotaStore(db.DB)
-	quotaStore.SetQuota(ctx, "t1", &ratelimit.QuotaConfig{TenantRequestsPerMinute: 5})
+	if err := quotaStore.SetQuota(ctx, "t1", &ratelimit.QuotaConfig{TenantRequestsPerMinute: 5}); err != nil {
+		t.Fatalf("SetQuota: %v", err)
+	}
 
-	limiter.Consume(ctx, ratelimit.RateLimitKey{TenantID: "t1"}, 3)
+	if err := limiter.Consume(ctx, ratelimit.RateLimitKey{TenantID: "t1"}, 3); err != nil {
+		t.Fatalf("Consume: %v", err)
+	}
 
 	err := limiter.Reset(ctx, ratelimit.RateLimitKey{TenantID: "t1"})
 	if err != nil {
