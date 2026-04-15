@@ -10,9 +10,8 @@ linters:
     - staticcheck
     - ineffassign
 
-issues:
-  # Exclude test files from errcheck
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - errcheck
+  exclusions:
+    rules:
+      - path: '(.+)_test\.go'
+        linters:
+          - errcheck
