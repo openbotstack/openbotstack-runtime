@@ -58,6 +58,12 @@ var (
 	configPath = flag.String("config", "./config.yaml", "Path to config file")
 	listenAddr = flag.String("addr", ":8080", "Listen address")
 	runMode    = flag.String("mode", "all", "Run mode: all, api, worker")
+
+	// Build metadata injected via -ldflags.
+	version   string
+	commit    string
+	branch    string
+	buildTime string
 )
 
 func main() {
@@ -327,6 +333,12 @@ func main() {
 	apiRouter.SetSkillProvider(exec)
 	apiRouter.SetExecutionStore(api.NewAuditExecutionStore(auditLogger))
 	apiRouter.SetHistoryProvider(&memoryHistoryProvider{store: memoryStore})
+	apiRouter.SetBuildInfo(api.BuildInfo{
+		Version:   version,
+		Commit:    commit,
+		Branch:    branch,
+		BuildTime: buildTime,
+	})
 
 	// Configure composite auth: API Key first, then JWT fallback
 	apiKeyMW := middleware.APIKeyMiddleware(middleware.APIKeyMiddlewareConfig{
@@ -356,6 +368,7 @@ func main() {
 	mux.Handle("/health", apiRouter)
 	mux.Handle("/healthz", apiRouter)
 	mux.Handle("/readyz", apiRouter)
+	mux.Handle("/version", apiRouter)
 	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 			api.MetricsHandler().ServeHTTP(w, r)
 		})

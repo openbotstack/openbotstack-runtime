@@ -1,3 +1,7 @@
+before:
+  hooks:
+    - sh -c "cd web && npm ci && npm run build"
+
 builds:
   - env:
       - CGO_ENABLED=0
@@ -10,7 +14,7 @@ builds:
     main: ./cmd/openbotstack
     binary: openbotstack
     ldflags:
-      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+      - -s -w -X main.version={{.Version}} -X main.commit={{.ShortCommit}} -X main.branch={{.Branch}} -X main.buildTime={{.Date}}
 
 archives:
   - format: tar.gz
@@ -22,6 +26,10 @@ archives:
     format_overrides:
       - goos: windows
         format: zip
+    files:
+      - config.yaml
+      - README.md
+      - LICENSE*
 
 checksum:
   name_template: 'checksums.txt'
@@ -35,3 +43,10 @@ changelog:
     exclude:
       - '^docs:'
       - '^test:'
+      - '^chore:'
+      - '^ci:'
+
+release:
+  github:
+    owner: openbotstack
+    name: openbotstack-runtime

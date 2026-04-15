@@ -27,7 +27,7 @@ help: ## Show this help
 # ============================================================================
 
 # Platforms to build for (os/arch)
-PLATFORMS := linux/amd64 linux/arm64 darwin/arm64
+PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
 build: ## Build for current platform
 	go build ./...
@@ -61,6 +61,9 @@ build-linux-arm64: web-build ## Build for Linux ARM64
 build-darwin-arm64: web-build ## Build for macOS Apple Silicon
 	GOOS=darwin GOARCH=arm64 go build $(GO_FLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 ./cmd/openbotstack
 
+build-darwin-amd64: web-build ## Build for macOS Intel
+	GOOS=darwin GOARCH=amd64 go build $(GO_FLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 ./cmd/openbotstack
+
 test: ## Run all tests
 	go test ./...
 
@@ -76,7 +79,7 @@ test-race: ## Run tests with race detector
 	go test -race ./...
 
 test-wasm: ## Run Wasm runtime tests only
-	go test -v ./wasm/...
+	go test -v ./sandbox/wasm/...
 
 test-executor: ## Run executor tests only
 	go test -v ./executor/...
@@ -84,9 +87,8 @@ test-executor: ## Run executor tests only
 test-skills: ## Run skill example tests
 	go test -v ./examples/skills/...
 
-test-integration: ## Run integration tests (requires API key)
-	@if [ -z "$(MODELSCOPE_API_KEY)" ]; then echo "Error: MODELSCOPE_API_KEY is not set"; exit 1; fi
-	go test -v -tags=integration ./llm/...
+test-integration: ## Run integration tests (auto-builds binary)
+	go test -v -timeout 120s ./integration/...
 
 test-count: ## Count all tests
 	@echo "Test counts by package:"
