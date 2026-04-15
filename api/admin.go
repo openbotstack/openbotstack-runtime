@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -49,7 +50,13 @@ func (ar *AdminRouter) handleTenants(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		ar.listTenants(w, r)
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		slog.WarnContext(r.Context(), "request validation error",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", http.StatusMethodNotAllowed,
+			"error", "method not allowed",
+		)
+		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
 	}
 }
 
@@ -59,11 +66,23 @@ func (ar *AdminRouter) createTenant(w http.ResponseWriter, r *http.Request) {
 		Name string `json:"name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request", http.StatusBadRequest)
+		slog.WarnContext(r.Context(), "request validation error",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", http.StatusBadRequest,
+			"error", "invalid request",
+		)
+		writeAPIError(w, http.StatusBadRequest, ErrInvalidRequest, "invalid request")
 		return
 	}
 	if req.ID == "" || req.Name == "" {
-		http.Error(w, "id and name required", http.StatusBadRequest)
+		slog.WarnContext(r.Context(), "request validation error",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", http.StatusBadRequest,
+			"error", "id and name required",
+		)
+		writeAPIError(w, http.StatusBadRequest, ErrInvalidRequest, "id and name required")
 		return
 	}
 
@@ -71,7 +90,13 @@ func (ar *AdminRouter) createTenant(w http.ResponseWriter, r *http.Request) {
 	_, err := ar.db.Exec(`INSERT INTO tenants (id, name, created_at) VALUES (?, ?, ?)`,
 		req.ID, req.Name, now)
 	if err != nil {
-		http.Error(w, "failed to create tenant: "+err.Error(), http.StatusInternalServerError)
+		slog.ErrorContext(r.Context(), "admin handler error",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", http.StatusInternalServerError,
+			"error", err,
+		)
+		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to create tenant")
 		return
 	}
 
@@ -83,7 +108,13 @@ func (ar *AdminRouter) createTenant(w http.ResponseWriter, r *http.Request) {
 func (ar *AdminRouter) listTenants(w http.ResponseWriter, r *http.Request) {
 	rows, err := ar.db.Query("SELECT id, name, created_at FROM tenants ORDER BY created_at")
 	if err != nil {
-		http.Error(w, "failed to list tenants", http.StatusInternalServerError)
+		slog.ErrorContext(r.Context(), "admin handler error",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", http.StatusInternalServerError,
+			"error", err,
+		)
+		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to list tenants")
 		return
 	}
 	defer rows.Close()
@@ -114,7 +145,13 @@ func (ar *AdminRouter) handleTenantUsers(w http.ResponseWriter, r *http.Request)
 	case http.MethodGet:
 		ar.listUsers(w, r, tenantID)
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		slog.WarnContext(r.Context(), "request validation error",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", http.StatusMethodNotAllowed,
+			"error", "method not allowed",
+		)
+		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
 	}
 }
 
@@ -125,18 +162,36 @@ func (ar *AdminRouter) createUser(w http.ResponseWriter, r *http.Request, tenant
 		Role string `json:"role"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request", http.StatusBadRequest)
+		slog.WarnContext(r.Context(), "request validation error",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", http.StatusBadRequest,
+			"error", "invalid request",
+		)
+		writeAPIError(w, http.StatusBadRequest, ErrInvalidRequest, "invalid request")
 		return
 	}
 	if req.ID == "" || req.Name == "" {
-		http.Error(w, "id and name required", http.StatusBadRequest)
+		slog.WarnContext(r.Context(), "request validation error",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", http.StatusBadRequest,
+			"error", "id and name required",
+		)
+		writeAPIError(w, http.StatusBadRequest, ErrInvalidRequest, "id and name required")
 		return
 	}
 	if req.Role == "" {
 		req.Role = "member"
 	}
 	if req.Role != "admin" && req.Role != "member" {
-		http.Error(w, "role must be 'admin' or 'member'", http.StatusBadRequest)
+		slog.WarnContext(r.Context(), "request validation error",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", http.StatusBadRequest,
+			"error", "role must be admin or member",
+		)
+		writeAPIError(w, http.StatusBadRequest, ErrInvalidRequest, "role must be 'admin' or 'member'")
 		return
 	}
 
@@ -144,7 +199,13 @@ func (ar *AdminRouter) createUser(w http.ResponseWriter, r *http.Request, tenant
 	_, err := ar.db.Exec(`INSERT INTO users (id, tenant_id, name, role, created_at) VALUES (?, ?, ?, ?, ?)`,
 		req.ID, tenantID, req.Name, req.Role, now)
 	if err != nil {
-		http.Error(w, "failed to create user: "+err.Error(), http.StatusInternalServerError)
+		slog.ErrorContext(r.Context(), "admin handler error",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", http.StatusInternalServerError,
+			"error", err,
+		)
+		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to create user")
 		return
 	}
 
@@ -157,7 +218,13 @@ func (ar *AdminRouter) createUser(w http.ResponseWriter, r *http.Request, tenant
 func (ar *AdminRouter) listUsers(w http.ResponseWriter, r *http.Request, tenantID string) {
 	rows, err := ar.db.Query(`SELECT id, tenant_id, name, role, created_at FROM users WHERE tenant_id = ?`, tenantID)
 	if err != nil {
-		http.Error(w, "failed to list users", http.StatusInternalServerError)
+		slog.ErrorContext(r.Context(), "admin handler error",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", http.StatusInternalServerError,
+			"error", err,
+		)
+		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to list users")
 		return
 	}
 	defer rows.Close()
@@ -189,7 +256,13 @@ func (ar *AdminRouter) handleUserKeys(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		ar.listAPIKeys(w, r, userID)
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		slog.WarnContext(r.Context(), "request validation error",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", http.StatusMethodNotAllowed,
+			"error", "method not allowed",
+		)
+		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
 	}
 }
 
@@ -198,11 +271,23 @@ func (ar *AdminRouter) createAPIKey(w http.ResponseWriter, r *http.Request, user
 		Name string `json:"name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request", http.StatusBadRequest)
+		slog.WarnContext(r.Context(), "request validation error",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", http.StatusBadRequest,
+			"error", "invalid request",
+		)
+		writeAPIError(w, http.StatusBadRequest, ErrInvalidRequest, "invalid request")
 		return
 	}
 	if req.Name == "" {
-		http.Error(w, "name required", http.StatusBadRequest)
+		slog.WarnContext(r.Context(), "request validation error",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", http.StatusBadRequest,
+			"error", "name required",
+		)
+		writeAPIError(w, http.StatusBadRequest, ErrInvalidRequest, "name required")
 		return
 	}
 
@@ -210,18 +295,36 @@ func (ar *AdminRouter) createAPIKey(w http.ResponseWriter, r *http.Request, user
 	var tenantID string
 	err := ar.db.QueryRow("SELECT tenant_id FROM users WHERE id = ?", userID).Scan(&tenantID)
 	if err == sql.ErrNoRows {
-		http.Error(w, "user not found", http.StatusNotFound)
+		slog.WarnContext(r.Context(), "request validation error",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", http.StatusNotFound,
+			"error", "user not found",
+		)
+		writeAPIError(w, http.StatusNotFound, ErrNotFound, "user not found")
 		return
 	}
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		slog.ErrorContext(r.Context(), "admin handler error",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", http.StatusInternalServerError,
+			"error", err,
+		)
+		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "internal error")
 		return
 	}
 
 	// Generate key: obs_ + 32 hex chars = 36 total
 	keyBytes := make([]byte, 16)
 	if _, err := rand.Read(keyBytes); err != nil {
-		http.Error(w, "failed to generate key", http.StatusInternalServerError)
+		slog.ErrorContext(r.Context(), "admin handler error",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", http.StatusInternalServerError,
+			"error", err,
+		)
+		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to generate key")
 		return
 	}
 	fullKey := "obs_" + hex.EncodeToString(keyBytes)
@@ -235,7 +338,13 @@ func (ar *AdminRouter) createAPIKey(w http.ResponseWriter, r *http.Request, user
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		keyID, tenantID, userID, prefix, hashHex, req.Name, now)
 	if err != nil {
-		http.Error(w, "failed to create key: "+err.Error(), http.StatusInternalServerError)
+		slog.ErrorContext(r.Context(), "admin handler error",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", http.StatusInternalServerError,
+			"error", err,
+		)
+		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to create API key")
 		return
 	}
 
@@ -248,7 +357,13 @@ func (ar *AdminRouter) createAPIKey(w http.ResponseWriter, r *http.Request, user
 func (ar *AdminRouter) listAPIKeys(w http.ResponseWriter, r *http.Request, userID string) {
 	rows, err := ar.db.Query(`SELECT id, key_prefix, name, created_at, revoked FROM api_keys WHERE user_id = ?`, userID)
 	if err != nil {
-		http.Error(w, "failed to list keys", http.StatusInternalServerError)
+		slog.ErrorContext(r.Context(), "admin handler error",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", http.StatusInternalServerError,
+			"error", err,
+		)
+		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to list keys")
 		return
 	}
 	defer rows.Close()
@@ -273,7 +388,13 @@ func (ar *AdminRouter) listAPIKeys(w http.ResponseWriter, r *http.Request, userI
 
 func (ar *AdminRouter) handleRevokeKey(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		slog.WarnContext(r.Context(), "request validation error",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", http.StatusMethodNotAllowed,
+			"error", "method not allowed",
+		)
+		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
 		return
 	}
 
@@ -281,12 +402,24 @@ func (ar *AdminRouter) handleRevokeKey(w http.ResponseWriter, r *http.Request) {
 
 	result, err := ar.db.Exec(`UPDATE api_keys SET revoked = 1 WHERE id = ?`, keyID)
 	if err != nil {
-		http.Error(w, "failed to revoke key", http.StatusInternalServerError)
+		slog.ErrorContext(r.Context(), "admin handler error",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", http.StatusInternalServerError,
+			"error", err,
+		)
+		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to revoke key")
 		return
 	}
 	n, _ := result.RowsAffected()
 	if n == 0 {
-		http.Error(w, "key not found", http.StatusNotFound)
+		slog.WarnContext(r.Context(), "request validation error",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", http.StatusNotFound,
+			"error", "key not found",
+		)
+		writeAPIError(w, http.StatusNotFound, ErrNotFound, "key not found")
 		return
 	}
 
