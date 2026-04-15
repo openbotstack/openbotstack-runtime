@@ -33,3 +33,12 @@ go.work.sum
 
 # Build artifacts
 build/
+openbotstack
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+
+# Data directory
+data/
