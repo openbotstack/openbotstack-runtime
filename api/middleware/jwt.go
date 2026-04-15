@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -44,7 +45,13 @@ func JWTMiddleware(config JWTMiddlewareConfig) func(http.Handler) http.Handler {
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
 				if config.Strict {
-					http.Error(w, "missing authorization header", http.StatusUnauthorized)
+					slog.WarnContext(r.Context(), "request validation error",
+						"method", r.Method,
+						"path", r.URL.Path,
+						"status", http.StatusUnauthorized,
+						"error", "missing authorization header",
+					)
+					writeMiddlewareError(w, http.StatusUnauthorized, ErrUnauthorized, "missing authorization header")
 					return
 				}
 				next.ServeHTTP(w, r)
@@ -54,7 +61,13 @@ func JWTMiddleware(config JWTMiddlewareConfig) func(http.Handler) http.Handler {
 			parts := strings.SplitN(authHeader, " ", 2)
 			if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
 				if config.Strict {
-					http.Error(w, "invalid authorization header format", http.StatusUnauthorized)
+					slog.WarnContext(r.Context(), "request validation error",
+						"method", r.Method,
+						"path", r.URL.Path,
+						"status", http.StatusUnauthorized,
+						"error", "invalid authorization header format",
+					)
+					writeMiddlewareError(w, http.StatusUnauthorized, ErrUnauthorized, "invalid authorization header format")
 					return
 				}
 				next.ServeHTTP(w, r)
@@ -68,7 +81,13 @@ func JWTMiddleware(config JWTMiddlewareConfig) func(http.Handler) http.Handler {
 
 			if err != nil || !token.Valid {
 				if config.Strict {
-					http.Error(w, "invalid token", http.StatusUnauthorized)
+					slog.WarnContext(r.Context(), "request validation error",
+						"method", r.Method,
+						"path", r.URL.Path,
+						"status", http.StatusUnauthorized,
+						"error", "invalid token",
+					)
+					writeMiddlewareError(w, http.StatusUnauthorized, ErrUnauthorized, "invalid token")
 					return
 				}
 				next.ServeHTTP(w, r)
@@ -78,7 +97,13 @@ func JWTMiddleware(config JWTMiddlewareConfig) func(http.Handler) http.Handler {
 			claims, ok := token.Claims.(jwt.MapClaims)
 			if !ok {
 				if config.Strict {
-					http.Error(w, "invalid token claims", http.StatusUnauthorized)
+					slog.WarnContext(r.Context(), "request validation error",
+						"method", r.Method,
+						"path", r.URL.Path,
+						"status", http.StatusUnauthorized,
+						"error", "invalid token claims",
+					)
+					writeMiddlewareError(w, http.StatusUnauthorized, ErrUnauthorized, "invalid token claims")
 					return
 				}
 				next.ServeHTTP(w, r)
