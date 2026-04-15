@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openbotstack/openbotstack-core/control/agent"
 	"github.com/openbotstack/openbotstack-runtime/api"
 )
 
@@ -154,6 +155,90 @@ func TestHistoryEndpointNoSession(t *testing.T) {
 	// Should return 404 or handle gracefully
 	if rr.Code == 0 {
 		t.Error("Server crashed on empty session ID")
+	}
+}
+
+// ==================== SSE Streaming Tests ====================
+
+func TestChatStreamEndpoint_SSEFormat(t *testing.T) {
+	mockResp := &agent.MessageResponse{
+		SessionID: "s1",
+		Message:   "Hello from stream!",
+	}
+	handler := api.NewRouter(&mockAgent{response: mockResp})
+
+	body := strings.NewReader(`{"message":"hi","session_id":"s1"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/stream", body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	// Should return SSE content type
+	if ct := rr.Header().Get("Content-Type"); ct != "text/event-stream" {
+		t.Errorf("Content-Type = %q, want text/event-stream", ct)
+	}
+
+	bodyStr := rr.Body.String()
+	if !strings.Contains(bodyStr, "event: session") {
+		t.Errorf("expected 'event: session' in SSE body, got: %s", bodyStr)
+	}
+	if !strings.Contains(bodyStr, "event: done") {
+		t.Errorf("expected 'event: done' in SSE body, got: %s", bodyStr)
+	}
+	if !strings.Contains(bodyStr, "data: Hello from stream!") {
+		t.Errorf("expected 'data: Hello from stream!' in SSE body, got: %s", bodyStr)
+	}
+	if !strings.Contains(bodyStr, "data: s1") {
+		t.Errorf("expected 'data: s1' (session ID) in SSE body, got: %s", bodyStr)
+	}
+}
+
+func TestChatStreamEndpoint_MethodNotAllowed(t *testing.T) {
+	handler := api.NewRouter(nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/chat/stream", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusMethodNotAllowed)
+	}
+
+	// Should be JSON error
+	var resp map[string]interface{}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("expected JSON error, got: %s", rr.Body.String())
+	}
+	errObj, _ := resp["error"].(map[string]interface{})
+	if errObj["code"] != "METHOD_NOT_ALLOWED" {
+		t.Errorf("error code = %v, want METHOD_NOT_ALLOWED", errObj["code"])
+	}
+}
+
+func TestChatStreamEndpoint_InvalidBody(t *testing.T) {
+	handler := api.NewRouter(&mockAgent{})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/stream", strings.NewReader("not json"))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+}
+
+func TestChatStreamEndpoint_AgentNotConfigured(t *testing.T) {
+	handler := api.NewRouter(nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/stream", strings.NewReader(`{"message":"hi"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusServiceUnavailable)
 	}
 }
 

@@ -130,6 +130,7 @@ func (r *Router) registerRoutes() {
 	
 	// Register v1 routes on v1Mux
 	r.v1Mux.HandleFunc("/v1/chat", r.handleChat)
+	r.v1Mux.HandleFunc("/v1/chat/stream", r.handleChatStream)
 	r.v1Mux.HandleFunc("/v1/skills", r.handleSkills)
 	r.v1Mux.HandleFunc("/v1/executions", r.handleExecutions)
 	r.v1Mux.HandleFunc("/v1/sessions/", r.handleSessions)
@@ -212,6 +213,66 @@ func (r *Router) handleChat(w http.ResponseWriter, req *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (r *Router) handleChatStream(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		slog.WarnContext(req.Context(), "request validation error",
+			"method", req.Method,
+			"path", req.URL.Path,
+			"status", http.StatusMethodNotAllowed,
+			"error", "method not allowed",
+		)
+		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var chatReq ChatRequest
+	if err := json.NewDecoder(req.Body).Decode(&chatReq); err != nil {
+		writeAPIError(w, http.StatusBadRequest, ErrInvalidRequest, "invalid request body")
+		return
+	}
+
+	if r.agent == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, ErrAgentNotConfigured, "agent not configured")
+		return
+	}
+
+	agentReq := agent.MessageRequest{
+		TenantID:  chatReq.TenantID,
+		UserID:    chatReq.UserID,
+		SessionID: chatReq.SessionID,
+		Message:   chatReq.Message,
+	}
+
+	// Authenticated identity overrides request body
+	if user, ok := middleware.UserFromContext(req.Context()); ok {
+		agentReq.TenantID = user.TenantID
+		agentReq.UserID = user.ID
+	}
+
+	agentResp, err := r.agent.HandleMessage(req.Context(), agentReq)
+	if err != nil {
+		slog.ErrorContext(req.Context(), "streaming handler error",
+			"method", req.Method,
+			"path", req.URL.Path,
+			"status", http.StatusInternalServerError,
+			"error", err,
+		)
+		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "internal error")
+		return
+	}
+
+	// Stream the response as SSE events
+	handler := NewSSEHandler(w)
+	_ = handler.WriteEvent(SSEEvent{
+		Event: "session",
+		Data:  agentResp.SessionID,
+	})
+	_ = handler.WriteEvent(SSEEvent{
+		Event: "done",
+		Data:  agentResp.Message,
+	})
 }
 
 func (r *Router) handleSessions(w http.ResponseWriter, req *http.Request) {
