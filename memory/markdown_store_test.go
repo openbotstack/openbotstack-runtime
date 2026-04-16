@@ -23,14 +23,13 @@ func testStore(t *testing.T) *memory.MarkdownMemoryStore {
 
 func TestNewMarkdownMemoryStoreCreatesDir(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "nested", "data")
-	store, err := memory.NewMarkdownMemoryStore(dir)
+	_, err := memory.NewMarkdownMemoryStore(dir)
 	if err != nil {
 		t.Fatalf("NewMarkdownMemoryStore: %v", err)
 	}
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		t.Error("expected data directory to be created")
 	}
-	_ = store
 }
 
 func TestAppendAndGetHistory(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -22,8 +23,11 @@ import (
 const (
 	binaryPath = "../build/openbotstack"
 	repoRoot   = ".."
-	serverURL  = "http://localhost:8888"
 )
+
+// serverURL is set dynamically by TestFullSystem after allocating a free port.
+// Other tests (streaming, error) read this variable to know where the server is.
+var serverURL string
 
 func buildBinary(t *testing.T) string {
 	t.Helper()
@@ -55,6 +59,16 @@ func buildBinary(t *testing.T) string {
 func TestFullSystem(t *testing.T) {
 	// 1. Setup: Ensure binary exists (auto-build if needed)
 	absBinaryPath := buildBinary(t)
+
+	// 1b. Allocate a free port dynamically to avoid conflicts
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Failed to allocate a free port: %v", err)
+	}
+	addr := listener.Addr().(*net.TCPAddr)
+	_ = listener.Close() // free the port so the server can bind it
+
+	serverURL = fmt.Sprintf("http://127.0.0.1:%d", addr.Port)
 
 	// 2. Mock LLM Server
 	mockLLM := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -154,7 +168,7 @@ func TestFullSystem(t *testing.T) {
 	defer cancel()
 
 	absRepoRoot, _ := filepath.Abs(repoRoot)
-	cmd := exec.CommandContext(ctx, absBinaryPath, "--addr=:8888")
+	cmd := exec.CommandContext(ctx, absBinaryPath, "--addr=:"+fmt.Sprintf("%d", addr.Port))
 	cmd.Dir = absRepoRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

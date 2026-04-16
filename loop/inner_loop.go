@@ -3,6 +3,7 @@ package loop
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/openbotstack/openbotstack-core/assistant"
@@ -115,25 +116,29 @@ func (l *DefaultInnerLoop) Run(ctx context.Context, task TaskInput, ec *executio
 
 				// Log tool execution start
 				if l.logger != nil {
-					_ = l.logger.LogStep(ctx, execution.ExecutionLogRecord{
+					if err := l.logger.LogStep(ctx, execution.ExecutionLogRecord{
 						StepName:  step.Name,
 						StepType:  string(step.Type),
 						Status:    "running",
 						Timestamp: time.Now(),
-					})
+					}); err != nil {
+						slog.Warn("audit log failed", "error", err)
+					}
 				}
 
 				toolRes, err := l.toolRunner.Execute(ctx, step.Name, step.Arguments, ec)
 				if err != nil {
 					// Log tool execution error
 					if l.logger != nil {
-						_ = l.logger.LogStep(ctx, execution.ExecutionLogRecord{
+						if logErr := l.logger.LogStep(ctx, execution.ExecutionLogRecord{
 							StepName:  step.Name,
 							StepType:  string(step.Type),
 							Status:    "failed",
 							Error:     err.Error(),
 							Timestamp: time.Now(),
-						})
+						}); logErr != nil {
+							slog.Warn("audit log failed", "error", logErr)
+						}
 					}
 					actErr = fmt.Errorf("tool execution failed: %w", err)
 					break // Stop executing current plan on tool failure
@@ -141,12 +146,14 @@ func (l *DefaultInnerLoop) Run(ctx context.Context, task TaskInput, ec *executio
 
 				// Log tool execution success
 				if l.logger != nil {
-					_ = l.logger.LogStep(ctx, execution.ExecutionLogRecord{
+					if logErr := l.logger.LogStep(ctx, execution.ExecutionLogRecord{
 						StepName:  step.Name,
 						StepType:  string(step.Type),
 						Status:    "success",
 						Timestamp: time.Now(),
-					})
+					}); logErr != nil {
+						slog.Warn("audit log failed", "error", logErr)
+					}
 				}
 
 				turnResult.ActionsExecuted = append(turnResult.ActionsExecuted, step.Name)
@@ -211,12 +218,14 @@ func (l *DefaultInnerLoop) Run(ctx context.Context, task TaskInput, ec *executio
 			if err != nil {
 				// Non-fatal, just log and continue with uncompacted context
 				if l.logger != nil {
-					_ = l.logger.LogStep(ctx, execution.ExecutionLogRecord{
+					if logErr := l.logger.LogStep(ctx, execution.ExecutionLogRecord{
 						StepName:  "context_compaction",
 						Status:    "failed",
 						Error:     err.Error(),
 						Timestamp: time.Now(),
-					})
+					}); logErr != nil {
+						slog.Warn("audit log failed", "error", logErr)
+					}
 				}
 			} else {
 				result.TurnResults = compacted

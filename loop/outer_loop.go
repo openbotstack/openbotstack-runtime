@@ -3,6 +3,7 @@ package loop
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/openbotstack/openbotstack-core/execution"
@@ -65,12 +66,14 @@ func (l *DefaultOuterLoop) Run(ctx context.Context, tasks []TaskInput, ec *execu
 
 		// STATE: TASK_SELECT (already provided by loop iterator)
 		if l.logger != nil {
-			_ = l.logger.LogStep(ctx, execution.ExecutionLogRecord{
+			if err := l.logger.LogStep(ctx, execution.ExecutionLogRecord{
 				StepName:  fmt.Sprintf("task_%d_start", taskIdx),
 				StepType:  "workflow_step",
 				Status:    "running",
 				Timestamp: time.Now(),
-			})
+			}); err != nil {
+				slog.Warn("audit log failed", "error", err)
+			}
 		}
 
 		// Evaluate policy before execution if configured
@@ -111,12 +114,14 @@ func (l *DefaultOuterLoop) Run(ctx context.Context, tasks []TaskInput, ec *execu
 		}
 
 		if l.logger != nil {
-			_ = l.logger.LogStep(ctx, execution.ExecutionLogRecord{
+			if err := l.logger.LogStep(ctx, execution.ExecutionLogRecord{
 				StepName:  fmt.Sprintf("task_%d_end", taskIdx),
 				StepType:  "workflow_step",
 				Status:    "success",
 				Timestamp: time.Now(),
-			})
+			}); err != nil {
+				slog.Warn("audit log failed", "error", err)
+			}
 		}
 
 		// STATE: CHECKPOINT
