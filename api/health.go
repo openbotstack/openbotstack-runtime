@@ -48,32 +48,6 @@ type HealthChecker interface {
 	Check(ctx context.Context) ComponentHealth
 }
 
-// RedisHealthChecker checks Redis connectivity.
-type RedisHealthChecker struct {
-	pingFunc func(ctx context.Context) error
-}
-
-// NewRedisHealthChecker creates a health checker for Redis.
-func NewRedisHealthChecker(pingFunc func(ctx context.Context) error) *RedisHealthChecker {
-	return &RedisHealthChecker{pingFunc: pingFunc}
-}
-
-func (c *RedisHealthChecker) Name() string { return "redis" }
-
-func (c *RedisHealthChecker) Check(ctx context.Context) ComponentHealth {
-	start := time.Now()
-	err := c.pingFunc(ctx)
-	durationMs := time.Since(start).Milliseconds()
-	if err != nil {
-		return ComponentHealth{
-			Status:     "unhealthy",
-			DurationMs: durationMs,
-			Error:      err.Error(),
-		}
-	}
-	return ComponentHealth{Status: "healthy", DurationMs: durationMs}
-}
-
 // ProviderHealthChecker checks LLM provider connectivity via /models endpoint.
 type ProviderHealthChecker struct {
 	baseURL    string

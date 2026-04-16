@@ -96,6 +96,7 @@ func (s *ConversationSummarizer) generateSummary(ctx context.Context, msgs []age
 type SummarizingConversationStore struct {
 	inner      agent.ConversationStore
 	summarizer *ConversationSummarizer
+	indexer    *AsyncEmbeddingIndexer // optional: nil = vector indexing disabled
 }
 
 // NewSummarizingConversationStore creates a decorator that auto-summarizes conversations.
@@ -103,9 +104,18 @@ func NewSummarizingConversationStore(inner agent.ConversationStore, summarizer *
 	return &SummarizingConversationStore{inner: inner, summarizer: summarizer}
 }
 
+// SetIndexer sets the async embedding indexer for vector search.
+func (s *SummarizingConversationStore) SetIndexer(indexer *AsyncEmbeddingIndexer) {
+	s.indexer = indexer
+}
+
 func (s *SummarizingConversationStore) AppendMessage(ctx context.Context, msg agent.SessionMessage) error {
 	if err := s.inner.AppendMessage(ctx, msg); err != nil {
 		return err
+	}
+	// Trigger async vector indexing (fire-and-forget, no-op if indexer is nil)
+	if s.indexer != nil {
+		s.indexer.OnMessage(ctx, msg)
 	}
 	// Trigger summarization check asynchronously with bounded timeout
 	sumCtx, cancel := context.WithTimeout(ctx, summarizationTimeout)

@@ -3,7 +3,6 @@ package api
 import (
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 )
 
@@ -57,28 +56,5 @@ func TestCorrelationIDFromContext_EmptyWhenNotSet(t *testing.T) {
 	id := CorrelationIDFromContext(req.Context())
 	if id != "" {
 		t.Errorf("expected empty, got %q", id)
-	}
-}
-
-func TestMetrics_Handler(t *testing.T) {
-	m := NewMetrics()
-	m.IncRequests()
-	m.IncRequests()
-	m.IncErrors()
-
-	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
-	rec := httptest.NewRecorder()
-	m.Handler().ServeHTTP(rec, req)
-
-	body := rec.Body.String()
-
-	if !strings.Contains(body, "openbotstack_requests_total 2") {
-		t.Errorf("expected requests_total 2, got: %s", body)
-	}
-	if !strings.Contains(body, "openbotstack_requests_errored_total 1") {
-		t.Errorf("expected requests_errored_total 1, got: %s", body)
-	}
-	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
-		t.Errorf("expected text/plain content type, got: %s", ct)
 	}
 }

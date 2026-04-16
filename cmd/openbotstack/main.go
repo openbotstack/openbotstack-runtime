@@ -289,9 +289,11 @@ func main() {
 		memoryBridge.SetVectorStore(vectorStore)
 		memoryBridge.SetEmbeddingService(embeddingSvc)
 
-		// Wire async indexer into message pipeline
+		// Wire async indexer into conversation store
 		indexer := memory.NewAsyncEmbeddingIndexer(embeddingSvc, vectorStore)
-		_ = indexer // Will be wired into conversation store wrapper
+		if summarizingStore, ok := convStore.(*memory.SummarizingConversationStore); ok {
+			summarizingStore.SetIndexer(indexer)
+		}
 		slog.Info("vector search enabled",
 			"model", cfg.Vector.Model,
 			"dimensions", cfg.Vector.Dimensions,

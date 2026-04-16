@@ -65,7 +65,6 @@ type Router struct {
 	skills         SkillProvider
 	execStore      ExecutionStore
 	history        HistoryProvider
-	metrics        *Metrics
 	healthCheckers []HealthChecker
 	buildInfo      BuildInfo
 }
@@ -73,10 +72,9 @@ type Router struct {
 // NewRouter creates a new API router with an Agent.
 func NewRouter(a agent.Agent) *Router {
 	r := &Router{
-		mux:     http.NewServeMux(),
-		v1Mux:   http.NewServeMux(),
-		agent:   a,
-		metrics: NewMetrics(),
+		mux:   http.NewServeMux(),
+		v1Mux: http.NewServeMux(),
+		agent: a,
 	}
 	r.v1Handler = r.v1Mux
 	r.registerRoutes()
@@ -126,8 +124,7 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("/healthz", r.handleHealthz)
 	r.mux.HandleFunc("/readyz", r.handleReadyz)
 	r.mux.HandleFunc("/version", r.handleVersion)
-	r.mux.HandleFunc("/metrics", r.metrics.Handler())
-	
+
 	// Register v1 routes on v1Mux
 	r.v1Mux.HandleFunc("/v1/chat", r.handleChat)
 	r.v1Mux.HandleFunc("/v1/chat/stream", r.handleChatStream)
