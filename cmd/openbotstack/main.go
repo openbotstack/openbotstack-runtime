@@ -327,6 +327,10 @@ func main() {
 	auditLogger := audit.NewSQLiteAuditLogger(pdb.DB)
 	slog.Info("sqlite audit logger initialized")
 
+	// Wire AuditLogger into SkillExecutor for execution write-path
+	exec.SetAuditLogger(auditLogger)
+	slog.Info("audit logger wired to executor")
+
 	// Create combined router
 	mux := http.NewServeMux()
 

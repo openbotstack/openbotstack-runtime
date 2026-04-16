@@ -9,6 +9,7 @@ import (
 	"github.com/openbotstack/openbotstack-core/execution"
 	control_skills "github.com/openbotstack/openbotstack-core/control/skills"
 	executor "github.com/openbotstack/openbotstack-runtime/executor/skill_executor"
+	"github.com/openbotstack/openbotstack-runtime/logging/execution_logs"
 	"github.com/openbotstack/openbotstack-runtime/sandbox/wasm"
 )
 
@@ -401,5 +402,152 @@ func TestReloadSkill(t *testing.T) {
 	}
 	if e.SkillCount() != 1 {
 		t.Errorf("After reload: expected 1, got %d", e.SkillCount())
+	}
+}
+
+// ==================== Audit Tests ====================
+
+func TestExecuteWithAuditSuccess(t *testing.T) {
+	e := executor.NewDefaultExecutor()
+	ctx := context.Background()
+	_ = e.LoadSkill(ctx, newMockSkill("audit-skill", true))
+
+	// Wire in-memory audit logger
+	auditLog := execution_logs.NewInMemoryAuditLogger()
+	e.SetAuditLogger(auditLog)
+
+	_, err := e.Execute(ctx, execution.ExecutionRequest{
+		SkillID:   "audit-skill",
+		Input:     []byte("test"),
+		TenantID:  "tenant-1",
+		UserID:    "user-1",
+		RequestID: "req-1",
+	})
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	// Verify audit events: should have "started" + "success"
+	events, err := auditLog.Query(ctx, execution_logs.QueryFilter{RequestID: "req-1"})
+	if err != nil {
+		t.Fatalf("Query failed: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("Expected 2 audit events (started + success), got %d", len(events))
+	}
+
+	// Check events by outcome (order depends on implementation)
+	// Find the "started" and "success" events
+	var startedEvt, successEvt *execution_logs.Event
+	for i := range events {
+		switch events[i].Outcome {
+		case "started":
+			startedEvt = &events[i]
+		case "success":
+			successEvt = &events[i]
+		}
+	}
+
+	if startedEvt == nil {
+		t.Fatal("Missing 'started' audit event")
+	}
+	if successEvt == nil {
+		t.Fatal("Missing 'success' audit event")
+	}
+
+	// Verify started event
+	if startedEvt.Action != "skills.execute" {
+		t.Errorf("Started event Action: got %q, want %q", startedEvt.Action, "skills.execute")
+	}
+	if startedEvt.Resource != "skill/audit-skill" {
+		t.Errorf("Started event Resource: got %q, want %q", startedEvt.Resource, "skill/audit-skill")
+	}
+	if startedEvt.TenantID != "tenant-1" {
+		t.Errorf("Started event TenantID: got %q, want %q", startedEvt.TenantID, "tenant-1")
+	}
+	if startedEvt.UserID != "user-1" {
+		t.Errorf("Started event UserID: got %q, want %q", startedEvt.UserID, "user-1")
+	}
+
+	// Verify success event
+	if successEvt.Duration == 0 {
+		t.Error("Success event Duration should be > 0")
+	}
+}
+
+func TestExecuteWithAuditFailure(t *testing.T) {
+	e := executor.NewDefaultExecutor()
+	ctx := context.Background()
+
+	auditLog := execution_logs.NewInMemoryAuditLogger()
+	e.SetAuditLogger(auditLog)
+
+	_, err := e.Execute(ctx, execution.ExecutionRequest{
+		SkillID:   "nonexistent",
+		TenantID:  "tenant-1",
+		UserID:    "user-1",
+		RequestID: "req-2",
+	})
+	if err == nil {
+		t.Fatal("Expected error for nonexistent skill")
+	}
+
+	// Verify: started + failure
+	events, err := auditLog.Query(ctx, execution_logs.QueryFilter{RequestID: "req-2"})
+	if err != nil {
+		t.Fatalf("Query failed: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("Expected 2 audit events (started + failure), got %d", len(events))
+	}
+
+	// Find the failure event
+	var failureEvt *execution_logs.Event
+	for i := range events {
+		if events[i].Outcome == "failure" {
+			failureEvt = &events[i]
+		}
+	}
+
+	if failureEvt == nil {
+		t.Fatal("Missing 'failure' audit event")
+	}
+	if failureEvt.Metadata["error"] != "skill not loaded" {
+		t.Errorf("Metadata error: got %q, want %q", failureEvt.Metadata["error"], "skill not loaded")
+	}
+}
+
+func TestExecuteWithNilAuditLogger(t *testing.T) {
+	e := executor.NewDefaultExecutor()
+	ctx := context.Background()
+	_ = e.LoadSkill(ctx, newMockSkill("no-audit", true))
+
+	// No SetAuditLogger called -- auditLogger is nil
+
+	result, err := e.Execute(ctx, execution.ExecutionRequest{
+		SkillID: "no-audit",
+		Input:   []byte("test"),
+	})
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if result.Status != execution.StatusSuccess {
+		t.Errorf("Expected StatusSuccess, got %v", result.Status)
+	}
+}
+
+func TestSetAuditLoggerNilSafe(t *testing.T) {
+	e := executor.NewDefaultExecutor()
+	// Should not panic
+	e.SetAuditLogger(nil)
+	ctx := context.Background()
+	_ = e.LoadSkill(ctx, newMockSkill("nil-audit", true))
+
+	result, err := e.Execute(ctx, execution.ExecutionRequest{SkillID: "nil-audit"})
+	if err != nil {
+		t.Fatalf("Execute with nil audit logger failed: %v", err)
+	}
+	if result.Status != execution.StatusSuccess {
+		t.Errorf("Expected StatusSuccess, got %v", result.Status)
 	}
 }

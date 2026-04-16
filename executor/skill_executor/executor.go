@@ -8,9 +8,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/openbotstack/openbotstack-core/execution"
 	"github.com/openbotstack/openbotstack-core/registry/skills"
 	"github.com/openbotstack/openbotstack-core/control/agent"
+	"github.com/openbotstack/openbotstack-runtime/logging/execution_logs"
 	"github.com/openbotstack/openbotstack-runtime/sandbox/wasm"
 	"github.com/openbotstack/openbotstack-runtime/toolrunner"
 )
@@ -40,11 +43,12 @@ type WasmSkill interface {
 
 // DefaultExecutor implements SkillExecutor with real Wasm execution.
 type DefaultExecutor struct {
-	mu      sync.RWMutex
-	skills  map[string]skills.Skill
-	wasm    map[string][]byte // Wasm bytes per skill
-	runtime *wasm.Runtime
-	tools   toolrunner.ToolRunner
+	mu          sync.RWMutex
+	skills      map[string]skills.Skill
+	wasm        map[string][]byte // Wasm bytes per skill
+	runtime     *wasm.Runtime
+	tools       toolrunner.ToolRunner
+	auditLogger execution_logs.AuditLogger
 }
 
 // NewDefaultExecutor creates a new executor.
@@ -70,6 +74,14 @@ func (e *DefaultExecutor) SetToolRunner(tools toolrunner.ToolRunner) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.tools = tools
+}
+
+// SetAuditLogger sets the audit logger for execution events.
+// If called with nil, audit logging is disabled (safe to call).
+func (e *DefaultExecutor) SetAuditLogger(l execution_logs.AuditLogger) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.auditLogger = l
 }
 
 // LoadSkill prepares a skill for execution.
@@ -203,16 +215,54 @@ func (e *DefaultExecutor) Execute(ctx context.Context, req execution.ExecutionRe
 		}, ErrEmptySkillID
 	}
 
+	// Snapshot audit logger under read lock
+	e.mu.RLock()
+	al := e.auditLogger
+	e.mu.RUnlock()
+
+	// Emit audit: started
+	e.emitAudit(ctx, al, execution_logs.Event{
+		ID:        uuid.NewString(),
+		TenantID:  req.TenantID,
+		UserID:    req.UserID,
+		RequestID: req.RequestID,
+		Action:    "skills.execute",
+		Resource:  "skill/" + req.SkillID,
+		Outcome:   "started",
+		Timestamp: start,
+	})
+
+	if req.SkillID == "" {
+		return &execution.ExecutionResult{
+			Status:   execution.StatusFailed,
+			Error:    "empty skill ID",
+			Duration: time.Since(start),
+		}, ErrEmptySkillID
+	}
+
 	e.mu.RLock()
 	s, exists := e.skills[req.SkillID]
 	wasmBytes := e.wasm[req.SkillID]
 	e.mu.RUnlock()
 
 	if !exists {
+		elapsed := time.Since(start)
+		e.emitAudit(ctx, al, execution_logs.Event{
+			ID:        uuid.NewString(),
+			TenantID:  req.TenantID,
+			UserID:    req.UserID,
+			RequestID: req.RequestID,
+			Action:    "skills.execute",
+			Resource:  "skill/" + req.SkillID,
+			Outcome:   "failure",
+			Duration:  elapsed,
+			Metadata:  map[string]string{"error": "skill not loaded"},
+			Timestamp: time.Now(),
+		})
 		return &execution.ExecutionResult{
 			Status:   execution.StatusFailed,
 			Error:    "skill not loaded",
-			Duration: time.Since(start),
+			Duration: elapsed,
 		}, execution.ErrSkillNotLoaded
 	}
 
@@ -233,25 +283,64 @@ func (e *DefaultExecutor) Execute(ctx context.Context, req execution.ExecutionRe
 		}
 
 		output, err := e.runtime.Execute(ctx, wasmBytes, req.Input, limits)
+		elapsed := time.Since(start)
+
 		if err != nil {
+			outcome := "failure"
 			if ctx.Err() == context.DeadlineExceeded {
+				outcome = "timeout"
+				e.emitAudit(ctx, al, execution_logs.Event{
+					ID:        uuid.NewString(),
+					TenantID:  req.TenantID,
+					UserID:    req.UserID,
+					RequestID: req.RequestID,
+					Action:    "skills.execute",
+					Resource:  "skill/" + req.SkillID,
+					Outcome:   outcome,
+					Duration:  elapsed,
+					Metadata:  map[string]string{"error": "execution timeout"},
+					Timestamp: time.Now(),
+				})
 				return &execution.ExecutionResult{
 					Status:   execution.StatusTimeout,
 					Error:    "execution timeout",
-					Duration: time.Since(start),
+					Duration: elapsed,
 				}, execution.ErrExecutionTimeout
 			}
+			e.emitAudit(ctx, al, execution_logs.Event{
+				ID:        uuid.NewString(),
+				TenantID:  req.TenantID,
+				UserID:    req.UserID,
+				RequestID: req.RequestID,
+				Action:    "skills.execute",
+				Resource:  "skill/" + req.SkillID,
+				Outcome:   outcome,
+				Duration:  elapsed,
+				Metadata:  map[string]string{"error": err.Error()},
+				Timestamp: time.Now(),
+			})
 			return &execution.ExecutionResult{
 				Status:   execution.StatusFailed,
 				Error:    err.Error(),
-				Duration: time.Since(start),
+				Duration: elapsed,
 			}, err
 		}
 
+		e.emitAudit(ctx, al, execution_logs.Event{
+			ID:        uuid.NewString(),
+			TenantID:  req.TenantID,
+			UserID:    req.UserID,
+			RequestID: req.RequestID,
+			Action:    "skills.execute",
+			Resource:  "skill/" + req.SkillID,
+			Outcome:   "success",
+			Duration:  elapsed,
+			Timestamp: time.Now(),
+		})
 		return &execution.ExecutionResult{
 			Status:   execution.StatusSuccess,
 			Output:   output,
-			Duration: time.Since(start),
+			Duration: elapsed,
 		}, nil
 	}
 
@@ -265,12 +354,35 @@ func (e *DefaultExecutor) Execute(ctx context.Context, req execution.ExecutionRe
 	case <-ctx.Done():
 		result.Status = execution.StatusTimeout
 		result.Error = "execution timeout"
+		e.emitAudit(ctx, al, execution_logs.Event{
+			ID:        uuid.NewString(),
+			TenantID:  req.TenantID,
+			UserID:    req.UserID,
+			RequestID: req.RequestID,
+			Action:    "skills.execute",
+			Resource:  "skill/" + req.SkillID,
+			Outcome:   "timeout",
+			Duration:  result.Duration,
+			Metadata:  map[string]string{"error": "execution timeout"},
+			Timestamp: time.Now(),
+		})
 		return result, execution.ErrExecutionTimeout
 	default:
 		// For declarative skills, return empty output (handled by agent)
 		result.Output = []byte(`{"type": "declarative"}`)
 	}
 
+	e.emitAudit(ctx, al, execution_logs.Event{
+		ID:        uuid.NewString(),
+		TenantID:  req.TenantID,
+		UserID:    req.UserID,
+		RequestID: req.RequestID,
+		Action:    "skills.execute",
+		Resource:  "skill/" + req.SkillID,
+		Outcome:   "success",
+		Duration:  result.Duration,
+		Timestamp: time.Now(),
+	})
 	return result, nil
 }
 
@@ -368,4 +480,13 @@ func (e *DefaultExecutor) Get(id string) (skills.Skill, error) {
 		return nil, ErrSkillNotFound
 	}
 	return s, nil
+}
+
+// emitAudit logs an audit event if the logger is non-nil.
+// Errors are silently ignored to avoid disrupting execution flow.
+func (e *DefaultExecutor) emitAudit(ctx context.Context, al execution_logs.AuditLogger, event execution_logs.Event) {
+	if al == nil {
+		return
+	}
+	_ = al.Log(ctx, event) //nolint:errcheck // audit failures must not disrupt execution
 }
