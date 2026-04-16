@@ -55,7 +55,7 @@ func TestReadyzAllHealthy(t *testing.T) {
 	router := NewRouter(nil)
 	router.SetBuildInfo(BuildInfo{Version: "1.0", Commit: "abc", Branch: "main", BuildTime: "2026-01-01"})
 	router.SetHealthCheckers(
-		&mockHealthChecker{name: "redis", status: "healthy"},
+		&mockHealthChecker{name: "storage", status: "healthy"},
 		&mockHealthChecker{name: "llm", status: "healthy"},
 	)
 
@@ -82,7 +82,7 @@ func TestReadyzUnhealthyComponent(t *testing.T) {
 	router := NewRouter(nil)
 	router.SetBuildInfo(BuildInfo{Version: "1.0"})
 	router.SetHealthCheckers(
-		&mockHealthChecker{name: "redis", status: "healthy"},
+		&mockHealthChecker{name: "storage", status: "healthy"},
 		&mockHealthChecker{name: "llm", status: "unhealthy", err: "connection refused"},
 	)
 

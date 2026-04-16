@@ -19,3 +19,20 @@ memory:
   summary_threshold: 20
   summary_enabled: true
   max_history_messages: 50
+
+# Optional: Vector search (requires PostgreSQL + pgvector)
+# vector:
+#   enabled: false
+#   database_url: ""  # env: OBS_VECTOR_DB_URL
+#   model: "text-embedding-3-small"
+#   dimensions: 512
+
+# Optional: TLS configuration
+# tls:
+#   cert_file: ""
+#   key_file: ""
+
+# Optional: Sandbox configuration
+# sandbox:
+#   http_allowlist: []
+#   tool_registry_url: ""
