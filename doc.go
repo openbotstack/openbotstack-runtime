@@ -7,11 +7,9 @@
 // Key components:
 //   - SkillExecutor: Executes skills with timeout and sandboxing
 //   - ToolAdapter: HTTP/DB/API tool wrappers
-//   - AuditLogger: Structured audit to PostgreSQL
-//   - RateLimiter: Redis-backed token bucket implementation
+//   - AuditLogger: SQLite-backed structured audit logging
+//   - RateLimiter: SQLite-backed token bucket rate limiting
 //
-// This module is stateless by design - all state is externalized to:
-//   - Redis: Session, rate limits
-//   - PostgreSQL: Audit logs
-//   - Milvus: Long-term memory
+// Persistence uses embedded SQLite for zero external dependencies:
+//   - SQLite: Audit logs, rate limits, session memory, quota
 package runtime

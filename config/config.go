@@ -59,7 +59,6 @@ type TLSConfig struct {
 type Config struct {
 	Server        ServerConfig        `yaml:"server"`
 	TLS           TLSConfig           `yaml:"tls"`
-	Redis         RedisConfig         `yaml:"redis"`
 	Providers     ProvidersConfig     `yaml:"providers"`
 	Observability ObservabilityConfig `yaml:"observability"`
 	Memory        MemoryConfig        `yaml:"memory"`
@@ -75,10 +74,6 @@ type ObservabilityConfig struct {
 
 type ServerConfig struct {
 	Addr string `yaml:"addr"`
-}
-
-type RedisConfig struct {
-	URL string `yaml:"url"`
 }
 
 type ProvidersConfig struct {
@@ -141,9 +136,6 @@ func Load(path string) (*Config, error) {
 	// Override with Environment Variables
 	if val := os.Getenv("OBS_SERVER_ADDR"); val != "" {
 		cfg.Server.Addr = val
-	}
-	if val := os.Getenv("OBS_REDIS_URL"); val != "" {
-		cfg.Redis.URL = val
 	}
 
 	// LLM Overrides

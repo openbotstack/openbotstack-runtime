@@ -1,12 +1,6 @@
 server:
   addr: ":8080"
 
-database:
-  path: "openbotstack.db"
-
-redis:
-  url: "redis://localhost:6379"
-
 providers:
   llm:
     default: modelscope
