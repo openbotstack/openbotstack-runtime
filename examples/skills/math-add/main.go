@@ -1,14 +1,14 @@
-// Package main implements a deterministic math.add skills.
+// Package main implements a deterministic math-add skill.
 //
-// This is a CODE skill - pure Go, no Wasm, deterministic.
-// Build:
+// Build for wasm:
 //
-//	go build -o math-add main.go
+//	GOOS=wasip1 GOARCH=wasm go build -o main.wasm .
 package main
 
 import (
 	"encoding/json"
-	"fmt"
+	"io"
+	"os"
 )
 
 // Input represents the skill input.
@@ -23,20 +23,21 @@ type Output struct {
 	Error string  `json:"error,omitempty"`
 }
 
-// Execute performs the addition.
-func Execute(inputJSON []byte) ([]byte, error) {
+// run is the core logic, separated from I/O for testability.
+func run(inputData []byte) []byte {
 	var input Input
-	if err := json.Unmarshal(inputJSON, &input); err != nil {
-		return json.Marshal(Output{Error: "invalid input: " + err.Error()})
+	if err := json.Unmarshal(inputData, &input); err != nil {
+		output := Output{Error: "invalid input: " + err.Error()}
+		data, _ := json.Marshal(output)
+		return data
 	}
 
 	output := Output{Sum: input.A + input.B}
-	return json.Marshal(output)
+	data, _ := json.Marshal(output)
+	return data
 }
 
 func main() {
-	// Example usage
-	input := `{"a": 5, "b": 3}`
-	result, _ := Execute([]byte(input))
-	fmt.Println(string(result))
+	input, _ := io.ReadAll(os.Stdin)
+	os.Stdout.Write(run(input))
 }

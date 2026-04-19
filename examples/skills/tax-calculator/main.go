@@ -1,4 +1,4 @@
-// Package main implements a deterministic tax calculator skills.
+// Package main implements a deterministic tax calculator skill.
 //
 // This skill demonstrates:
 //   - Pure code logic with NO LLM calls
@@ -7,12 +7,14 @@
 //
 // Build for wasm:
 //
-//	tinygo build -o tax.wasm -target wasi -scheduler=none main.go
+//	GOOS=wasip1 GOARCH=wasm go build -o main.wasm .
 package main
 
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 )
 
 // TaxInput is the input from the runtime.
@@ -33,29 +35,17 @@ type TaxOutput struct {
 	Error       string  `json:"error,omitempty"`
 }
 
-// Tax rates by region and category (deterministic, auditable)
+// Tax rates by region and category (deterministic, auditable).
 var taxRates = map[string]map[string]float64{
-	"US": {
-		"goods":    0.08,
-		"services": 0.06,
-		"digital":  0.00,
-	},
-	"EU": {
-		"goods":    0.20,
-		"services": 0.20,
-		"digital":  0.23,
-	},
-	"CN": {
-		"goods":    0.13,
-		"services": 0.06,
-		"digital":  0.06,
-	},
+	"US": {"goods": 0.08, "services": 0.06, "digital": 0.00},
+	"EU": {"goods": 0.20, "services": 0.20, "digital": 0.23},
+	"CN": {"goods": 0.13, "services": 0.06, "digital": 0.06},
 }
 
-// calculateTax runs the core tax calculation logic.
-func calculateTax(inputData []byte) []byte {
+// run is the core calculation logic, separated from I/O for testability.
+func run(inputData []byte) []byte {
 	if len(inputData) == 0 {
-		return nil
+		return marshalError("empty input")
 	}
 
 	var input TaxInput
@@ -82,14 +72,11 @@ func calculateTax(inputData []byte) []byte {
 	}
 
 	// Deterministic calculation
-	taxAmount := input.Amount * rate
-	totalAmount := input.Amount + taxAmount
-
 	output := TaxOutput{
 		Amount:      input.Amount,
 		TaxRate:     rate,
-		TaxAmount:   taxAmount,
-		TotalAmount: totalAmount,
+		TaxAmount:   input.Amount * rate,
+		TotalAmount: input.Amount + input.Amount*rate,
 		Region:      input.Region,
 		Category:    input.Category,
 	}
@@ -104,29 +91,7 @@ func marshalError(msg string) []byte {
 	return data
 }
 
-// main is the library initialization entry point.
-func main() {}
-
-// Test helpers
-var (
-	inputBuffer  []byte
-	outputBuffer []byte
-)
-
-// SetInput sets the input buffer (for testing).
-func SetInput(data []byte) { inputBuffer = data }
-
-// GetOutput gets the output buffer (for testing).
-func GetOutput() []byte { return outputBuffer }
-
-// ResetBuffers clears buffers (for testing).
-func ResetBuffers() {
-	inputBuffer = nil
-	outputBuffer = nil
-}
-
-// Execute runs the calculation using internal buffers (for testing).
-func Execute() error {
-	outputBuffer = calculateTax(inputBuffer)
-	return nil
+func main() {
+	input, _ := io.ReadAll(os.Stdin)
+	os.Stdout.Write(run(input))
 }

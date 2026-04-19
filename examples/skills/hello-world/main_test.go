@@ -5,128 +5,117 @@ import (
 	"testing"
 )
 
-func TestExecuteEmptyInput(t *testing.T) {
-	inputBuffer = nil
-	outputBuffer = nil
+func TestEmptyInput(t *testing.T) {
+	output := run(nil)
 
-	err := Execute()
-	if err != nil {
-		t.Fatalf("Execute failed: %v", err)
+	var result SkillOutput
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatalf("Failed to parse output: %v", err)
 	}
 
-	var output SkillOutput
-	_ = json.Unmarshal(outputBuffer, &output)
-
-	if output.Message != "Hello! I'm the hello-world skills. How can I help you?" {
-		t.Errorf("Unexpected response: %s", output.Message)
+	if result.Message != "Hello! I'm the hello-world skill. How can I help you?" {
+		t.Errorf("Unexpected response: %s", result.Message)
 	}
 }
 
-func TestExecuteHello(t *testing.T) {
+func TestHello(t *testing.T) {
 	input := SkillInput{Message: "hello there!"}
 	data, _ := json.Marshal(input)
-	SetInput(data)
 
-	_ = Execute()
+	output := run(data)
 
-	var output SkillOutput
-	_ = json.Unmarshal(GetOutput(), &output)
+	var result SkillOutput
+	_ = json.Unmarshal(output, &result)
 
-	if output.Message != "Hello! I'm the hello-world skills. How can I help you?" {
-		t.Errorf("Unexpected response: %s", output.Message)
+	if result.Message != "Hello! I'm the hello-world skill. How can I help you?" {
+		t.Errorf("Unexpected response: %s", result.Message)
 	}
 }
 
-func TestExecuteHi(t *testing.T) {
+func TestHi(t *testing.T) {
 	input := SkillInput{Message: "Hi"}
 	data, _ := json.Marshal(input)
-	SetInput(data)
 
-	_ = Execute()
+	output := run(data)
 
-	var output SkillOutput
-	_ = json.Unmarshal(GetOutput(), &output)
+	var result SkillOutput
+	_ = json.Unmarshal(output, &result)
 
-	if output.Message != "Hello! I'm the hello-world skills. How can I help you?" {
-		t.Errorf("Unexpected response: %s", output.Message)
+	if result.Message != "Hello! I'm the hello-world skill. How can I help you?" {
+		t.Errorf("Unexpected response: %s", result.Message)
 	}
 }
 
-func TestExecuteName(t *testing.T) {
+func TestName(t *testing.T) {
 	input := SkillInput{Message: "What's your name?"}
 	data, _ := json.Marshal(input)
-	SetInput(data)
 
-	_ = Execute()
+	output := run(data)
 
-	var output SkillOutput
-	_ = json.Unmarshal(GetOutput(), &output)
+	var result SkillOutput
+	_ = json.Unmarshal(output, &result)
 
-	if output.Message != "I'm the OpenBotStack hello-world skill!" {
-		t.Errorf("Unexpected response: %s", output.Message)
+	if result.Message != "I'm the OpenBotStack hello-world skill!" {
+		t.Errorf("Unexpected response: %s", result.Message)
 	}
 }
 
-func TestExecuteHelp(t *testing.T) {
+func TestHelp(t *testing.T) {
 	input := SkillInput{Message: "help"}
 	data, _ := json.Marshal(input)
-	SetInput(data)
 
-	_ = Execute()
+	output := run(data)
 
-	var output SkillOutput
-	_ = json.Unmarshal(GetOutput(), &output)
+	var result SkillOutput
+	_ = json.Unmarshal(output, &result)
 
-	if output.Message != "I can respond to greetings. Try saying 'hello' or ask my name!" {
-		t.Errorf("Unexpected response: %s", output.Message)
+	if result.Message != "I can respond to greetings. Try saying 'hello' or ask my name!" {
+		t.Errorf("Unexpected response: %s", result.Message)
 	}
 }
 
-func TestExecuteVersion(t *testing.T) {
+func TestVersion(t *testing.T) {
 	input := SkillInput{Message: "version"}
 	data, _ := json.Marshal(input)
-	SetInput(data)
 
-	_ = Execute()
+	output := run(data)
 
-	var output SkillOutput
-	_ = json.Unmarshal(GetOutput(), &output)
+	var result SkillOutput
+	_ = json.Unmarshal(output, &result)
 
-	if output.Message != "hello-world skill v1.0.0" {
-		t.Errorf("Unexpected response: %s", output.Message)
+	if result.Message != "hello-world skill v1.0.0" {
+		t.Errorf("Unexpected response: %s", result.Message)
 	}
 }
 
-func TestExecuteUnknown(t *testing.T) {
+func TestUnknown(t *testing.T) {
 	input := SkillInput{Message: "random message"}
 	data, _ := json.Marshal(input)
-	SetInput(data)
 
-	_ = Execute()
+	output := run(data)
 
-	var output SkillOutput
-	_ = json.Unmarshal(GetOutput(), &output)
+	var result SkillOutput
+	_ = json.Unmarshal(output, &result)
 
-	if output.Message != "I heard you say: random message" {
-		t.Errorf("Unexpected response: %s", output.Message)
+	if result.Message != "I heard you say: random message" {
+		t.Errorf("Unexpected response: %s", result.Message)
 	}
 }
 
 func TestOutputMetadata(t *testing.T) {
 	input := SkillInput{Message: "hi"}
 	data, _ := json.Marshal(input)
-	SetInput(data)
 
-	_ = Execute()
+	output := run(data)
 
-	var output SkillOutput
-	_ = json.Unmarshal(GetOutput(), &output)
+	var result SkillOutput
+	_ = json.Unmarshal(output, &result)
 
-	if output.Data["skill"] != "hello-world" {
-		t.Errorf("Expected skill='hello-world', got %q", output.Data["skill"])
+	if result.Data["skill"] != "hello-world" {
+		t.Errorf("Expected skill='hello-world', got %q", result.Data["skill"])
 	}
-	if output.Data["version"] != "1.0.0" {
-		t.Errorf("Expected version='1.0.0', got %q", output.Data["version"])
+	if result.Data["version"] != "1.0.0" {
+		t.Errorf("Expected version='1.0.0', got %q", result.Data["version"])
 	}
 }
 
@@ -138,14 +127,24 @@ func TestInputWithSession(t *testing.T) {
 		Message:   "hello",
 	}
 	data, _ := json.Marshal(input)
-	SetInput(data)
 
-	_ = Execute()
+	output := run(data)
 
-	var output SkillOutput
-	_ = json.Unmarshal(GetOutput(), &output)
+	var result SkillOutput
+	_ = json.Unmarshal(output, &result)
 
-	if output.Error != "" {
-		t.Errorf("Unexpected error: %s", output.Error)
+	if result.Error != "" {
+		t.Errorf("Unexpected error: %s", result.Error)
+	}
+}
+
+func TestInvalidJSON(t *testing.T) {
+	output := run([]byte("not json"))
+
+	var result SkillOutput
+	_ = json.Unmarshal(output, &result)
+
+	if result.Error == "" {
+		t.Error("Expected error for invalid JSON")
 	}
 }

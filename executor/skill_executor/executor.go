@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -41,14 +42,21 @@ type WasmSkill interface {
 	WasmBytes() []byte
 }
 
+// TextGenerator generates text from a prompt using an LLM.
+// Used for declarative skills that have no Wasm binary.
+type TextGenerator interface {
+	GenerateText(ctx context.Context, prompt string) (string, error)
+}
+
 // DefaultExecutor implements SkillExecutor with real Wasm execution.
 type DefaultExecutor struct {
-	mu          sync.RWMutex
-	skills      map[string]skills.Skill
-	wasm        map[string][]byte // Wasm bytes per skill
-	runtime     *wasm.Runtime
-	tools       toolrunner.ToolRunner
-	auditLogger execution_logs.AuditLogger
+	mu            sync.RWMutex
+	skills        map[string]skills.Skill
+	wasm          map[string][]byte // Wasm bytes per skill
+	runtime       *wasm.Runtime
+	tools         toolrunner.ToolRunner
+	auditLogger   execution_logs.AuditLogger
+	textGenerator TextGenerator // optional: for declarative (non-Wasm) skills
 }
 
 // NewDefaultExecutor creates a new executor.
@@ -82,6 +90,14 @@ func (e *DefaultExecutor) SetAuditLogger(l execution_logs.AuditLogger) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.auditLogger = l
+}
+
+// SetTextGenerator sets the LLM text generator for declarative skill execution.
+// If nil, declarative skills will return a placeholder response.
+func (e *DefaultExecutor) SetTextGenerator(tg TextGenerator) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.textGenerator = tg
 }
 
 // LoadSkill prepares a skill for execution.
@@ -286,6 +302,42 @@ func (e *DefaultExecutor) Execute(ctx context.Context, req execution.ExecutionRe
 		elapsed := time.Since(start)
 
 		if err != nil {
+			// Wasm execution failed — try LLM fallback if available
+			e.mu.RLock()
+			tg := e.textGenerator
+			e.mu.RUnlock()
+
+			if ctx.Err() != context.DeadlineExceeded && tg != nil {
+				slog.WarnContext(ctx, "wasm execution failed, falling back to LLM",
+					"skill_id", req.SkillID, "error", err)
+				prompt := fmt.Sprintf("You are performing the skill: %s.\n\n%s\n\nUser input:\n%s",
+					s.Name(), s.Description(), string(req.Input))
+				llmCtx, llmCancel := context.WithTimeout(context.Background(), 60*time.Second)
+				llmOutput, llmErr := tg.GenerateText(llmCtx, prompt)
+				llmCancel()
+				if llmErr == nil {
+					e.emitAudit(ctx, al, execution_logs.Event{
+						ID:        uuid.NewString(),
+						TenantID:  req.TenantID,
+						UserID:    req.UserID,
+						RequestID: req.RequestID,
+						Action:    "skills.execute",
+						Resource:  "skill/" + req.SkillID,
+						Outcome:   "success",
+						Duration:  time.Since(start),
+						Metadata:  map[string]string{"fallback": "llm"},
+						Timestamp: time.Now(),
+					})
+					return &execution.ExecutionResult{
+						Status:   execution.StatusSuccess,
+						Output:   []byte(llmOutput),
+						Duration: time.Since(start),
+					}, nil
+				}
+				// LLM also failed — return original Wasm error
+				slog.WarnContext(ctx, "LLM fallback also failed", "error", llmErr)
+			}
+
 			outcome := "failure"
 			if ctx.Err() == context.DeadlineExceeded {
 				outcome = "timeout"
@@ -344,7 +396,7 @@ func (e *DefaultExecutor) Execute(ctx context.Context, req execution.ExecutionRe
 		}, nil
 	}
 
-	// Fallback for skills without Wasm (declarative skills)
+	// Fallback for skills without Wasm (declarative/LLM-assisted skills)
 	result := &execution.ExecutionResult{
 		Status:   execution.StatusSuccess,
 		Duration: time.Since(start),
@@ -368,8 +420,41 @@ func (e *DefaultExecutor) Execute(ctx context.Context, req execution.ExecutionRe
 		})
 		return result, execution.ErrExecutionTimeout
 	default:
-		// For declarative skills, return empty output (handled by agent)
-		result.Output = []byte(`{"type": "declarative"}`)
+		// Try LLM-based execution for declarative skills
+		e.mu.RLock()
+		tg := e.textGenerator
+		e.mu.RUnlock()
+
+		if tg != nil {
+			// Build prompt from skill description + user input
+			prompt := fmt.Sprintf("You are performing the skill: %s.\n\n%s\n\nUser input:\n%s",
+				s.Name(), s.Description(), string(req.Input))
+			llmCtx, llmCancel := context.WithTimeout(context.Background(), 60*time.Second)
+			output, err := tg.GenerateText(llmCtx, prompt)
+			llmCancel()
+			if err != nil {
+				result.Status = execution.StatusFailed
+				result.Error = "LLM generation failed: " + err.Error()
+				e.emitAudit(ctx, al, execution_logs.Event{
+					ID:        uuid.NewString(),
+					TenantID:  req.TenantID,
+					UserID:    req.UserID,
+					RequestID: req.RequestID,
+					Action:    "skills.execute",
+					Resource:  "skill/" + req.SkillID,
+					Outcome:   "failure",
+					Duration:  time.Since(start),
+					Metadata:  map[string]string{"error": err.Error()},
+					Timestamp: time.Now(),
+				})
+				return result, err
+			}
+			result.Output = []byte(output)
+			result.Duration = time.Since(start)
+		} else {
+			// No LLM available — return the raw input as passthrough
+			result.Output = req.Input
+		}
 	}
 
 	e.emitAudit(ctx, al, execution_logs.Event{

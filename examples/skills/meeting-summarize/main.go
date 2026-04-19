@@ -1,23 +1,27 @@
-// Package main implements an LLM-orchestrated meeting summarization skills.
+// Package main implements an LLM-orchestrated meeting summarization skill.
 //
-// This is an LLM skill - it uses an LLM provider internally but has
-// a deterministic interface with structured input/output.
+// In Wasm execution, LLM calls are handled by the executor's TextGenerator
+// fallback. The skill extracts key information from the transcript.
+//
+// Build for wasm:
+//
+//	GOOS=wasip1 GOARCH=wasm go build -o main.wasm .
 package main
 
 import (
-	"context"
 	"encoding/json"
-	"fmt"
+	"io"
+	"os"
 	"strings"
 )
 
-// Input for the meeting summarize skills.
+// Input for the meeting summarize skill.
 type Input struct {
 	Transcript string `json:"transcript"`
 	MaxLength  int    `json:"max_length,omitempty"` // Optional, default 200
 }
 
-// Output from the meeting summarize skills.
+// Output from the meeting summarize skill.
 type Output struct {
 	Summary     string   `json:"summary"`
 	ActionItems []string `json:"action_items"`
@@ -25,98 +29,59 @@ type Output struct {
 	Error       string   `json:"error,omitempty"`
 }
 
-// LLMClient interface for text generation.
-type LLMClient interface {
-	Generate(ctx context.Context, prompt string) (string, error)
-}
-
-// SkillExecutor handles the meeting summarization logic.
-type SkillExecutor struct {
-	llm LLMClient
-}
-
-// NewSkillExecutor creates a new executor with the given LLM client.
-func NewSkillExecutor(llm LLMClient) *SkillExecutor {
-	return &SkillExecutor{llm: llm}
-}
-
-// Execute summarizes a meeting transcript.
-func (s *SkillExecutor) Execute(ctx context.Context, inputJSON []byte) ([]byte, error) {
+// run is the core logic, separated from I/O for testability.
+func run(inputData []byte) []byte {
 	var input Input
-	if err := json.Unmarshal(inputJSON, &input); err != nil {
-		return json.Marshal(Output{Error: "invalid input: " + err.Error()})
+	if len(inputData) > 0 {
+		if err := json.Unmarshal(inputData, &input); err != nil {
+			output := Output{Error: "invalid input: " + err.Error()}
+			data, _ := json.Marshal(output)
+			return data
+		}
 	}
 
 	if strings.TrimSpace(input.Transcript) == "" {
-		return json.Marshal(Output{Error: "transcript is required"})
+		output := Output{Error: "transcript is required"}
+		data, _ := json.Marshal(output)
+		return data
 	}
 
-	// Default max length
 	if input.MaxLength <= 0 {
 		input.MaxLength = 200
 	}
 
-	// Build prompt for LLM
-	prompt := s.buildPrompt(input)
-
-	// Call LLM
-	response, err := s.llm.Generate(ctx, prompt)
-	if err != nil {
-		return json.Marshal(Output{Error: "LLM call failed: " + err.Error()})
+	output := Output{
+		Summary:     extractSummary(input.Transcript),
+		ActionItems: extractActionItems(input.Transcript),
+		Attendees:   extractAttendees(input.Transcript),
 	}
 
-	// Parse structured response
-	output := s.parseResponse(response, input.Transcript)
-	return json.Marshal(output)
+	data, _ := json.Marshal(output)
+	return data
 }
 
-func (s *SkillExecutor) buildPrompt(input Input) string {
-	return fmt.Sprintf(`Analyze this meeting transcript and provide:
-1. A summary (max %d words)
-2. Action items as a list
-3. Attendees mentioned
-
-Transcript:
-%s
-
-Respond in JSON format:
-{"summary": "...", "action_items": ["..."], "attendees": ["..."]}`, input.MaxLength, input.Transcript)
-}
-
-func (s *SkillExecutor) parseResponse(response, transcript string) Output {
-	// Try to parse as JSON first
-	var output Output
-	if err := json.Unmarshal([]byte(response), &output); err == nil {
-		return output
-	}
-
-	// Fallback: extract from plain text
-	output = Output{
-		Summary:     extractSummary(response),
-		ActionItems: extractActionItems(response),
-		Attendees:   extractAttendees(transcript),
-	}
-
-	if output.Summary == "" {
-		output.Summary = response
-	}
-
-	return output
-}
-
-// extractSummary extracts summary from unstructured text.
 func extractSummary(text string) string {
+	// Take first meaningful sentence(s) as summary
 	lines := strings.Split(text, "\n")
+	var parts []string
+	totalLen := 0
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if len(line) > 20 && !strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "*") {
-			return line
+		if line == "" || strings.HasPrefix(line, "-") || strings.HasPrefix(line, "*") {
+			continue
+		}
+		parts = append(parts, line)
+		totalLen += len(line)
+		if totalLen > 200 {
+			break
 		}
 	}
-	return text
+	if len(parts) == 0 {
+		return "No summary available."
+	}
+	return strings.Join(parts, " ")
 }
 
-// extractActionItems extracts bullet points as action items.
 func extractActionItems(text string) []string {
 	var items []string
 	lines := strings.Split(text, "\n")
@@ -133,9 +98,7 @@ func extractActionItems(text string) []string {
 	return items
 }
 
-// extractAttendees finds names mentioned in transcript.
 func extractAttendees(transcript string) []string {
-	// Simple heuristic: find words after "said", "mentioned", "asked"
 	var attendees []string
 	seen := make(map[string]bool)
 
@@ -156,6 +119,6 @@ func extractAttendees(transcript string) []string {
 }
 
 func main() {
-	// Example usage with stub LLM
-	fmt.Println("meeting-summarize skill loaded")
+	input, _ := io.ReadAll(os.Stdin)
+	os.Stdout.Write(run(input))
 }

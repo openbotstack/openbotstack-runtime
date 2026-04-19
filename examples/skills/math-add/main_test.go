@@ -10,41 +10,17 @@ func TestExecuteSuccess(t *testing.T) {
 		name    string
 		input   string
 		wantSum float64
-		wantErr bool
 	}{
-		{
-			name:    "positive integers",
-			input:   `{"a": 5, "b": 3}`,
-			wantSum: 8,
-		},
-		{
-			name:    "negative numbers",
-			input:   `{"a": -10, "b": 5}`,
-			wantSum: -5,
-		},
-		{
-			name:    "floats",
-			input:   `{"a": 1.5, "b": 2.5}`,
-			wantSum: 4.0,
-		},
-		{
-			name:    "zero",
-			input:   `{"a": 0, "b": 0}`,
-			wantSum: 0,
-		},
-		{
-			name:    "large numbers",
-			input:   `{"a": 999999999, "b": 1}`,
-			wantSum: 1000000000,
-		},
+		{"positive integers", `{"a": 5, "b": 3}`, 8},
+		{"negative numbers", `{"a": -10, "b": 5}`, -5},
+		{"floats", `{"a": 1.5, "b": 2.5}`, 4.0},
+		{"zero", `{"a": 0, "b": 0}`, 0},
+		{"large numbers", `{"a": 999999999, "b": 1}`, 1000000000},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := Execute([]byte(tt.input))
-			if err != nil {
-				t.Fatalf("Execute failed: %v", err)
-			}
+			result := run([]byte(tt.input))
 
 			var output Output
 			if err := json.Unmarshal(result, &output); err != nil {
@@ -74,11 +50,7 @@ func TestExecuteInvalidInput(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := Execute([]byte(tt.input))
-			// Should return result with error, not fail
-			if err != nil {
-				t.Fatalf("Execute should not return error: %v", err)
-			}
+			result := run([]byte(tt.input))
 
 			var output Output
 			_ = json.Unmarshal(result, &output)
@@ -89,20 +61,17 @@ func TestExecuteInvalidInput(t *testing.T) {
 	}
 }
 
-// Note: {} is valid JSON and unmarshal produces {a:0, b:0} - this is expected behavior
 func TestExecuteMissingFields(t *testing.T) {
-	result, _ := Execute([]byte(`{}`))
+	result := run([]byte(`{}`))
 	var output Output
 	_ = json.Unmarshal(result, &output)
-	// 0 + 0 = 0, no error expected
 	if output.Sum != 0 {
 		t.Errorf("Expected sum 0, got %v", output.Sum)
 	}
 }
 
 func TestExecuteBoundary(t *testing.T) {
-	// Edge case: very small numbers
-	result, _ := Execute([]byte(`{"a": 0.0000001, "b": 0.0000002}`))
+	result := run([]byte(`{"a": 0.0000001, "b": 0.0000002}`))
 	var output Output
 	_ = json.Unmarshal(result, &output)
 	if output.Sum < 0.0000002 || output.Sum > 0.0000004 {

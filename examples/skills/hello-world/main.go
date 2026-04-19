@@ -1,16 +1,11 @@
-// Package main implements a production-like hello-world skill for OpenBotStack.
+// Package main implements a hello-world skill for OpenBotStack.
 //
-// This is a standalone skill that can be compiled to WebAssembly and
-// executed by the OpenBotStack runtime. It demonstrates:
-//
-//   - Reading input from the host runtime
-//   - Processing user messages
-//   - Writing output back to the runtime
-//   - Using host APIs (logging, KV, LLM) - stubbed for local testing
+// Command pattern: reads input JSON from stdin, writes output JSON to stdout.
+// Compatible with GOOS=wasip1 GOARCH=wasm (Go 1.26+) and TinyGo.
 //
 // Build for wasm:
 //
-//	tinygo build -o hello.wasm -target wasi -scheduler=none main.go
+//	GOOS=wasip1 GOARCH=wasm go build -o main.wasm .
 //
 // Test locally:
 //
@@ -19,6 +14,8 @@ package main
 
 import (
 	"encoding/json"
+	"io"
+	"os"
 	"strings"
 )
 
@@ -37,62 +34,16 @@ type SkillOutput struct {
 	Error   string            `json:"error,omitempty"`
 }
 
-// Shared memory buffers (populated by host, read by guest)
-var (
-	inputBuffer  []byte
-	outputBuffer []byte
-)
-
-// SetInput is called by tests to set input data.
-func SetInput(data []byte) {
-	inputBuffer = data
-}
-
-// GetOutput is called by tests to read output data.
-func GetOutput() []byte {
-	return outputBuffer
-}
-
-// Execute is the main skill logic.
-func Execute() error {
-	// Parse input
-	var input SkillInput
-	if len(inputBuffer) > 0 {
-		if err := json.Unmarshal(inputBuffer, &input); err != nil {
-			return setError("failed to parse input: " + err.Error())
-		}
-	}
-
-	// Process message
-	response := processMessage(input.Message)
-
-	// Set output
-	output := SkillOutput{
-		Message: response,
-		Data: map[string]string{
-			"skill":   "hello-world",
-			"version": "1.0.0",
-		},
-	}
-
-	data, err := json.Marshal(output)
-	if err != nil {
-		return setError("failed to marshal output: " + err.Error())
-	}
-	outputBuffer = data
-	return nil
-}
-
-// processMessage handles different message types.
+// processMessage handles different message types (pure logic, testable).
 func processMessage(message string) string {
 	msg := strings.ToLower(strings.TrimSpace(message))
 
 	switch {
 	case msg == "":
-		return "Hello! I'm the hello-world skills. How can I help you?"
+		return "Hello! I'm the hello-world skill. How can I help you?"
 
 	case strings.Contains(msg, "hello") || strings.Contains(msg, "hi"):
-		return "Hello! I'm the hello-world skills. How can I help you?"
+		return "Hello! I'm the hello-world skill. How can I help you?"
 
 	case strings.Contains(msg, "name"):
 		return "I'm the OpenBotStack hello-world skill!"
@@ -108,19 +59,32 @@ func processMessage(message string) string {
 	}
 }
 
-func setError(msg string) error {
-	output := SkillOutput{Error: msg}
+// run is the core execution logic, separated from I/O for testability.
+func run(inputData []byte) []byte {
+	var input SkillInput
+	if len(inputData) > 0 {
+		if err := json.Unmarshal(inputData, &input); err != nil {
+			output := SkillOutput{Error: "failed to parse input: " + err.Error()}
+			data, _ := json.Marshal(output)
+			return data
+		}
+	}
+
+	response := processMessage(input.Message)
+
+	output := SkillOutput{
+		Message: response,
+		Data: map[string]string{
+			"skill":   "hello-world",
+			"version": "1.0.0",
+		},
+	}
+
 	data, _ := json.Marshal(output)
-	outputBuffer = data
-	return nil
+	return data
 }
 
-// main is required but empty for wasm.
-func main() {}
-
-// execute is the wasm entrypoint called by the runtime.
-//
-//export execute
-func execute() { //nolint:unused // wasm export
-	_ = Execute()
+func main() {
+	input, _ := io.ReadAll(os.Stdin)
+	os.Stdout.Write(run(input))
 }

@@ -551,3 +551,185 @@ func TestSetAuditLoggerNilSafe(t *testing.T) {
 		t.Errorf("Expected StatusSuccess, got %v", result.Status)
 	}
 }
+
+// mockTextGenerator implements executor.TextGenerator for testing.
+type mockTextGenerator struct {
+	response string
+	err      error
+	called   bool
+	prompt   string
+}
+
+func (m *mockTextGenerator) GenerateText(ctx context.Context, prompt string) (string, error) {
+	m.called = true
+	m.prompt = prompt
+	return m.response, m.err
+}
+
+func TestDeclarativeSkill_WithTextGenerator(t *testing.T) {
+	e := executor.NewDefaultExecutor()
+	ctx := context.Background()
+
+	skill := newMockSkill("core/summarize", true)
+	_ = e.LoadSkill(ctx, skill)
+
+	mockLLM := &mockTextGenerator{response: "This is a summary of the text."}
+	e.SetTextGenerator(mockLLM)
+
+	result, err := e.Execute(ctx, execution.ExecutionRequest{
+		SkillID: "core/summarize",
+		Input:   []byte(`{"text": "Long text to summarize"}`),
+	})
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if result.Status != execution.StatusSuccess {
+		t.Errorf("Expected StatusSuccess, got %v", result.Status)
+	}
+	if string(result.Output) != "This is a summary of the text." {
+		t.Errorf("Expected LLM output, got %q", string(result.Output))
+	}
+	if !mockLLM.called {
+		t.Error("TextGenerator was not called")
+	}
+	if mockLLM.prompt == "" {
+		t.Error("Prompt was empty")
+	}
+	// Verify the prompt includes skill description and user input
+	if !contains(mockLLM.prompt, "Test skill core/summarize") {
+		t.Errorf("Prompt should include skill name, got: %s", mockLLM.prompt)
+	}
+	if !contains(mockLLM.prompt, "Long text to summarize") {
+		t.Errorf("Prompt should include user input, got: %s", mockLLM.prompt)
+	}
+}
+
+func TestDeclarativeSkill_NoTextGenerator_Passthrough(t *testing.T) {
+	e := executor.NewDefaultExecutor()
+	ctx := context.Background()
+
+	skill := newMockSkill("core/summarize", true)
+	_ = e.LoadSkill(ctx, skill)
+	// No SetTextGenerator called
+
+	input := []byte(`{"text": "hello"}`)
+	result, err := e.Execute(ctx, execution.ExecutionRequest{
+		SkillID: "core/summarize",
+		Input:   input,
+	})
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if result.Status != execution.StatusSuccess {
+		t.Errorf("Expected StatusSuccess, got %v", result.Status)
+	}
+	// Without TextGenerator, should passthrough the raw input
+	if string(result.Output) != string(input) {
+		t.Errorf("Expected passthrough input, got %q", string(result.Output))
+	}
+}
+
+func TestDeclarativeSkill_LLMError(t *testing.T) {
+	e := executor.NewDefaultExecutor()
+	ctx := context.Background()
+
+	skill := newMockSkill("core/summarize", true)
+	_ = e.LoadSkill(ctx, skill)
+
+	mockLLM := &mockTextGenerator{err: errors.New("LLM unavailable")}
+	e.SetTextGenerator(mockLLM)
+
+	result, err := e.Execute(ctx, execution.ExecutionRequest{
+		SkillID: "core/summarize",
+		Input:   []byte("test"),
+	})
+	if err == nil {
+		t.Fatal("Expected error from LLM failure")
+	}
+	if result.Status != execution.StatusFailed {
+		t.Errorf("Expected StatusFailed, got %v", result.Status)
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
+}
+
+func containsHelper(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
+func TestWasmSkill_FallbackToLLM(t *testing.T) {
+	// Create executor with a Wasm runtime that will fail on execution
+	wasmRT, err := wasm.NewRuntime()
+	if err != nil {
+		t.Fatalf("Failed to create wasm runtime: %v", err)
+	}
+	defer wasmRT.Close()
+
+	e := executor.NewDefaultExecutorWithRuntime(wasmRT, nil)
+	ctx := context.Background()
+
+	// Load a skill WITH Wasm bytes (invalid Wasm that will fail)
+	skill := &mockSkill{
+		id:        "core/test-wasm",
+		valid:     true,
+		timeout:   5 * time.Second,
+		wasmBytes: []byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00}, // invalid Wasm header
+	}
+	_ = e.LoadSkill(ctx, skill)
+
+	// Set up LLM fallback
+	mockLLM := &mockTextGenerator{response: "LLM fallback result"}
+	e.SetTextGenerator(mockLLM)
+
+	result, err := e.Execute(ctx, execution.ExecutionRequest{
+		SkillID: "core/test-wasm",
+		Input:   []byte("test input"),
+	})
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if result.Status != execution.StatusSuccess {
+		t.Errorf("Expected StatusSuccess via LLM fallback, got %v", result.Status)
+	}
+	if string(result.Output) != "LLM fallback result" {
+		t.Errorf("Expected LLM fallback output, got %q", string(result.Output))
+	}
+	if !mockLLM.called {
+		t.Error("LLM fallback should have been called after Wasm failure")
+	}
+}
+
+func TestWasmSkill_NoFallbackWithoutTextGenerator(t *testing.T) {
+	wasmRT, err := wasm.NewRuntime()
+	if err != nil {
+		t.Fatalf("Failed to create wasm runtime: %v", err)
+	}
+	defer wasmRT.Close()
+
+	e := executor.NewDefaultExecutorWithRuntime(wasmRT, nil)
+	ctx := context.Background()
+
+	skill := &mockSkill{
+		id:        "core/test-wasm-no-fallback",
+		valid:     true,
+		timeout:   5 * time.Second,
+		wasmBytes: []byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00}, // invalid Wasm
+	}
+	_ = e.LoadSkill(ctx, skill)
+	// No TextGenerator set
+
+	_, err = e.Execute(ctx, execution.ExecutionRequest{
+		SkillID: "core/test-wasm-no-fallback",
+		Input:   []byte("test"),
+	})
+	if err == nil {
+		t.Error("Expected error when Wasm fails and no TextGenerator")
+	}
+}

@@ -2,9 +2,11 @@
 package wasm
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	"time"
@@ -12,6 +14,7 @@ import (
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
+	"github.com/tetratelabs/wazero/sys"
 )
 
 var (
@@ -85,7 +88,7 @@ func (r *Runtime) LoadModule(ctx context.Context, name string, wasmBytes []byte)
 		return nil, err
 	}
 
-	mod, err := r.engine.InstantiateModule(ctx, compiled, wazero.NewModuleConfig().WithName(name))
+	mod, err := r.engine.InstantiateModule(ctx, compiled, wazero.NewModuleConfig().WithName(name).WithSysWalltime().WithSysNanotime())
 	if err != nil {
 		return nil, err
 	}
@@ -94,6 +97,12 @@ func (r *Runtime) LoadModule(ctx context.Context, name string, wasmBytes []byte)
 }
 
 // Execute runs a Wasm module with the given input and limits.
+//
+// Supports two execution patterns:
+//   - Command pattern (Go wasip1): module reads input from stdin, writes output to stdout.
+//   - Reactor pattern (TinyGo): module exports "execute", uses host API get_input/set_output.
+//
+// The runtime auto-detects the pattern by checking for exported functions.
 func (r *Runtime) Execute(ctx context.Context, wasmBytes []byte, input []byte, limits Limits) ([]byte, error) {
 	// Apply timeout
 	if limits.MaxExecutionTime > 0 {
@@ -105,7 +114,7 @@ func (r *Runtime) Execute(ctx context.Context, wasmBytes []byte, input []byte, l
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Set execution-specific input in the shared Host API state (if registered)
+	// Set execution-specific input in the shared Host API state (Reactor pattern).
 	if r.hf != nil {
 		r.hf.ClearBuffers()
 		r.hf.SetInput(input)
@@ -117,50 +126,74 @@ func (r *Runtime) Execute(ctx context.Context, wasmBytes []byte, input []byte, l
 		return nil, err
 	}
 
-	// Configure I/O and System Time (REQUIRED for Go wasip1 runtime)
+	// Capture stdout for Command-pattern modules (stdin/stdout I/O).
+	var stdoutBuf bytes.Buffer
+
+	// Create stdin reader from input.
+	var stdinReader io.Reader = bytes.NewReader(input)
+
+	// Configure module with stdin/stdout + prevent auto _start.
+	// WithStartFunctions() disables the default auto-call of _start during
+	// InstantiateModule, which prevents clock_time_get nil pointer crashes
+	// with Go wasip1 runtime initialization.
 	config := wazero.NewModuleConfig().
 		WithName("skill").
-		WithStdout(os.Stdout).
+		WithStdin(stdinReader).
+		WithStdout(&stdoutBuf).
 		WithStderr(os.Stderr).
 		WithSysWalltime().
-		WithSysNanotime()
+		WithSysNanotime().
+		WithStartFunctions() // disable auto _start
 
-	// Instantiate
+	// Instantiate module (no auto-start).
 	mod, err := r.engine.InstantiateModule(ctx, compiled, config)
 	if err != nil {
 		return nil, fmt.Errorf("wasm: instantiation failed: %w", err)
 	}
-	defer mod.Close(ctx) //nolint:errcheck // error on close is ignored
+	defer mod.Close(ctx) //nolint:errcheck // cleanup
 
-	// Lifecycle step 1: Initialize (Go Reactor pattern)
-	if init := mod.ExportedFunction("_initialize"); init != nil {
-		if _, err := init.Call(ctx); err != nil {
-			return nil, fmt.Errorf("wasm: _initialize failed: %w", err)
-		}
-	}
-
-	// Lifecycle step 2: Call execute
+	// Find entrypoint.
+	// Priority: "execute" (Reactor/TinyGo) > "_start" (Command/Go wasip1)
 	fn := mod.ExportedFunction("execute")
 	if fn == nil {
-		// Fallback to _start if execute not found
 		fn = mod.ExportedFunction("_start")
 	}
 	if fn == nil {
 		return nil, ErrNoEntrypoint
 	}
 
-	// Execute logic
+	// Call the entrypoint.
 	_, err = fn.Call(ctx)
 	if err != nil {
+		// Go wasip1 Command modules call proc_exit(0) after main() returns.
+		// This is normal successful completion, not an error.
+		var exitErr *sys.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 0 {
+			// Clean exit — collect output from stdout.
+			if stdoutBuf.Len() > 0 {
+				return stdoutBuf.Bytes(), nil
+			}
+			if r.hf != nil && len(r.hf.GetOutput()) > 0 {
+				return r.hf.GetOutput(), nil
+			}
+			return nil, nil
+		}
+
 		if ctx.Err() == context.DeadlineExceeded {
 			return nil, ErrExecutionTimeout
 		}
 		return nil, fmt.Errorf("wasm: execution failed: %w", err)
 	}
 
-	// Retrieve output from the Host API state (if available)
-	if r.hf != nil {
+	// Collect output:
+	// 1. If host functions were used (Reactor: set_output), prefer that.
+	// 2. Otherwise use stdout capture (Command: stdin/stdout).
+	if r.hf != nil && len(r.hf.GetOutput()) > 0 {
 		return r.hf.GetOutput(), nil
+	}
+
+	if stdoutBuf.Len() > 0 {
+		return stdoutBuf.Bytes(), nil
 	}
 
 	return nil, nil
