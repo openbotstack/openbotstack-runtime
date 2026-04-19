@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -64,6 +65,29 @@ type Config struct {
 	Memory        MemoryConfig        `yaml:"memory"`
 	Sandbox       SandboxConfig       `yaml:"sandbox"`
 	Vector        VectorConfig        `yaml:"vector"`
+	Agent         AgentConfig         `yaml:"agent"`
+}
+
+// AgentConfig controls agent execution mode and parameters.
+type AgentConfig struct {
+	// Mode selects the agent execution strategy.
+	// "single_pass" = DefaultAgent (Plan → Execute, one shot)
+	// "dual_loop"  = DualLoopAgent (Outer + Inner bounded loops)
+	// Env override: OBS_AGENT_MODE
+	Mode string `yaml:"mode"`
+
+	// DualLoop holds configuration for the dual bounded loop kernel.
+	DualLoop DualLoopConfig `yaml:"dual_loop"`
+}
+
+// DualLoopConfig holds bounds for the dual bounded loop kernel.
+type DualLoopConfig struct {
+	MaxTurns          int           `yaml:"max_turns"`            // Inner loop: max reasoning turns (default: 8)
+	MaxToolCalls      int           `yaml:"max_tool_calls"`       // Inner loop: max tool calls per task (default: 20)
+	MaxTurnRuntime    time.Duration `yaml:"max_turn_runtime"`     // Inner loop: max time per turn (default: 30s)
+	MaxWorkflowSteps  int           `yaml:"max_workflow_steps"`   // Outer loop: max tasks (default: 5)
+	MaxSessionRuntime time.Duration `yaml:"max_session_runtime"`  // Outer loop: max total time (default: 60s)
+	MaxRetainedTurns  int           `yaml:"max_retained_turns"`   // Context compaction: turns to keep (default: 4)
 }
 
 type ObservabilityConfig struct {
@@ -92,10 +116,9 @@ type LLMProviderConfig struct {
 	Model   string `yaml:"model"`
 }
 
-// Load loads configuration from file and environment variables.
-func Load(path string) (*Config, error) {
-	// Default config
-	cfg := &Config{
+// defaultConfig returns the default configuration with all fields populated.
+func defaultConfig() *Config {
+	return &Config{
 		Server: ServerConfig{
 			Addr: ":8080",
 		},
@@ -121,7 +144,23 @@ func Load(path string) (*Config, error) {
 			HTTPAllowlist:   []string{"*"},
 			ToolRegistryURL: "http://localhost:8080",
 		},
+		Agent: AgentConfig{
+			Mode: "single_pass",
+			DualLoop: DualLoopConfig{
+				MaxTurns:          8,
+				MaxToolCalls:      20,
+				MaxTurnRuntime:    30 * time.Second,
+				MaxWorkflowSteps:  5,
+				MaxSessionRuntime: 60 * time.Second,
+				MaxRetainedTurns:  4,
+			},
+		},
 	}
+}
+
+// Load loads configuration from file and environment variables.
+func Load(path string) (*Config, error) {
+	cfg := defaultConfig()
 
 	// Load from file if exists
 	if path != "" {
@@ -179,6 +218,11 @@ func Load(path string) (*Config, error) {
 	}
 	if val := os.Getenv("OBS_TLS_KEY_FILE"); val != "" {
 		cfg.TLS.KeyFile = val
+	}
+
+	// Agent overrides
+	if val := os.Getenv("OBS_AGENT_MODE"); val != "" {
+		cfg.Agent.Mode = val
 	}
 
 	return cfg, nil

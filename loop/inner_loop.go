@@ -19,12 +19,14 @@ type InnerLoop interface {
 
 // DefaultInnerLoop implements the reasoning turn loop.
 type DefaultInnerLoop struct {
-	config        InnerLoopConfig
-	planner       planner.ExecutionPlanner
-	toolRunner    toolrunner.ToolRunner
-	compactor     ContextCompactor
-	stopEvaluator *InnerStopEvaluator
-	logger        execution.ExecutionLogger
+	config         InnerLoopConfig
+	planner        planner.ExecutionPlanner
+	toolRunner     toolrunner.ToolRunner
+	skillExecutor  execution.SkillExecutor
+	compactor      ContextCompactor
+	stopEvaluator  *InnerStopEvaluator
+	logger         execution.ExecutionLogger
+	currentState   InnerState
 }
 
 // NewDefaultInnerLoop creates a new DefaultInnerLoop.
@@ -43,6 +45,17 @@ func NewDefaultInnerLoop(
 		stopEvaluator: NewInnerStopEvaluator(config),
 		logger:        logger,
 	}
+}
+
+// State returns the current inner loop state for observability.
+func (l *DefaultInnerLoop) State() InnerState {
+	return l.currentState
+}
+
+// SetSkillExecutor configures the executor for skill steps.
+// If not set, skill steps in plans will be skipped with a warning.
+func (l *DefaultInnerLoop) SetSkillExecutor(se execution.SkillExecutor) {
+	l.skillExecutor = se
 }
 
 // Run executes the iterative reasoning loop until a stop condition is met.
@@ -66,12 +79,14 @@ func (l *DefaultInnerLoop) Run(ctx context.Context, task TaskInput, ec *executio
 
 	for {
 		// Priority 1: Check context cancellation at the start of loop iteration
-		if ctx.Err() != nil {
-			result.StopReason = StopReasonContextCanceled
-			result.Error = ctx.Err()
-			result.Duration = time.Since(startTime)
-			return result, ctx.Err()
-		}
+		l.currentState = InnerTurnInit
+			if ctx.Err() != nil {
+				l.currentState = InnerDone
+				result.StopReason = StopReasonContextCanceled
+				result.Error = ctx.Err()
+				result.Duration = time.Since(startTime)
+				return result, ctx.Err()
+			}
 
 		turnStart := time.Now()
 		turnsElapsed++
@@ -83,11 +98,13 @@ func (l *DefaultInnerLoop) Run(ctx context.Context, task TaskInput, ec *executio
 		}
 
 		// STATE: PLAN
+		l.currentState = InnerPlan
 		plan, err := l.planner.Plan(ctx, task.PlannerContext)
 		if err != nil {
 			result.StopReason = StopReasonError
 			result.Error = err
 			result.Duration = time.Since(startTime)
+			l.currentState = InnerDone
 			return result, err
 		}
 
@@ -97,6 +114,7 @@ func (l *DefaultInnerLoop) Run(ctx context.Context, task TaskInput, ec *executio
 		}
 
 		// STATE: ACT
+		l.currentState = InnerAct
 		turnToolCalls := 0
 		var actErr error
 		for _, step := range plan.Steps {
@@ -111,6 +129,10 @@ func (l *DefaultInnerLoop) Run(ctx context.Context, task TaskInput, ec *executio
 			}
 
 			if step.Type == execution.StepTypeTool {
+				if l.toolRunner == nil {
+					slog.Warn("tool step skipped: no tool runner configured", "tool", step.Name)
+					continue
+				}
 				toolCallsUsed++
 				turnToolCalls++
 
@@ -158,6 +180,51 @@ func (l *DefaultInnerLoop) Run(ctx context.Context, task TaskInput, ec *executio
 
 				turnResult.ActionsExecuted = append(turnResult.ActionsExecuted, step.Name)
 				turnResult.Observations = append(turnResult.Observations, fmt.Sprintf("%v", toolRes))
+			} else if step.Type == execution.StepTypeSkill {
+				if l.skillExecutor == nil {
+					slog.Warn("skill step skipped: no skill executor configured", "skill", step.Name)
+					continue
+				}
+
+				inputBytes, _ := step.ArgumentsJSON()
+				skillRes, err := l.skillExecutor.Execute(ctx, execution.ExecutionRequest{
+					SkillID: step.Name,
+					Input:   inputBytes,
+				})
+				if err != nil {
+					if l.logger != nil {
+						if logErr := l.logger.LogStep(ctx, execution.ExecutionLogRecord{
+							StepName:  step.Name,
+							StepType:  string(step.Type),
+							Status:    "failed",
+							Error:     err.Error(),
+							Timestamp: time.Now(),
+						}); logErr != nil {
+							slog.Warn("audit log failed", "error", logErr)
+						}
+					}
+					actErr = fmt.Errorf("skill execution failed: %w", err)
+					break
+				}
+
+				if l.logger != nil {
+					if logErr := l.logger.LogStep(ctx, execution.ExecutionLogRecord{
+						StepName:  step.Name,
+						StepType:  string(step.Type),
+						Status:    "success",
+						Timestamp: time.Now(),
+					}); logErr != nil {
+						slog.Warn("audit log failed", "error", logErr)
+					}
+				}
+
+				turnResult.ActionsExecuted = append(turnResult.ActionsExecuted, step.Name)
+				if skillRes != nil {
+					turnResult.Observations = append(turnResult.Observations, string(skillRes.Output))
+				}
+			} else {
+				actErr = fmt.Errorf("unknown step type %q for step %q", step.Type, step.Name)
+				break
 			}
 		}
 
@@ -172,10 +239,12 @@ func (l *DefaultInnerLoop) Run(ctx context.Context, task TaskInput, ec *executio
 			result.TurnCount = turnsElapsed
 			result.ToolCallsUsed = toolCallsUsed
 			result.Duration = time.Since(startTime)
+			l.currentState = InnerDone
 			return result, actErr
 		}
 
 		// STATE: OBSERVE & CHECK_STOP
+		l.currentState = InnerObserve
 		// Update planner context with new observations before the next turn
 		// For V1, we simply append observations to the MemoryContext string
 		if len(turnResult.Observations) > 0 && task.PlannerContext != nil {
@@ -187,11 +256,13 @@ func (l *DefaultInnerLoop) Run(ctx context.Context, task TaskInput, ec *executio
 		}
 
 		// Evaluate stop conditions
+		l.currentState = InnerCheckStop
 		stopCond := l.stopEvaluator.Evaluate(turnsElapsed, toolCallsUsed, startTime, plannerStopped, ctx)
 		turnResult.StopReason = stopCond.Reason
 		result.TurnResults = append(result.TurnResults, turnResult)
 
 		if stopCond.Stopped {
+			l.currentState = InnerDone
 			result.StopReason = stopCond.Reason
 			result.TurnCount = turnsElapsed
 			result.ToolCallsUsed = toolCallsUsed
@@ -213,6 +284,7 @@ func (l *DefaultInnerLoop) Run(ctx context.Context, task TaskInput, ec *executio
 		}
 
 		// STATE: NEXT_TURN (Compact context)
+		l.currentState = InnerNextTurn
 		if l.compactor != nil {
 			compacted, err := l.compactor.Compact(ctx, result.TurnResults)
 			if err != nil {

@@ -22,6 +22,7 @@ type DefaultOuterLoop struct {
 	policy        PolicyCheckpoint
 	stopEvaluator *OuterStopEvaluator
 	logger        execution.ExecutionLogger
+	currentState  OuterState
 }
 
 // NewDefaultOuterLoop creates a new DefaultOuterLoop.
@@ -42,6 +43,11 @@ func NewDefaultOuterLoop(
 	}
 }
 
+// State returns the current outer loop state for observability.
+func (l *DefaultOuterLoop) State() OuterState {
+	return l.currentState
+}
+
 // Run executes the task sequence via the outer loop state machine.
 func (l *DefaultOuterLoop) Run(ctx context.Context, tasks []TaskInput, ec *execution.ExecutionContext) (*WorkflowResult, error) {
 	if ec == nil {
@@ -57,8 +63,10 @@ func (l *DefaultOuterLoop) Run(ctx context.Context, tasks []TaskInput, ec *execu
 	}
 
 	for taskIdx, task := range tasks {
+		l.currentState = OuterTaskSelect
 		// Priority 1: Check context cancellation
 		if ctx.Err() != nil {
+			l.currentState = OuterDone
 			result.StopCondition = StopCondition{Stopped: true, Reason: StopReasonContextCanceled}
 			result.Metrics.TotalRuntime = time.Since(startTime)
 			return result, ctx.Err()
@@ -86,6 +94,7 @@ func (l *DefaultOuterLoop) Run(ctx context.Context, tasks []TaskInput, ec *execu
 		}
 
 		// STATE: TASK_EXECUTE
+		l.currentState = OuterTaskExecute
 		innerRes, err := l.innerLoop.Run(ctx, task, ec)
 		if err != nil {
 			// Inner loop error is generally fatal unhandled error in the engine
@@ -125,6 +134,7 @@ func (l *DefaultOuterLoop) Run(ctx context.Context, tasks []TaskInput, ec *execu
 		}
 
 		// STATE: CHECKPOINT
+		l.currentState = OuterCheckpoint
 		if l.checkpoint != nil {
 			if err := l.checkpoint.Save(ctx, taskIdx, innerRes, &result.Metrics); err != nil {
 				result.StopCondition = StopCondition{Stopped: true, Reason: StopReasonError}
@@ -146,10 +156,12 @@ func (l *DefaultOuterLoop) Run(ctx context.Context, tasks []TaskInput, ec *execu
 		}
 
 		// STATE: NEXT_TASK
+		l.currentState = OuterNextTask
 		// Proceed to next iteration. Context compacting happens inside the inner loop turn-by-turn.
 	}
 
 	// STATE: DONE (Goal Achieved since we finished all tasks)
+		l.currentState = OuterDone
 	result.StopCondition = StopCondition{Stopped: true, Reason: StopReasonGoalAchieved}
 	result.Metrics.TotalRuntime = time.Since(startTime)
 	return result, nil

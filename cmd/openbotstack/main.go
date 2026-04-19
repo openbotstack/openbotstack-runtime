@@ -27,6 +27,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -34,8 +35,10 @@ import (
 	"github.com/openbotstack/openbotstack-core/control/agent"
 	"github.com/openbotstack/openbotstack-runtime/api"
 	"github.com/openbotstack/openbotstack-runtime/config"
+	dualloop "github.com/openbotstack/openbotstack-runtime/agent"
 	executor "github.com/openbotstack/openbotstack-runtime/executor/skill_executor"
 	audit "github.com/openbotstack/openbotstack-runtime/logging/execution_logs"
+	"github.com/openbotstack/openbotstack-runtime/loop"
 	"github.com/openbotstack/openbotstack-runtime/memory"
 	contextassembler "github.com/openbotstack/openbotstack-runtime/context"
 	"github.com/openbotstack/openbotstack-runtime/observability"
@@ -50,6 +53,7 @@ import (
 	"github.com/openbotstack/openbotstack-core/ai/providers"
 	"github.com/openbotstack/openbotstack-core/ai/router"
 	"github.com/openbotstack/openbotstack-core/control/skills"
+	plannerpkg "github.com/openbotstack/openbotstack-core/planner"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
@@ -172,6 +176,9 @@ func main() {
 	// Initialize Executor
 	exec := executor.NewDefaultExecutorWithRuntime(wasmRuntime, nil)
 
+	// Wire TextGenerator for declarative (non-Wasm) skill execution
+	exec.SetTextGenerator(&llmTextGenerator{router: modelRouter})
+
 	// Register Host Functions with Wasm Runtime (linked to our hostFuncs)
 	if err := wasmRuntime.RegisterHostFunctions(context.Background(), hostFuncs); err != nil {
 		slog.Error("failed to register host functions", "error", err)
@@ -191,6 +198,15 @@ func main() {
 	// LLM configuration IS REQUIRED for production operation
 	planner := agent.NewLLMPlanner(modelRouter)
 	slog.Info("planner initialized with LLM router")
+
+	// Dual-loop planner (used when agent mode is "dual_loop")
+	// Use generous limits for local/thinking models that need extra time.
+	dualPlannerLimits := &plannerpkg.ExecutionLimits{
+		MaxSteps:         10,
+		MaxToolCalls:     5,
+		MaxExecutionTime: 45 * time.Second,
+	}
+	dualPlanner := plannerpkg.NewLLMPlanner(modelRouter, dualPlannerLimits)
 
 	// Initialize SQLite Persistence
 	dbPath := os.Getenv("OBS_DATABASE_PATH")
@@ -241,7 +257,35 @@ func main() {
 	}
 
 	// Create Agent (orchestrates Planner + Executor)
-	apiAgent := agent.NewDefaultAgent(planner, exec, exec, art)
+	var apiAgent agent.Agent
+	if cfg.Agent.Mode == "dual_loop" {
+		innerCfg := loop.InnerLoopConfig{
+			MaxTurns:       cfg.Agent.DualLoop.MaxTurns,
+			MaxToolCalls:   cfg.Agent.DualLoop.MaxToolCalls,
+			MaxTurnRuntime: cfg.Agent.DualLoop.MaxTurnRuntime,
+		}
+		compactor := loop.NewDefaultContextCompactor(cfg.Agent.DualLoop.MaxRetainedTurns)
+		innerLoop := loop.NewDefaultInnerLoop(innerCfg, dualPlanner, nil, compactor, nil)
+		innerLoop.SetSkillExecutor(exec)
+
+		outerCfg := loop.OuterLoopConfig{
+			MaxWorkflowSteps:  cfg.Agent.DualLoop.MaxWorkflowSteps,
+			MaxSessionRuntime: cfg.Agent.DualLoop.MaxSessionRuntime,
+		}
+		outerLoop := loop.NewDefaultOuterLoop(outerCfg, innerLoop, &loop.NoOpCheckpoint{}, nil, nil)
+
+		dla := dualloop.NewDualLoopAgent(dualPlanner, exec, art, innerLoop, outerLoop)
+		apiAgent = dla
+		// Setters called below after convStore/contextAssembler are ready
+		slog.Info("dual-loop agent initialized",
+			"max_turns", innerCfg.MaxTurns,
+			"max_workflow_steps", outerCfg.MaxWorkflowSteps,
+		)
+	} else {
+		da := agent.NewDefaultAgent(planner, exec, exec, art)
+		apiAgent = da
+		slog.Info("single-pass agent initialized")
+	}
 
 	// Initialize Markdown Memory Store (3+1 layered model)
 	markdownStore, err := memory.NewMarkdownMemoryStore(cfg.Memory.DataDir)
@@ -258,8 +302,16 @@ func main() {
 		convStore = memory.NewSummarizingConversationStore(markdownStore, summarizer)
 		slog.Info("conversation summarization enabled", "threshold", cfg.Memory.SummaryThreshold)
 	}
-	apiAgent.SetConversationStore(convStore)
-	apiAgent.SetMaxHistoryMessages(cfg.Memory.MaxHistoryMessages)
+
+	// Inject shared dependencies into agent (type-specific setter calls)
+	switch a := apiAgent.(type) {
+	case *agent.DefaultAgent:
+		a.SetConversationStore(convStore)
+		a.SetMaxHistoryMessages(cfg.Memory.MaxHistoryMessages)
+	case *dualloop.DualLoopAgent:
+		a.SetConversationStore(convStore)
+		a.SetMaxHistoryMessages(cfg.Memory.MaxHistoryMessages)
+	}
 
 	// Initialize MemoryManager Bridge (markdown-first, optional vector search)
 	memoryBridge := memory.NewMarkdownMemoryBridge(markdownStore, nil)
@@ -304,7 +356,12 @@ func main() {
 
 	// Initialize ContextAssembler (persona + memory -> prompt enrichment)
 	contextAssembler := contextassembler.NewRuntimeContextAssembler(exec, memoryBridge)
-	apiAgent.SetContextAssembler(contextAssembler)
+	switch a := apiAgent.(type) {
+	case *agent.DefaultAgent:
+		a.SetContextAssembler(contextAssembler)
+	case *dualloop.DualLoopAgent:
+		a.SetContextAssembler(contextAssembler)
+	}
 	slog.Info("context assembler initialized")
 
 	// Wire Tool Invocation Pipeline for Wasm skill HTTP access.
@@ -336,7 +393,9 @@ func main() {
 
 	// API routes
 	apiRouter := api.NewRouter(apiAgent)
+	skillAdmin := newSkillAdminAdapter(exec)
 	apiRouter.SetSkillProvider(exec)
+	apiRouter.SetSkillDisabledChecker(skillAdmin.IsDisabled)
 	apiRouter.SetExecutionStore(api.NewAuditExecutionStore(auditLogger))
 	apiRouter.SetHistoryProvider(&memoryHistoryProvider{store: memoryStore})
 	apiRouter.SetBuildInfo(api.BuildInfo{
@@ -381,12 +440,19 @@ func main() {
 	rateLimitMW := middleware.RateLimitMiddleware(rateLimiter)
 	mux.Handle("/v1/", rateLimitMW(apiRouter))
 
+	// /v1/me is a user-level endpoint — any authenticated user can call it.
+	// Not behind RequireAdmin. Insert after /v1/ catch-all (ServeMux longest-prefix wins).
+	mux.Handle("/v1/me", authMW(http.HandlerFunc(api.HandleMe)))
+
 	// Admin endpoints require auth (API Key or JWT) AND admin role
 	adminRouter := api.NewAdminRouter(pdb.DB)
 	mux.Handle("/v1/admin/", authMW(adminRouter.Handler()))
+		adminRouter.SetProviderLister(&modelRouterLister{router: modelRouter})
+		adminRouter.SetSkillAdmin(skillAdmin)
 
-	// UI routes (embedded frontend)
-	mux.Handle("/ui/", http.StripPrefix("/ui", webui.Handler()))
+	// UI routes (embedded frontends — dual SPA)
+	mux.Handle("/ui/", http.StripPrefix("/ui", webui.UserHandler()))
+	mux.Handle("/admin/", http.StripPrefix("/admin", webui.AdminHandler()))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
 			http.Redirect(w, r, "/ui/", http.StatusFound)
@@ -406,7 +472,7 @@ func main() {
 	// Allows all origins for development; restrict via config for production.
 	corsHandler := middleware.CORSMiddleware(middleware.CORSConfig{
 		AllowedOrigins:   []string{"*"},
-		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Content-Type", "X-API-Key", "Authorization"},
 		AllowCredentials: true,
 	})(metricsHandler)
@@ -502,7 +568,128 @@ func (p *memoryHistoryProvider) GetSessionHistory(ctx context.Context, sessionID
 	return messages, nil
 }
 
+func (p *memoryHistoryProvider) ListSessions(ctx context.Context) ([]api.SessionSummary, error) {
+	if p.store == nil {
+		return []api.SessionSummary{}, nil
+	}
+	sessions, err := p.store.ListSessions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	summaries := make([]api.SessionSummary, 0, len(sessions))
+	for _, s := range sessions {
+		summaries = append(summaries, api.SessionSummary{
+			SessionID:  s.SessionID,
+			TenantID:   s.TenantID,
+			LastEntry:  s.LastEntry,
+			EntryCount: s.EntryCount,
+			CreatedAt:  s.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:  s.UpdatedAt.Format(time.RFC3339),
+		})
+	}
+	return summaries, nil
+}
+
+func (p *memoryHistoryProvider) DeleteSession(ctx context.Context, sessionID string) error {
+	if p.store == nil {
+		return nil
+	}
+	return p.store.ClearSession(ctx, sessionID)
+}
+
+// modelRouterLister adapts a ModelRouter to the api.ProviderLister interface.
+type modelRouterLister struct {
+	router *router.DefaultRouter
+}
+
+func (m *modelRouterLister) ListProviders() []api.ProviderInfo {
+	ids := m.router.List()
+	result := make([]api.ProviderInfo, 0, len(ids))
+	for _, id := range ids {
+		provider, err := m.router.Route(nil, skills.ModelConstraints{})
+		caps := []string{}
+		if err == nil && provider != nil {
+			for _, c := range provider.Capabilities() {
+				caps = append(caps, string(c))
+			}
+		}
+		result = append(result, api.ProviderInfo{
+			ID:           id,
+			Capabilities: caps,
+		})
+	}
+	return result
+}
+
+// skillAdminAdapter tracks skill enable/disable state for the admin API.
+// It also wraps the executor's SkillProvider to filter out disabled skills
+// from the user-facing /v1/skills endpoint.
+type skillAdminAdapter struct {
+	exec     api.SkillProvider
+	mu       sync.RWMutex
+	disabled map[string]bool
+}
+
+func newSkillAdminAdapter(exec api.SkillProvider) *skillAdminAdapter {
+	return &skillAdminAdapter{exec: exec, disabled: make(map[string]bool)}
+}
+
+// FilteredList returns skill IDs excluding disabled ones.
+func (sa *skillAdminAdapter) FilteredList() []string {
+	all := sa.exec.List()
+	sa.mu.RLock()
+	defer sa.mu.RUnlock()
+	result := make([]string, 0, len(all))
+	for _, id := range all {
+		if !sa.disabled[id] {
+			result = append(result, id)
+		}
+	}
+	return result
+}
+
+// IsDisabled checks if a skill is disabled.
+func (sa *skillAdminAdapter) IsDisabled(id string) bool {
+	sa.mu.RLock()
+	defer sa.mu.RUnlock()
+	return sa.disabled[id]
+}
+
+func (sa *skillAdminAdapter) ListSkills() ([]api.SkillAdminInfo, error) {
+	ids := sa.exec.List()
+	sa.mu.RLock()
+	defer sa.mu.RUnlock()
+	result := make([]api.SkillAdminInfo, 0, len(ids))
+	for _, id := range ids {
+		s, err := sa.exec.Get(id)
+		if err != nil {
+			continue
+		}
+		result = append(result, api.SkillAdminInfo{
+			ID:          s.ID(),
+			Name:        s.Name(),
+			Description: s.Description(),
+			Type:        "declarative",
+			Enabled:     !sa.disabled[id],
+		})
+	}
+	return result, nil
+}
+
+func (sa *skillAdminAdapter) SetSkillEnabled(skillID string, enabled bool) error {
+	sa.mu.Lock()
+	defer sa.mu.Unlock()
+	if enabled {
+		delete(sa.disabled, skillID)
+	} else {
+		sa.disabled[skillID] = true
+	}
+	return nil
+}
+
 // parseLogLevel converts a log level string to slog.Level.
+
+
 func parseLogLevel(s string) slog.Level {
 	switch strings.ToLower(s) {
 	case "debug":
@@ -514,4 +701,26 @@ func parseLogLevel(s string) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
+}
+
+// llmTextGenerator adapts a ModelRouter to the executor.TextGenerator interface.
+// Used for declarative skills that need LLM execution but have no Wasm binary.
+type llmTextGenerator struct {
+	router providers.ModelRouter
+}
+
+func (g *llmTextGenerator) GenerateText(ctx context.Context, prompt string) (string, error) {
+	provider, err := g.router.Route([]skills.CapabilityType{skills.CapTextGeneration}, skills.ModelConstraints{})
+	if err != nil {
+		return "", fmt.Errorf("no text generation provider: %w", err)
+	}
+	resp, err := provider.Generate(ctx, skills.GenerateRequest{
+		Messages: []skills.Message{
+			{Role: "user", Content: prompt},
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	return resp.Content, nil
 }
