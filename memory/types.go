@@ -21,6 +21,16 @@ type Entry struct {
 	TTL       time.Duration
 }
 
+// SessionInfo represents a summary of a session.
+type SessionInfo struct {
+	SessionID string
+	TenantID  string
+	LastEntry string    // content of the most recent entry
+	EntryCount int
+	CreatedAt time.Time // timestamp of the first entry
+	UpdatedAt time.Time // timestamp of the last entry
+}
+
 // ShortTermStore provides short-term memory operations.
 type ShortTermStore interface {
 	Store(ctx context.Context, entry Entry) error
@@ -28,4 +38,5 @@ type ShortTermStore interface {
 	ListBySession(ctx context.Context, sessionID string) ([]Entry, error)
 	Delete(ctx context.Context, id string) error
 	ClearSession(ctx context.Context, sessionID string) error
+	ListSessions(ctx context.Context) ([]SessionInfo, error)
 }

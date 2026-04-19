@@ -379,3 +379,71 @@ func TestNoAuthContext(t *testing.T) {
 		t.Errorf("Content = %q, want %q", got.Content, "tenant-data")
 	}
 }
+
+func TestListSessions(t *testing.T) {
+	db := setupMemoryTestDB(t)
+	defer func() { _ = db.Close() }()
+	ctx := ctxWithTenant("tenant-a")
+	store := NewSQLiteMemoryStore(db.DB)
+
+	now := time.Now().Truncate(time.Millisecond)
+
+	store.Store(ctx, Entry{ID: "e1", SessionID: "s1", Content: "hello", CreatedAt: now})
+	store.Store(ctx, Entry{ID: "e2", SessionID: "s1", Content: "world", CreatedAt: now.Add(time.Second)})
+	store.Store(ctx, Entry{ID: "e3", SessionID: "s2", Content: "other", CreatedAt: now.Add(2*time.Second)})
+
+	sessions, err := store.ListSessions(ctx)
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(sessions) != 2 {
+		t.Fatalf("ListSessions returned %d sessions, want 2", len(sessions))
+	}
+
+	var s1 *SessionInfo
+	for i := range sessions {
+		if sessions[i].SessionID == "s1" {
+			s1 = &sessions[i]
+			break
+		}
+	}
+	if s1 == nil {
+		t.Fatal("session s1 not found")
+	}
+	if s1.EntryCount != 2 {
+		t.Errorf("s1 EntryCount = %d, want 2", s1.EntryCount)
+	}
+	if s1.LastEntry != "world" {
+		t.Errorf("s1 LastEntry = %q, want %q", s1.LastEntry, "world")
+	}
+	if s1.TenantID != "tenant-a" {
+		t.Errorf("s1 TenantID = %q, want %q", s1.TenantID, "tenant-a")
+	}
+}
+
+func TestListSessions_TenantIsolation(t *testing.T) {
+	db := setupMemoryTestDB(t)
+	defer func() { _ = db.Close() }()
+	store := NewSQLiteMemoryStore(db.DB)
+
+	ctxA := ctxWithTenant("tenant-a")
+	ctxB := ctxWithTenant("tenant-b")
+	now := time.Now()
+
+	store.Store(ctxA, Entry{ID: "e1", SessionID: "s1", Content: "a-data", CreatedAt: now})
+	store.Store(ctxB, Entry{ID: "e2", SessionID: "s1", Content: "b-data", CreatedAt: now})
+	store.Store(ctxA, Entry{ID: "e3", SessionID: "s2", Content: "a-data2", CreatedAt: now})
+
+	sessionsA, _ := store.ListSessions(ctxA)
+	if len(sessionsA) != 2 {
+		t.Errorf("tenant A sees %d sessions, want 2", len(sessionsA))
+	}
+
+	sessionsB, _ := store.ListSessions(ctxB)
+	if len(sessionsB) != 1 {
+		t.Errorf("tenant B sees %d sessions, want 1", len(sessionsB))
+	}
+	if sessionsB[0].LastEntry != "b-data" {
+		t.Errorf("tenant B last entry = %q, want %q", sessionsB[0].LastEntry, "b-data")
+	}
+}

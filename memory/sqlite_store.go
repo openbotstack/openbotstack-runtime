@@ -184,3 +184,47 @@ func (s *SQLiteMemoryStore) ClearSession(ctx context.Context, sessionID string) 
 	}
 	return nil
 }
+
+// ListSessions returns all sessions for the current tenant, ordered by most recent first.
+// Uses a correlated subquery for last_entry to avoid N+1 query pattern.
+func (s *SQLiteMemoryStore) ListSessions(ctx context.Context) ([]SessionInfo, error) {
+	tenantID := tenantFromCtx(ctx)
+	query := `
+		SELECT
+			e.session_id, e.tenant_id, COUNT(*) as entry_count,
+			MIN(e.created_at) as created_at, MAX(e.created_at) as updated_at,
+			(SELECT e2.content FROM session_entries e2
+			 WHERE e2.session_id = e.session_id AND e2.tenant_id = e.tenant_id
+			 ORDER BY e2.created_at DESC LIMIT 1) as last_entry
+		FROM session_entries e`
+	args := []interface{}{}
+	if tenantID != "" {
+		query += " WHERE e.tenant_id = ?"
+		args = append(args, tenantID)
+	}
+	query += " GROUP BY e.session_id, e.tenant_id ORDER BY updated_at DESC"
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list sessions: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var sessions []SessionInfo
+	for rows.Next() {
+		var si SessionInfo
+		var createdAtStr, updatedAtStr string
+		var lastEntry sql.NullString
+		if err := rows.Scan(&si.SessionID, &si.TenantID, &si.EntryCount, &createdAtStr, &updatedAtStr, &lastEntry); err != nil {
+			return nil, fmt.Errorf("scan session: %w", err)
+		}
+		si.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAtStr)
+		si.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAtStr)
+		if lastEntry.Valid {
+			si.LastEntry = lastEntry.String
+		}
+		sessions = append(sessions, si)
+	}
+
+	return sessions, rows.Err()
+}
