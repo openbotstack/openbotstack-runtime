@@ -36,7 +36,9 @@ export async function apiCall<T>(path: string, options?: RequestInit): Promise<T
     throw new Error(body.error?.message || `HTTP ${resp.status}`)
   }
 
-  return resp.json()
+  const text = await resp.text()
+  if (!text) return undefined as T
+  return JSON.parse(text)
 }
 
 export function getStoredKey(): string | null {
