@@ -99,6 +99,10 @@ func main() {
 		slog.Error("failed to initialize OTel metrics", "error", err)
 		os.Exit(1)
 	}
+	if err := observability.InitAppMetrics(); err != nil {
+		slog.Error("failed to initialize app metrics", "error", err)
+		os.Exit(1)
+	}
 
 	// CLI flags override config if explicitly set (simple check for now, can be improved)
 	if *listenAddr != ":8080" {

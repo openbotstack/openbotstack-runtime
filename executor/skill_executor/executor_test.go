@@ -40,6 +40,14 @@ func newMockSkill(id string, valid bool) *mockSkill {
 	return &mockSkill{id: id, valid: valid, timeout: 30 * time.Second}
 }
 
+// schemaMockSkill extends mockSkill with an input schema.
+type schemaMockSkill struct {
+	mockSkill
+	inputSchema *control_skills.JSONSchema
+}
+
+func (s *schemaMockSkill) InputSchema() *control_skills.JSONSchema { return s.inputSchema }
+
 // Minimal valid Wasm module with execute export
 var testWasm = []byte{
 	0x00, 0x61, 0x73, 0x6d, // magic
@@ -731,5 +739,85 @@ func TestWasmSkill_NoFallbackWithoutTextGenerator(t *testing.T) {
 	})
 	if err == nil {
 		t.Error("Expected error when Wasm fails and no TextGenerator")
+	}
+}
+
+// ==================== Schema Validation Tests ====================
+
+func TestExecute_SchemaValidationReject(t *testing.T) {
+	e := executor.NewDefaultExecutor()
+	ctx := context.Background()
+
+	skill := &schemaMockSkill{
+		mockSkill: mockSkill{id: "schema-skill", valid: true, timeout: 30 * time.Second},
+		inputSchema: &control_skills.JSONSchema{
+			Type:     "object",
+			Required: []string{"text"},
+			Properties: map[string]*control_skills.JSONSchema{
+				"text": {Type: "string"},
+			},
+		},
+	}
+	_ = e.LoadSkill(ctx, skill)
+
+	// Missing required field "text"
+	result, err := e.Execute(ctx, execution.ExecutionRequest{
+		SkillID: "schema-skill",
+		Input:   []byte(`{"other": "value"}`),
+	})
+	if err == nil {
+		t.Fatal("Expected error for schema validation failure")
+	}
+	if result.Status != execution.StatusRejected {
+		t.Errorf("Expected StatusRejected, got %v", result.Status)
+	}
+}
+
+func TestExecute_SchemaValidationPass(t *testing.T) {
+	e := executor.NewDefaultExecutor()
+	ctx := context.Background()
+
+	skill := &schemaMockSkill{
+		mockSkill: mockSkill{id: "schema-skill-pass", valid: true, timeout: 30 * time.Second},
+		inputSchema: &control_skills.JSONSchema{
+			Type:     "object",
+			Required: []string{"text"},
+			Properties: map[string]*control_skills.JSONSchema{
+				"text": {Type: "string"},
+			},
+		},
+	}
+	_ = e.LoadSkill(ctx, skill)
+
+	// Valid input with required field
+	result, err := e.Execute(ctx, execution.ExecutionRequest{
+		SkillID: "schema-skill-pass",
+		Input:   []byte(`{"text": "hello"}`),
+	})
+	if err != nil {
+		t.Fatalf("Expected success, got: %v", err)
+	}
+	if result.Status != execution.StatusSuccess {
+		t.Errorf("Expected StatusSuccess, got %v", result.Status)
+	}
+}
+
+func TestExecute_NilSchemaSkipsValidation(t *testing.T) {
+	e := executor.NewDefaultExecutor()
+	ctx := context.Background()
+
+	// Default mockSkill returns nil InputSchema
+	_ = e.LoadSkill(ctx, newMockSkill("nil-schema-skill", true))
+
+	// Any input should pass since schema is nil
+	result, err := e.Execute(ctx, execution.ExecutionRequest{
+		SkillID: "nil-schema-skill",
+		Input:   []byte(`{"arbitrary": "data"}`),
+	})
+	if err != nil {
+		t.Fatalf("Expected success with nil schema, got: %v", err)
+	}
+	if result.Status != execution.StatusSuccess {
+		t.Errorf("Expected StatusSuccess, got %v", result.Status)
 	}
 }

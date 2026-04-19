@@ -14,7 +14,9 @@ import (
 	"github.com/openbotstack/openbotstack-core/execution"
 	"github.com/openbotstack/openbotstack-core/registry/skills"
 	"github.com/openbotstack/openbotstack-core/control/agent"
+	"github.com/openbotstack/openbotstack-core/validation"
 	"github.com/openbotstack/openbotstack-runtime/logging/execution_logs"
+	"github.com/openbotstack/openbotstack-runtime/observability"
 	"github.com/openbotstack/openbotstack-runtime/sandbox/wasm"
 	"github.com/openbotstack/openbotstack-runtime/toolrunner"
 )
@@ -231,6 +233,13 @@ func (e *DefaultExecutor) Execute(ctx context.Context, req execution.ExecutionRe
 		}, ErrEmptySkillID
 	}
 
+	// Track outcome for metrics
+	execStatus := "success"
+	defer func() {
+		durationMs := float64(time.Since(start).Milliseconds())
+		observability.RecordSkillExecution(ctx, req.SkillID, execStatus, durationMs)
+	}()
+
 	// Snapshot audit logger under read lock
 	e.mu.RLock()
 	al := e.auditLogger
@@ -247,14 +256,6 @@ func (e *DefaultExecutor) Execute(ctx context.Context, req execution.ExecutionRe
 		Outcome:   "started",
 		Timestamp: start,
 	})
-
-	if req.SkillID == "" {
-		return &execution.ExecutionResult{
-			Status:   execution.StatusFailed,
-			Error:    "empty skill ID",
-			Duration: time.Since(start),
-		}, ErrEmptySkillID
-	}
 
 	e.mu.RLock()
 	s, exists := e.skills[req.SkillID]
@@ -275,11 +276,35 @@ func (e *DefaultExecutor) Execute(ctx context.Context, req execution.ExecutionRe
 			Metadata:  map[string]string{"error": "skill not loaded"},
 			Timestamp: time.Now(),
 		})
+		execStatus = "failed"
 		return &execution.ExecutionResult{
 			Status:   execution.StatusFailed,
 			Error:    "skill not loaded",
 			Duration: elapsed,
 		}, execution.ErrSkillNotLoaded
+	}
+
+	// Validate input against skill schema
+	if err := validation.ValidateInput(req.Input, s.InputSchema()); err != nil {
+		elapsed := time.Since(start)
+		execStatus = "rejected"
+		e.emitAudit(ctx, al, execution_logs.Event{
+			ID:        uuid.NewString(),
+			TenantID:  req.TenantID,
+			UserID:    req.UserID,
+			RequestID: req.RequestID,
+			Action:    "skills.execute",
+			Resource:  "skill/" + req.SkillID,
+			Outcome:   "rejected",
+			Duration:  elapsed,
+			Metadata:  map[string]string{"error": err.Error()},
+			Timestamp: time.Now(),
+		})
+		return &execution.ExecutionResult{
+			Status:   execution.StatusRejected,
+			Error:    "input validation failed: " + err.Error(),
+			Duration: elapsed,
+		}, err
 	}
 
 	// Apply timeout
@@ -339,8 +364,10 @@ func (e *DefaultExecutor) Execute(ctx context.Context, req execution.ExecutionRe
 			}
 
 			outcome := "failure"
+			execStatus = "failed"
 			if ctx.Err() == context.DeadlineExceeded {
 				outcome = "timeout"
+				execStatus = "timeout"
 				e.emitAudit(ctx, al, execution_logs.Event{
 					ID:        uuid.NewString(),
 					TenantID:  req.TenantID,
@@ -405,6 +432,7 @@ func (e *DefaultExecutor) Execute(ctx context.Context, req execution.ExecutionRe
 	select {
 	case <-ctx.Done():
 		result.Status = execution.StatusTimeout
+		execStatus = "timeout"
 		result.Error = "execution timeout"
 		e.emitAudit(ctx, al, execution_logs.Event{
 			ID:        uuid.NewString(),
@@ -434,6 +462,7 @@ func (e *DefaultExecutor) Execute(ctx context.Context, req execution.ExecutionRe
 			llmCancel()
 			if err != nil {
 				result.Status = execution.StatusFailed
+				execStatus = "failed"
 				result.Error = "LLM generation failed: " + err.Error()
 				e.emitAudit(ctx, al, execution_logs.Event{
 					ID:        uuid.NewString(),
