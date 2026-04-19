@@ -8,35 +8,40 @@ import (
 	"strings"
 )
 
-//go:embed dist/*
-var distFS embed.FS
+//go:embed user/dist/*
+var userDistFS embed.FS
 
-// Handler returns an HTTP handler for the embedded frontend.
-func Handler() http.Handler {
-	// Strip "dist" prefix
-	sub, err := fs.Sub(distFS, "dist")
+//go:embed admin/dist/*
+var adminDistFS embed.FS
+
+// UserHandler returns an HTTP handler for the user plane (/ui/).
+func UserHandler() http.Handler {
+	return spaHandler(userDistFS, "user/dist")
+}
+
+// AdminHandler returns an HTTP handler for the admin plane (/admin/).
+func AdminHandler() http.Handler {
+	return spaHandler(adminDistFS, "admin/dist")
+}
+
+func spaHandler(embedFS embed.FS, subDir string) http.Handler {
+	sub, err := fs.Sub(embedFS, subDir)
 	if err != nil {
 		panic("failed to create sub filesystem: " + err.Error())
 	}
-
 	fileServer := http.FileServer(http.FS(sub))
-
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
-
-		// Remove /ui prefix if present
-		path = strings.TrimPrefix(path, "/ui")
+		path := strings.TrimPrefix(r.URL.Path, "/")
 		if path == "" {
-			path = "/"
+			path = "index.html"
 		}
-
-		// Check if path looks like a file (has extension)
-		if strings.Contains(path, ".") {
+		// Check if the file actually exists in the embedded FS
+		if f, err := sub.Open(path); err == nil {
+			f.Close()
 			fileServer.ServeHTTP(w, r)
 			return
 		}
-
-		// SPA fallback: serve index.html
+		// SPA fallback: serve index.html for all non-file routes
 		r.URL.Path = "/"
 		fileServer.ServeHTTP(w, r)
 	})

@@ -1,5 +1,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import './App.css'
+import { AuthProvider, useAuth, LoginForm } from './components/AuthProvider'
+import { AdminPage } from './components/AdminPage'
 
 // ==================== Types ====================
 
@@ -32,14 +34,15 @@ interface ExecutionInfo {
 
 // ==================== Navigation ====================
 
-type Page = 'chat' | 'skills' | 'executions'
+type Page = 'chat' | 'skills' | 'executions' | 'admin'
 
-function Nav({ page, setPage }: { page: Page; setPage: (p: Page) => void }) {
+function Nav({ page, setPage, showAdmin }: { page: Page; setPage: (p: Page) => void; showAdmin: boolean }) {
   return (
     <nav className="nav">
       <button className={page === 'chat' ? 'active' : ''} onClick={() => setPage('chat')}>Chat</button>
       <button className={page === 'skills' ? 'active' : ''} onClick={() => setPage('skills')}>Skills</button>
       <button className={page === 'executions' ? 'active' : ''} onClick={() => setPage('executions')}>Executions</button>
+      {showAdmin && <button className={page === 'admin' ? 'active' : ''} onClick={() => setPage('admin')}>Admin</button>}
     </nav>
   )
 }
@@ -101,8 +104,7 @@ function ChatPage() {
 
       setMessages(prev => [...prev, assistantMessage])
       setExecutionStatus('done')
-    } catch (error) {
-      console.error('Chat error:', error)
+    } catch {
       setMessages(prev => [...prev, {
         id: crypto.randomUUID(),
         role: 'assistant',
@@ -125,13 +127,13 @@ function ChatPage() {
     <div className="page chat-page">
       {/* Status Bar */}
       <div className="status-bar">
-        {sessionId && <span className="session-tag">Session: {sessionId.slice(0, 8)}…</span>}
+        {sessionId && <span className="session-tag">Session: {sessionId.slice(0, 8)}...</span>}
         {executionStatus && (
           <span className={`status-tag status-${executionStatus}`}>
-            {executionStatus === 'planning' && '🔄 Planning…'}
-            {executionStatus === 'executing' && '⚡ Executing…'}
-            {executionStatus === 'done' && `✅ Done (${lastDuration}ms)`}
-            {executionStatus === 'error' && '❌ Error'}
+            {executionStatus === 'planning' && 'Planning...'}
+            {executionStatus === 'executing' && 'Executing...'}
+            {executionStatus === 'done' && `Done (${lastDuration}ms)`}
+            {executionStatus === 'error' && 'Error'}
           </span>
         )}
       </div>
@@ -150,7 +152,7 @@ function ChatPage() {
             )}
           </div>
         ))}
-        {loading && <div className="loading">Thinking…</div>}
+        {loading && <div className="loading">Thinking...</div>}
       </div>
 
       {/* Input */}
@@ -159,7 +161,7 @@ function ChatPage() {
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={handleKeyPress}
-          placeholder="Type a message…"
+          placeholder="Type a message..."
           disabled={loading}
         />
         <button onClick={sendMessage} disabled={loading || !input.trim()}>
@@ -190,7 +192,7 @@ function SkillsPage() {
       })
   }, [])
 
-  if (loading) return <div className="page"><div className="loading">Loading skills…</div></div>
+  if (loading) return <div className="page"><div className="loading">Loading skills...</div></div>
   if (error) return <div className="page"><div className="error">{error}</div></div>
 
   return (
@@ -216,7 +218,7 @@ function SkillsPage() {
                 <td>{skill.name}</td>
                 <td><span className={`type-badge type-${skill.type}`}>{skill.type}</span></td>
                 <td className="mono">{skill.version}</td>
-                <td>{skill.enabled ? '✅ Active' : '⏸ Disabled'}</td>
+                <td>{skill.enabled ? 'Active' : 'Disabled'}</td>
               </tr>
             ))}
           </tbody>
@@ -246,7 +248,7 @@ function ExecutionsPage() {
       })
   }, [])
 
-  if (loading) return <div className="page"><div className="loading">Loading executions…</div></div>
+  if (loading) return <div className="page"><div className="loading">Loading executions...</div></div>
   if (error) return <div className="page"><div className="error">{error}</div></div>
 
   return (
@@ -269,12 +271,12 @@ function ExecutionsPage() {
           <tbody>
             {executions.map(exec => (
               <tr key={exec.execution_id} className={exec.status === 'success' ? '' : 'error-row'}>
-                <td className="mono">{exec.execution_id.slice(0, 8)}…</td>
-                <td className="mono">{exec.session_id ? exec.session_id.slice(0, 8) + '…' : '—'}</td>
+                <td className="mono">{exec.execution_id.slice(0, 8)}...</td>
+                <td className="mono">{exec.session_id ? exec.session_id.slice(0, 8) + '...' : '-'}</td>
                 <td className="mono">{exec.skill_id}</td>
                 <td>{exec.duration_ms}ms</td>
                 <td><span className={`status-badge status-${exec.status}`}>{exec.status}</span></td>
-                <td className="error-text">{exec.error || '—'}</td>
+                <td className="error-text">{exec.error || '-'}</td>
               </tr>
             ))}
           </tbody>
@@ -284,22 +286,58 @@ function ExecutionsPage() {
   )
 }
 
-// ==================== App ====================
+// ==================== App Content ====================
 
-function App() {
+function AppContent() {
   const [page, setPage] = useState<Page>('chat')
+  const [showLogin, setShowLogin] = useState(false)
+  const { authenticated, role, user, login, logout } = useAuth()
+  const showAdmin = authenticated && role === 'admin'
 
   return (
     <div className="app">
       <header className="header">
         <h1>OpenBotStack</h1>
-        <Nav page={page} setPage={setPage} />
+        <Nav page={page} setPage={setPage} showAdmin={showAdmin} />
+        <div className="header-right">
+          {authenticated ? (
+            <div className="user-info">
+              <span className="user-name">{user?.name || 'User'}</span>
+              {role && <span className={`role-badge role-${role}`}>{role}</span>}
+              <button className="btn-logout" onClick={logout}>Logout</button>
+            </div>
+          ) : (
+            <button className="btn-login" onClick={() => setShowLogin(true)}>Login</button>
+          )}
+        </div>
       </header>
+
+      {/* Login modal */}
+      {showLogin && !authenticated && (
+        <div className="dialog-overlay" onClick={() => setShowLogin(false)}>
+          <div className="dialog" onClick={e => e.stopPropagation()}>
+            <div className="dialog-body" style={{ padding: '24px' }}>
+              <LoginForm onLogin={async (key) => { await login(key); setShowLogin(false) }} />
+            </div>
+          </div>
+        </div>
+      )}
 
       {page === 'chat' && <ChatPage />}
       {page === 'skills' && <SkillsPage />}
       {page === 'executions' && <ExecutionsPage />}
+      {page === 'admin' && authenticated && showAdmin && <AdminPage />}
     </div>
+  )
+}
+
+// ==================== App ====================
+
+function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   )
 }
 
