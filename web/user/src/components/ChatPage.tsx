@@ -240,6 +240,9 @@ export function ChatPage() {
         }),
       })
 
+      if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status}`)
+      }
       const data = await resp.json()
 
       if (data.session_id && data.session_id !== sessionId) {

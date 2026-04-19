@@ -298,19 +298,22 @@ func TestRevokeKey(t *testing.T) {
 	// Revoke the key
 	rec := doAdminRequest(t, handler, "DELETE", "/v1/admin/keys/"+keyID, nil)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusNoContent, rec.Body.String())
 	}
 
-	var resp map[string]interface{}
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
+	// Verify the key is revoked by listing keys
+	listRec := doAdminRequest(t, handler, "GET", "/v1/admin/users/u1/keys", nil)
+	var keys []map[string]interface{}
+	if err := json.NewDecoder(listRec.Body).Decode(&keys); err != nil {
+		t.Fatalf("decode list response: %v", err)
 	}
-	if resp["id"] != keyID {
-		t.Errorf("id = %v, want %q", resp["id"], keyID)
-	}
-	if revoked, _ := resp["revoked"].(bool); !revoked {
-		t.Error("revoked should be true")
+	for _, k := range keys {
+		if k["id"] == keyID {
+			if revoked, _ := k["revoked"].(bool); !revoked {
+				t.Error("key should be revoked after DELETE")
+			}
+		}
 	}
 }
 

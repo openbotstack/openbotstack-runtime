@@ -226,7 +226,31 @@ func (ar *AdminRouter) updateTenant(w http.ResponseWriter, r *http.Request, tena
 }
 
 func (ar *AdminRouter) deleteTenant(w http.ResponseWriter, r *http.Request, tenantID string) {
-	result, err := ar.db.Exec(`DELETE FROM tenants WHERE id = ?`, tenantID)
+	// Cascade delete: api_keys → users → session_entries → tenants
+	tx, err := ar.db.Begin()
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to begin transaction")
+		return
+	}
+	defer tx.Rollback()
+
+	// Delete API keys for users in this tenant
+	if _, err := tx.Exec(`DELETE FROM api_keys WHERE user_id IN (SELECT id FROM users WHERE tenant_id = ?)`, tenantID); err != nil {
+		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to delete tenant API keys")
+		return
+	}
+	// Delete users in this tenant
+	if _, err := tx.Exec(`DELETE FROM users WHERE tenant_id = ?`, tenantID); err != nil {
+		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to delete tenant users")
+		return
+	}
+	// Delete session entries for this tenant
+	if _, err := tx.Exec(`DELETE FROM session_entries WHERE tenant_id = ?`, tenantID); err != nil {
+		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to delete tenant sessions")
+		return
+	}
+	// Delete the tenant itself
+	result, err := tx.Exec(`DELETE FROM tenants WHERE id = ?`, tenantID)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "admin handler error",
 			"method", r.Method, "path", r.URL.Path, "status", http.StatusInternalServerError, "error", err)
@@ -239,6 +263,10 @@ func (ar *AdminRouter) deleteTenant(w http.ResponseWriter, r *http.Request, tena
 		return
 	}
 
+	if err := tx.Commit(); err != nil {
+		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to commit transaction")
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -618,7 +646,7 @@ func (ar *AdminRouter) handleRevokeKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"id": keyID, "revoked": true})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // writeJSON writes a JSON response.
