@@ -230,6 +230,146 @@ func TestChatEndpointUsesAuthenticatedIdentity(t *testing.T) {
 	}
 }
 
+// mockHistoryProvider implements api.HistoryProvider for testing.
+type mockHistoryProvider struct {
+	sessions    []api.SessionSummary
+	history     []api.Message
+	deleteErr   error
+	deletedID   string
+}
+
+func (m *mockHistoryProvider) GetSessionHistory(ctx context.Context, sessionID string) ([]api.Message, error) {
+	return m.history, nil
+}
+
+func (m *mockHistoryProvider) ListSessions(ctx context.Context) ([]api.SessionSummary, error) {
+	return m.sessions, nil
+}
+
+func (m *mockHistoryProvider) DeleteSession(ctx context.Context, sessionID string) error {
+	m.deletedID = sessionID
+	return m.deleteErr
+}
+
+func TestListSessionsEndpoint(t *testing.T) {
+	handler := api.NewRouter(&mockAgent{})
+	handler.SetHistoryProvider(&mockHistoryProvider{
+		sessions: []api.SessionSummary{
+			{SessionID: "s1", TenantID: "t1", LastEntry: "hello", EntryCount: 3, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-02T00:00:00Z"},
+			{SessionID: "s2", TenantID: "t1", LastEntry: "world", EntryCount: 1, CreatedAt: "2025-01-03T00:00:00Z", UpdatedAt: "2025-01-03T00:00:00Z"},
+		},
+	})
+
+	req := httptest.NewRequest("GET", "/v1/sessions", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", rr.Code)
+	}
+
+	var sessions []api.SessionSummary
+	_ = json.Unmarshal(rr.Body.Bytes(), &sessions)
+	if len(sessions) != 2 {
+		t.Errorf("Expected 2 sessions, got %d", len(sessions))
+	}
+	if sessions[0].SessionID != "s1" {
+		t.Errorf("Expected session s1, got %s", sessions[0].SessionID)
+	}
+	if sessions[0].EntryCount != 3 {
+		t.Errorf("Expected entry count 3, got %d", sessions[0].EntryCount)
+	}
+}
+
+func TestListSessionsEmpty(t *testing.T) {
+	handler := api.NewRouter(&mockAgent{})
+	// No history provider set
+
+	req := httptest.NewRequest("GET", "/v1/sessions", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", rr.Code)
+	}
+
+	var sessions []api.SessionSummary
+	_ = json.Unmarshal(rr.Body.Bytes(), &sessions)
+	if len(sessions) != 0 {
+		t.Errorf("Expected 0 sessions without provider, got %d", len(sessions))
+	}
+}
+
+func TestDeleteSessionEndpoint(t *testing.T) {
+	handler := api.NewRouter(&mockAgent{})
+	mockHistory := &mockHistoryProvider{}
+	handler.SetHistoryProvider(mockHistory)
+
+	req := httptest.NewRequest("DELETE", "/v1/sessions/session-123", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("Expected status 204, got %d", rr.Code)
+	}
+	if mockHistory.deletedID != "session-123" {
+		t.Errorf("Expected deleted session-123, got %s", mockHistory.deletedID)
+	}
+}
+
+func TestDeleteSessionMissingID(t *testing.T) {
+	handler := api.NewRouter(&mockAgent{})
+	handler.SetHistoryProvider(&mockHistoryProvider{})
+
+	req := httptest.NewRequest("DELETE", "/v1/sessions/", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("Expected status 400 for missing session ID, got %d", rr.Code)
+	}
+}
+
+func TestDeleteSessionNoProvider(t *testing.T) {
+	handler := api.NewRouter(&mockAgent{})
+	// No history provider set
+
+	req := httptest.NewRequest("DELETE", "/v1/sessions/session-123", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("Expected status 500 without provider, got %d", rr.Code)
+	}
+}
+
+func TestSessionHistoryEndpointWithProvider(t *testing.T) {
+	handler := api.NewRouter(&mockAgent{})
+	handler.SetHistoryProvider(&mockHistoryProvider{
+		history: []api.Message{
+			{Role: "user", Content: "Hello"},
+			{Role: "assistant", Content: "Hi there!"},
+		},
+	})
+
+	req := httptest.NewRequest("GET", "/v1/sessions/sess-1/history", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", rr.Code)
+	}
+
+	var resp api.HistoryResponse
+	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if resp.SessionID != "sess-1" {
+		t.Errorf("Expected session ID sess-1, got %s", resp.SessionID)
+	}
+	if len(resp.Messages) != 2 {
+		t.Errorf("Expected 2 messages, got %d", len(resp.Messages))
+	}
+}
+
 func TestChatEndpointNoAuthUsesBodyIdentity(t *testing.T) {
 	ca := &captureAgent{}
 	router := api.NewRouter(ca)

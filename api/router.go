@@ -43,6 +43,20 @@ type Message struct {
 type HistoryProvider interface {
 	// GetSessionHistory retrieves messages for a session.
 	GetSessionHistory(ctx context.Context, sessionID string) ([]Message, error)
+	// ListSessions returns all sessions for the current tenant.
+	ListSessions(ctx context.Context) ([]SessionSummary, error)
+	// DeleteSession removes all entries for a session.
+	DeleteSession(ctx context.Context, sessionID string) error
+}
+
+// SessionSummary is a summary of a session for listing.
+type SessionSummary struct {
+	SessionID string `json:"session_id"`
+	TenantID  string `json:"tenant_id"`
+	LastEntry string `json:"last_entry"`
+	EntryCount int   `json:"entry_count"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
 }
 
 // Router handles HTTP routing.
@@ -63,6 +77,7 @@ type Router struct {
 	v1Handler      http.Handler
 	agent          agent.Agent
 	skills         SkillProvider
+	skillDisabled  func(id string) bool
 	execStore      ExecutionStore
 	history        HistoryProvider
 	healthCheckers []HealthChecker
@@ -92,6 +107,11 @@ func (r *Router) SetAuthMiddleware(mw func(http.Handler) http.Handler) {
 // SetSkillProvider sets the skill registry for the /v1/skills endpoint.
 func (r *Router) SetSkillProvider(sp SkillProvider) {
 	r.skills = sp
+}
+
+// SetSkillDisabledChecker sets a function that checks if a skill is disabled.
+func (r *Router) SetSkillDisabledChecker(fn func(id string) bool) {
+	r.skillDisabled = fn
 }
 
 // SetExecutionStore sets the execution store for the /v1/executions endpoint.
@@ -130,6 +150,7 @@ func (r *Router) registerRoutes() {
 	r.v1Mux.HandleFunc("/v1/chat/stream", r.handleChatStream)
 	r.v1Mux.HandleFunc("/v1/skills", r.handleSkills)
 	r.v1Mux.HandleFunc("/v1/executions", r.handleExecutions)
+	r.v1Mux.HandleFunc("/v1/sessions", r.handleListSessions)
 	r.v1Mux.HandleFunc("/v1/sessions/", r.handleSessions)
 
 	// Route /v1/ traffic to the potentially wrapped v1Handler
@@ -273,9 +294,23 @@ func (r *Router) handleChatStream(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) handleSessions(w http.ResponseWriter, req *http.Request) {
-	// Extract session ID from path: /v1/sessions/{sessionID}/history
+	// Extract session ID from path: /v1/sessions/{sessionID}/history or /v1/sessions/{sessionID}
 	path := strings.TrimPrefix(req.URL.Path, "/v1/sessions/")
 	parts := strings.Split(path, "/")
+
+	sessionID := parts[0]
+	if sessionID == "" {
+		writeAPIError(w, http.StatusBadRequest, ErrInvalidRequest, "missing session ID")
+		return
+	}
+
+	// DELETE /v1/sessions/{sessionID}
+	if req.Method == http.MethodDelete {
+		r.deleteSessionByID(w, req, sessionID)
+		return
+	}
+
+	// GET /v1/sessions/{sessionID}/history
 	if len(parts) < 2 || parts[1] != "history" {
 		slog.WarnContext(req.Context(), "request validation error",
 			"method", req.Method,
@@ -286,8 +321,6 @@ func (r *Router) handleSessions(w http.ResponseWriter, req *http.Request) {
 		writeAPIError(w, http.StatusNotFound, ErrNotFound, "not found")
 		return
 	}
-
-	sessionID := parts[0]
 
 	messages := []Message{}
 	if r.history != nil {
@@ -314,6 +347,57 @@ func (r *Router) handleSessions(w http.ResponseWriter, req *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+func (r *Router) handleListSessions(w http.ResponseWriter, req *http.Request) {
+	if req.Method == http.MethodGet {
+		r.listSessions(w, req)
+		return
+	}
+	writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "")
+}
+
+func (r *Router) listSessions(w http.ResponseWriter, req *http.Request) {
+	if r.history == nil {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]SessionSummary{})
+		return
+	}
+
+	sessions, err := r.history.ListSessions(req.Context())
+	if err != nil {
+		slog.ErrorContext(req.Context(), "handler error",
+			"method", req.Method,
+			"path", req.URL.Path,
+			"status", http.StatusInternalServerError,
+			"error", err,
+		)
+		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to list sessions")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(sessions)
+}
+
+
+func (r *Router) deleteSessionByID(w http.ResponseWriter, req *http.Request, sessionID string) {
+	if r.history == nil {
+		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "history provider not configured")
+		return
+	}
+
+	if err := r.history.DeleteSession(req.Context(), sessionID); err != nil {
+		slog.ErrorContext(req.Context(), "handler error",
+			"method", req.Method,
+			"path", req.URL.Path,
+			"status", http.StatusInternalServerError,
+			"error", err,
+		)
+		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to delete session")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
 func (r *Router) handleNotFound(w http.ResponseWriter, req *http.Request) {
 	// Only trigger for truly unmatched paths
 	if req.URL.Path == "/" || req.URL.Path == "/health" || req.URL.Path == "/healthz" ||

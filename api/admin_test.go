@@ -526,6 +526,376 @@ func TestCreatedAPIKeyCanAuthenticate(t *testing.T) {
 	}
 }
 
+func TestHandleMe(t *testing.T) {
+	// Test with authenticated admin user
+	t.Run("authenticated admin", func(t *testing.T) {
+		_, _ = setupAdminTest(t) // need DB for migration
+
+		user := &auth.User{ID: "admin", TenantID: "default", Name: "Admin"}
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := middleware.WithUser(r.Context(), user)
+			ctx = middleware.WithUserRole(ctx, "admin")
+			HandleMe(w, r.WithContext(ctx))
+		})
+
+		rec := doAdminRequest(t, handler, "GET", "/v1/me", nil)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+		}
+
+		var resp map[string]string
+		if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if resp["user_id"] != "admin" {
+			t.Errorf("user_id = %q, want %q", resp["user_id"], "admin")
+		}
+		if resp["tenant_id"] != "default" {
+			t.Errorf("tenant_id = %q, want %q", resp["tenant_id"], "default")
+		}
+		if resp["name"] != "Admin" {
+			t.Errorf("name = %q, want %q", resp["name"], "Admin")
+		}
+		if resp["role"] != "admin" {
+			t.Errorf("role = %q, want %q", resp["role"], "admin")
+		}
+	})
+
+	t.Run("authenticated member", func(t *testing.T) {
+		_, _ = setupAdminTest(t)
+
+		user := &auth.User{ID: "alice", TenantID: "default", Name: "Alice"}
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := middleware.WithUser(r.Context(), user)
+			ctx = middleware.WithUserRole(ctx, "member")
+			HandleMe(w, r.WithContext(ctx))
+		})
+
+		rec := doAdminRequest(t, handler, "GET", "/v1/me", nil)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+		}
+
+		var resp map[string]string
+		if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if resp["role"] != "member" {
+			t.Errorf("role = %q, want %q", resp["role"], "member")
+		}
+	})
+
+	t.Run("unauthenticated", func(t *testing.T) {
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			HandleMe(w, r)
+		})
+
+		rec := doAdminRequest(t, handler, "GET", "/v1/me", nil)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+		}
+	})
+}
+
+func TestUpdateTenant(t *testing.T) {
+	_, handler := setupAdminTest(t)
+
+	// Create a tenant
+	doAdminRequest(t, handler, "POST", "/v1/admin/tenants", map[string]string{
+		"id": "acme", "name": "Acme Corp",
+	})
+
+	// Update the tenant name
+	rec := doAdminRequest(t, handler, "PUT", "/v1/admin/tenants/acme", map[string]string{
+		"name": "Acme Inc",
+	})
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp map[string]string
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp["name"] != "Acme Inc" {
+		t.Errorf("name = %q, want %q", resp["name"], "Acme Inc")
+	}
+
+	// Verify via list
+	listRec := doAdminRequest(t, handler, "GET", "/v1/admin/tenants", nil)
+	var tenants []map[string]string
+	json.NewDecoder(listRec.Body).Decode(&tenants)
+	for _, t2 := range tenants {
+		if t2["id"] == "acme" && t2["name"] != "Acme Inc" {
+			t.Errorf("tenant name not updated in list: %q", t2["name"])
+		}
+	}
+}
+
+func TestUpdateTenantNotFound(t *testing.T) {
+	_, handler := setupAdminTest(t)
+
+	rec := doAdminRequest(t, handler, "PUT", "/v1/admin/tenants/nonexistent", map[string]string{
+		"name": "New Name",
+	})
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+}
+
+func TestDeleteTenant(t *testing.T) {
+	_, handler := setupAdminTest(t)
+
+	// Create a tenant
+	doAdminRequest(t, handler, "POST", "/v1/admin/tenants", map[string]string{
+		"id": "to-delete", "name": "Delete Me",
+	})
+
+	// Delete it
+	rec := doAdminRequest(t, handler, "DELETE", "/v1/admin/tenants/to-delete", nil)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusNoContent, rec.Body.String())
+	}
+
+	// Verify via list
+	listRec := doAdminRequest(t, handler, "GET", "/v1/admin/tenants", nil)
+	var tenants []map[string]string
+	json.NewDecoder(listRec.Body).Decode(&tenants)
+	for _, t2 := range tenants {
+		if t2["id"] == "to-delete" {
+			t.Error("tenant should have been deleted")
+		}
+	}
+}
+
+func TestDeleteTenantNotFound(t *testing.T) {
+	_, handler := setupAdminTest(t)
+
+	rec := doAdminRequest(t, handler, "DELETE", "/v1/admin/tenants/nonexistent", nil)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+}
+
+func TestUpdateUser(t *testing.T) {
+	_, handler := setupAdminTest(t)
+
+	// Create tenant + user
+	doAdminRequest(t, handler, "POST", "/v1/admin/tenants", map[string]string{
+		"id": "acme", "name": "Acme Corp",
+	})
+	doAdminRequest(t, handler, "POST", "/v1/admin/tenants/acme/users", map[string]string{
+		"id": "u1", "name": "Alice", "role": "member",
+	})
+
+	// Update user name and role
+	rec := doAdminRequest(t, handler, "PUT", "/v1/admin/users/u1", map[string]string{
+		"name": "Alice Updated",
+		"role": "admin",
+	})
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp map[string]string
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp["name"] != "Alice Updated" {
+		t.Errorf("name = %q, want %q", resp["name"], "Alice Updated")
+	}
+	if resp["role"] != "admin" {
+		t.Errorf("role = %q, want %q", resp["role"], "admin")
+	}
+}
+
+func TestUpdateUserNotFound(t *testing.T) {
+	_, handler := setupAdminTest(t)
+
+	rec := doAdminRequest(t, handler, "PUT", "/v1/admin/users/nonexistent", map[string]string{
+		"name": "Ghost",
+	})
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+}
+
+func TestDeleteUser(t *testing.T) {
+	_, handler := setupAdminTest(t)
+
+	// Create tenant + user
+	doAdminRequest(t, handler, "POST", "/v1/admin/tenants", map[string]string{
+		"id": "acme", "name": "Acme Corp",
+	})
+	doAdminRequest(t, handler, "POST", "/v1/admin/tenants/acme/users", map[string]string{
+		"id": "u-del", "name": "Delete Me", "role": "member",
+	})
+
+	// Delete user
+	rec := doAdminRequest(t, handler, "DELETE", "/v1/admin/users/u-del", nil)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusNoContent, rec.Body.String())
+	}
+
+	// Verify user is gone from list
+	listRec := doAdminRequest(t, handler, "GET", "/v1/admin/tenants/acme/users", nil)
+	var users []map[string]string
+	json.NewDecoder(listRec.Body).Decode(&users)
+	for _, u := range users {
+		if u["id"] == "u-del" {
+			t.Error("user should have been deleted")
+		}
+	}
+}
+
+func TestDeleteUserNotFound(t *testing.T) {
+	_, handler := setupAdminTest(t)
+
+	rec := doAdminRequest(t, handler, "DELETE", "/v1/admin/users/nonexistent", nil)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+}
+
+func TestDeleteUserCascadesKeys(t *testing.T) {
+	_, handler := setupAdminTest(t)
+
+	// Create tenant + user + key
+	doAdminRequest(t, handler, "POST", "/v1/admin/tenants", map[string]string{
+		"id": "acme", "name": "Acme Corp",
+	})
+	doAdminRequest(t, handler, "POST", "/v1/admin/tenants/acme/users", map[string]string{
+		"id": "u-cascade", "name": "Cascade", "role": "member",
+	})
+	createResp := doAdminRequest(t, handler, "POST", "/v1/admin/users/u-cascade/keys", map[string]string{
+		"name": "test-key",
+	})
+	var createBody map[string]string
+	json.NewDecoder(createResp.Body).Decode(&createBody)
+
+	// Delete user — keys should cascade
+	rec := doAdminRequest(t, handler, "DELETE", "/v1/admin/users/u-cascade", nil)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+
+	// Verify key is gone (revoke should return 404)
+	keyID := createBody["id"]
+	delKeyRec := doAdminRequest(t, handler, "DELETE", "/v1/admin/keys/"+keyID, nil)
+	if delKeyRec.Code != http.StatusNotFound {
+		t.Errorf("key should be cascade-deleted, got status %d", delKeyRec.Code)
+	}
+}
+
+func TestListProviders(t *testing.T) {
+	_, handler := setupAdminTest(t)
+	// No provider lister set - should return empty array
+
+	rec := doAdminRequest(t, handler, "GET", "/v1/admin/providers", nil)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp []map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp) != 0 {
+		t.Errorf("expected 0 providers without lister, got %d", len(resp))
+	}
+}
+
+func TestListProvidersWithData(t *testing.T) {
+	_, handler := setupAdminTest(t)
+	// Note: setupAdminTest doesn't set a provider lister,
+	// so this test verifies the endpoint returns empty when no lister is set.
+	// The full integration test happens via browser.
+	rec := doAdminRequest(t, handler, "GET", "/v1/admin/providers", nil)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
+func TestAuditEndpoint(t *testing.T) {
+	_, handler := setupAdminTest(t)
+
+	rec := doAdminRequest(t, handler, "GET", "/v1/admin/audit", nil)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp []interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	// Empty audit log is expected
+	if len(resp) != 0 {
+		t.Errorf("expected 0 audit entries, got %d", len(resp))
+	}
+}
+
+func TestAuditWithFilters(t *testing.T) {
+	_, handler := setupAdminTest(t)
+
+	rec := doAdminRequest(t, handler, "GET", "/v1/admin/audit?tenant_id=default&limit=10", nil)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
+func TestAdminSkillsEndpoint(t *testing.T) {
+	_, handler := setupAdminTest(t)
+	// No SkillAdmin set - should return empty array
+
+	rec := doAdminRequest(t, handler, "GET", "/v1/admin/skills", nil)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp []interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp) != 0 {
+		t.Errorf("expected 0 skills without admin, got %d", len(resp))
+	}
+}
+
+func TestAdminSkillsMethodNotAllowed(t *testing.T) {
+	_, handler := setupAdminTest(t)
+
+	rec := doAdminRequest(t, handler, "POST", "/v1/admin/skills", nil)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusMethodNotAllowed)
+	}
+}
+
+func TestAuditMethodNotAllowed(t *testing.T) {
+	_, handler := setupAdminTest(t)
+
+	rec := doAdminRequest(t, handler, "POST", "/v1/admin/audit", nil)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusMethodNotAllowed)
+	}
+}
+
 func TestAdminEndpointRejectsNonAdmin(t *testing.T) {
 	db, err := persistence.Open(":memory:")
 	if err != nil {

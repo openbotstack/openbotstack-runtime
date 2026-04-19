@@ -81,11 +81,21 @@ test-race: ## Run tests with race detector
 test-wasm: ## Run Wasm runtime tests only
 	go test -v ./sandbox/wasm/...
 
+test-wasm-e2e: ## Run Wasm E2E tests (requires compiled skills)
+	go test -v -tags=integration -timeout 120s ./sandbox/wasm/ -run "TestE2E"
+
 test-executor: ## Run executor tests only
 	go test -v ./executor/...
 
 test-skills: ## Run skill example tests
 	go test -v ./examples/skills/...
+
+build-skills: ## Build all skill Wasm modules (requires Go 1.26+)
+	@for skill in hello-world tax-calculator wordcount math-add sentiment meeting-summarize; do \
+		echo "Building $$skill..." && \
+		(cd examples/skills/$$skill && GOOS=wasip1 GOARCH=wasm go build -o main.wasm .) && \
+		echo "  OK: examples/skills/$$skill/main.wasm"; \
+	done
 
 test-integration: ## Run integration tests (auto-builds binary)
 	go test -v -timeout 120s ./integration/...
@@ -104,7 +114,7 @@ clean: ## Clean build artifacts and generated files
 	rm -f $(BINARY_NAME)
 	rm -f coverage.out coverage.html
 	rm -f server.log
-	rm -rf web/webui/dist
+	rm -rf web/webui/user/dist web/webui/admin/dist
 
 clean-all: clean web-clean ## Clean everything (including node_modules)
 
@@ -118,18 +128,31 @@ deps: ## Download dependencies
 # Frontend targets
 # ============================================================================
 
-web-install: ## Install frontend dependencies
-	cd web && npm install
+web-install: ## Install frontend dependencies for both UIs
+	@set -e; \
+	echo "Installing user plane deps..."; \
+	cd web/user && npm install; \
+	echo "Installing admin plane deps..."; \
+	cd ../../web/admin && npm install
 
-web-build: ## Build frontend for embedding
-	cd web && npm run build
-	@echo "Frontend built to web/webui/dist/"
+web-build: ## Build both frontends for embedding
+	@set -e; \
+	echo "Building user plane..."; \
+	cd web/user && npm run build; \
+	echo "Building admin plane..."; \
+	cd ../../web/admin && npm run build; \
+	echo "User UI built to web/webui/user/dist/"; \
+	echo "Admin UI built to web/webui/admin/dist/"
 
-web-dev: ## Start frontend dev server
-	cd web && npm run dev
+web-dev-user: ## Start user UI dev server
+	cd web/user && npm run dev
+
+web-dev-admin: ## Start admin UI dev server
+	cd web/admin && npm run dev
 
 web-clean: ## Clean frontend build artifacts
-	rm -rf web/dist web/node_modules
+	rm -rf web/user/node_modules web/admin/node_modules
+	rm -rf web/webui/user/dist web/webui/admin/dist
 
 # ============================================================================
 # Docker targets

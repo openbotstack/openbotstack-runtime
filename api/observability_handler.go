@@ -67,13 +67,18 @@ func (r *Router) handleSkills(w http.ResponseWriter, req *http.Request) {
 			continue
 		}
 
+		enabled := true
+		if r.skillDisabled != nil && r.skillDisabled(id) {
+			enabled = false
+		}
+
 		resp := SkillResponse{
 			ID:          s.ID(),
 			Name:        s.Name(),
 			Description: s.Description(),
 			Type:        skillTypeFromID(s),
 			Version:     "1.0.0",
-			Enabled:     true,
+			Enabled:     enabled,
 		}
 
 		if schema := s.InputSchema(); schema != nil {
