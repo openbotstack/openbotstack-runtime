@@ -921,3 +921,192 @@ func TestAdminEndpointRejectsNonAdmin(t *testing.T) {
 		t.Errorf("status = %d, want %d for non-admin", rec.Code, http.StatusForbidden)
 	}
 }
+
+// --- Provider Config Tests ---
+
+// mockProviderReloader tracks reload calls for test assertions.
+type mockProviderReloader struct {
+	lastProvider string
+	lastBaseURL  string
+	lastAPIKey   string
+	lastModel    string
+	calls        int
+	err          error
+}
+
+func (m *mockProviderReloader) ReloadProvider(providerName, baseURL, apiKey, model string) error {
+	m.calls++
+	m.lastProvider = providerName
+	m.lastBaseURL = baseURL
+	m.lastAPIKey = apiKey
+	m.lastModel = model
+	return m.err
+}
+
+func TestGetProviderConfig(t *testing.T) {
+	_, handler := setupAdminTest(t)
+
+	rec := doAdminRequest(t, handler, "GET", "/v1/admin/providers/config", nil)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	// Should have "default" and "providers" keys
+	if _, ok := resp["default"]; !ok {
+		t.Error("missing 'default' field")
+	}
+	if _, ok := resp["providers"]; !ok {
+		t.Error("missing 'providers' field")
+	}
+}
+
+func TestUpdateProviderConfig(t *testing.T) {
+	db, _ := setupAdminTest(t)
+
+	// Setup mock reloader
+	ar := NewAdminRouter(db.DB)
+	// Re-wrap handler to access the admin router directly
+	mockReloader := &mockProviderReloader{}
+	ar.SetProviderReloader(mockReloader)
+
+	wrappedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user := &auth.User{ID: "admin", TenantID: "default", Name: "Admin"}
+		ctx := middleware.WithUser(r.Context(), user)
+		ctx = middleware.WithUserRole(ctx, "admin")
+		ar.Handler().ServeHTTP(w, r.WithContext(ctx))
+	})
+
+	// Update provider config
+	rec := doAdminRequest(t, wrappedHandler, "PUT", "/v1/admin/providers/config", map[string]string{
+		"provider": "openai",
+		"base_url": "https://api.example.com/v1",
+		"api_key":  "sk-test-key-123",
+		"model":    "gpt-4o",
+	})
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	// Verify reloader was called
+	if mockReloader.calls != 1 {
+		t.Errorf("ReloadProvider calls = %d, want 1", mockReloader.calls)
+	}
+	if mockReloader.lastProvider != "openai" {
+		t.Errorf("provider = %q, want %q", mockReloader.lastProvider, "openai")
+	}
+	if mockReloader.lastAPIKey != "sk-test-key-123" {
+		t.Errorf("api_key = %q, want %q", mockReloader.lastAPIKey, "sk-test-key-123")
+	}
+
+	// Verify config persisted in DB
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM provider_config WHERE provider_name = 'openai'").Scan(&count); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("provider_config rows = %d, want 1", count)
+	}
+
+	// Verify GET returns masked key
+	rec2 := doAdminRequest(t, wrappedHandler, "GET", "/v1/admin/providers/config", nil)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, want %d", rec2.Code, http.StatusOK)
+	}
+	var getConfig map[string]interface{}
+	json.Unmarshal(rec2.Body.Bytes(), &getConfig)
+	providers := getConfig["providers"].(map[string]interface{})
+	openai := providers["openai"].(map[string]interface{})
+	if openai["api_key_set"] != true {
+		t.Error("api_key_set should be true after setting key")
+	}
+	// The actual key should never appear in GET response
+	if strings.Contains(rec2.Body.String(), "sk-test-key-123") {
+		t.Error("API key should be masked in GET response")
+	}
+}
+
+func TestUpdateProviderConfigValidation(t *testing.T) {
+	_, handler := setupAdminTest(t)
+
+	tests := []struct {
+		name string
+		body map[string]string
+	}{
+		{"missing provider", map[string]string{"base_url": "https://example.com", "model": "gpt-4o"}},
+		{"missing model", map[string]string{"provider": "openai", "base_url": "https://example.com"}},
+		{"invalid provider", map[string]string{"provider": "invalid", "base_url": "https://example.com", "model": "gpt-4o"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := doAdminRequest(t, handler, "PUT", "/v1/admin/providers/config", tt.body)
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want %d for %s; body: %s", rec.Code, http.StatusBadRequest, tt.name, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestTestProviderConnectionValidation(t *testing.T) {
+	_, handler := setupAdminTest(t)
+
+	// Missing required fields
+	rec := doAdminRequest(t, handler, "POST", "/v1/admin/providers/test", map[string]string{
+		"provider": "openai",
+	})
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d; body: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+}
+
+func TestSetDefaultProvider(t *testing.T) {
+	db, _ := setupAdminTest(t)
+
+	ar := NewAdminRouter(db.DB)
+	mockReloader := &mockProviderReloader{}
+	ar.SetProviderReloader(mockReloader)
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user := &auth.User{ID: "admin", TenantID: "default", Name: "Admin"}
+		ctx := middleware.WithUser(r.Context(), user)
+		ctx = middleware.WithUserRole(ctx, "admin")
+		ar.Handler().ServeHTTP(w, r.WithContext(ctx))
+	})
+
+	// Set openai as default with config
+	rec := doAdminRequest(t, handler, "PUT", "/v1/admin/providers/config", map[string]string{
+		"provider":    "openai",
+		"base_url":    "https://api.openai.com/v1",
+		"api_key":     "sk-test",
+		"model":       "gpt-4o",
+		"is_default":  "true",
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body: %s", rec.Code, rec.Body.String())
+	}
+
+	// Verify default is set in DB
+	var isDefault int
+	if err := db.QueryRow("SELECT is_default FROM provider_config WHERE provider_name = 'openai'").Scan(&isDefault); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if isDefault != 1 {
+		t.Errorf("is_default = %d, want 1", isDefault)
+	}
+
+	// Verify GET returns correct default
+	rec2 := doAdminRequest(t, handler, "GET", "/v1/admin/providers/config", nil)
+	var resp map[string]interface{}
+	json.Unmarshal(rec2.Body.Bytes(), &resp)
+	if resp["default"] != "openai" {
+		t.Errorf("default = %v, want 'openai'", resp["default"])
+	}
+}

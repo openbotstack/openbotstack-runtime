@@ -452,6 +452,7 @@ func main() {
 	adminRouter := api.NewAdminRouter(pdb.DB)
 	mux.Handle("/v1/admin/", authMW(adminRouter.Handler()))
 		adminRouter.SetProviderLister(&modelRouterLister{router: modelRouter})
+		adminRouter.SetProviderReloader(&providerReloader{router: modelRouter})
 		adminRouter.SetSkillAdmin(skillAdmin)
 
 	// UI routes (embedded frontends — dual SPA)
@@ -623,6 +624,30 @@ func (m *modelRouterLister) ListProviders() []api.ProviderInfo {
 		})
 	}
 	return result
+}
+
+// providerReloader adapts a DefaultRouter to the api.ProviderReloader interface.
+// It hot-reloads providers at runtime by creating a new provider instance
+// and replacing the old one in the router.
+type providerReloader struct {
+	router *router.DefaultRouter
+}
+
+func (p *providerReloader) ReloadProvider(providerName, baseURL, apiKey, model string) error {
+	var newProvider providers.ModelProvider
+	switch providerName {
+	case "modelscope":
+		newProvider = providers.NewModelScopeProvider(baseURL, apiKey, model)
+	case "siliconflow":
+		newProvider = providers.NewSiliconFlowProvider(baseURL, apiKey, model)
+	case "claude":
+		newProvider = providers.NewClaudeProvider(baseURL, apiKey, model)
+	default:
+		newProvider = providers.NewOpenAIProvider(baseURL, apiKey, model)
+	}
+	p.router.Replace(newProvider)
+	slog.Info("provider hot-reloaded", "provider", providerName, "model", model, "base_url", baseURL)
+	return nil
 }
 
 // skillAdminAdapter tracks skill enable/disable state for the admin API.
