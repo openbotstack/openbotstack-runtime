@@ -12,24 +12,35 @@ export interface MeResponse {
   role: string
 }
 
-export async function apiCall<T>(path: string, options?: RequestInit): Promise<T> {
+export function authHeaders(): Record<string, string> {
   const key = sessionStorage.getItem('obs_admin_key')
   if (!key) throw new AuthError('No API key')
+  return { 'X-API-Key': key }
+}
 
-  const resp = await fetch(path, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      'X-API-Key': key,
-      ...options?.headers,
-    },
-  })
-
+export function checkAuthStatus(resp: Response): void {
   if (resp.status === 401 || resp.status === 403) {
     sessionStorage.removeItem('obs_admin_key')
     sessionStorage.removeItem('obs_admin_role')
     throw new AuthError('Authentication failed')
   }
+}
+
+export async function apiCall<T>(path: string, options?: RequestInit): Promise<T> {
+  const key = sessionStorage.getItem('obs_admin_key')
+  if (!key) throw new AuthError('No API key')
+
+  const headers: Record<string, string> = {
+    'X-API-Key': key,
+    ...options?.headers as Record<string, string>,
+  }
+  if (options?.body) {
+    headers['Content-Type'] = 'application/json'
+  }
+
+  const resp = await fetch(path, { ...options, headers })
+
+  checkAuthStatus(resp)
 
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({ error: { message: `HTTP ${resp.status}` } }))
@@ -37,8 +48,9 @@ export async function apiCall<T>(path: string, options?: RequestInit): Promise<T
   }
 
   const text = await resp.text()
-  if (!text) return undefined as T
-  return JSON.parse(text)
+  const trimmed = text.trim()
+  if (!trimmed) return undefined as T
+  return JSON.parse(trimmed)
 }
 
 export function getStoredKey(): string | null {

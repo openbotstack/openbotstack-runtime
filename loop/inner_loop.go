@@ -27,6 +27,7 @@ type DefaultInnerLoop struct {
 	stopEvaluator  *InnerStopEvaluator
 	logger         execution.ExecutionLogger
 	currentState   InnerState
+	progressCB     ProgressCallback
 }
 
 // NewDefaultInnerLoop creates a new DefaultInnerLoop.
@@ -56,6 +57,18 @@ func (l *DefaultInnerLoop) State() InnerState {
 // If not set, skill steps in plans will be skipped with a warning.
 func (l *DefaultInnerLoop) SetSkillExecutor(se execution.SkillExecutor) {
 	l.skillExecutor = se
+}
+
+// SetProgressCallback configures a callback for intermediate execution events.
+func (l *DefaultInnerLoop) SetProgressCallback(cb ProgressCallback) {
+	l.progressCB = cb
+}
+
+// emitProgress calls the progress callback if set.
+func (l *DefaultInnerLoop) emitProgress(event ProgressEvent) {
+	if l.progressCB != nil {
+		l.progressCB(event)
+	}
 }
 
 // Run executes the iterative reasoning loop until a stop condition is met.
@@ -112,6 +125,7 @@ func (l *DefaultInnerLoop) Run(ctx context.Context, task TaskInput, ec *executio
 		if !plannerStopped {
 			turnResult.PlanText = fmt.Sprintf("Planned %d steps", len(plan.Steps))
 		}
+		l.emitProgress(ProgressEvent{Type: "thought", Content: turnResult.PlanText, Turn: turnsElapsed})
 
 		// STATE: ACT
 		l.currentState = InnerAct
@@ -135,6 +149,7 @@ func (l *DefaultInnerLoop) Run(ctx context.Context, task TaskInput, ec *executio
 				}
 				toolCallsUsed++
 				turnToolCalls++
+				l.emitProgress(ProgressEvent{Type: "tool_call", Content: step.Name, Turn: turnsElapsed, Tool: step.Name})
 
 				// Log tool execution start
 				if l.logger != nil {
@@ -180,6 +195,7 @@ func (l *DefaultInnerLoop) Run(ctx context.Context, task TaskInput, ec *executio
 
 				turnResult.ActionsExecuted = append(turnResult.ActionsExecuted, step.Name)
 				turnResult.Observations = append(turnResult.Observations, fmt.Sprintf("%v", toolRes))
+				l.emitProgress(ProgressEvent{Type: "tool_result", Content: fmt.Sprintf("%v", toolRes), Turn: turnsElapsed, Tool: step.Name})
 			} else if step.Type == execution.StepTypeSkill {
 				if l.skillExecutor == nil {
 					slog.Warn("skill step skipped: no skill executor configured", "skill", step.Name)
@@ -260,6 +276,7 @@ func (l *DefaultInnerLoop) Run(ctx context.Context, task TaskInput, ec *executio
 		stopCond := l.stopEvaluator.Evaluate(turnsElapsed, toolCallsUsed, startTime, plannerStopped, ctx)
 		turnResult.StopReason = stopCond.Reason
 		result.TurnResults = append(result.TurnResults, turnResult)
+		l.emitProgress(ProgressEvent{Type: "turn_complete", Content: string(stopCond.Reason), Turn: turnsElapsed})
 
 		if stopCond.Stopped {
 			l.currentState = InnerDone

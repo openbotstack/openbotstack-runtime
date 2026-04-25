@@ -10,6 +10,7 @@ import (
 	csSkills "github.com/openbotstack/openbotstack-core/control/skills"
 	"github.com/openbotstack/openbotstack-core/assistant"
 	"github.com/openbotstack/openbotstack-core/execution"
+	"github.com/openbotstack/openbotstack-core/memory/abstraction"
 	"github.com/openbotstack/openbotstack-core/planner"
 	"github.com/openbotstack/openbotstack-core/registry/skills"
 	"github.com/openbotstack/openbotstack-runtime/loop"
@@ -251,3 +252,203 @@ func TestDualLoopAgent_ImplementsAgentInterface(t *testing.T) {
 // Compile-time interface checks
 var _ agent.SkillRegistry = (*mockSkillRegistry)(nil)
 var _ agent.ConversationStore = (*mockConversationStore)(nil)
+
+// --- MemoryManager Mock ---
+
+type mockMemoryManager struct {
+	entries []abstraction.MemoryEntry
+	err     error
+	called  bool
+	query   string
+}
+
+func (m *mockMemoryManager) StoreShortTerm(ctx context.Context, entry abstraction.MemoryEntry) error {
+	return nil
+}
+func (m *mockMemoryManager) StoreLongTerm(ctx context.Context, entry abstraction.MemoryEntry) error {
+	return nil
+}
+func (m *mockMemoryManager) RetrieveSimilar(ctx context.Context, query string, limit int) ([]abstraction.MemoryEntry, error) {
+	m.called = true
+	m.query = query
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.entries, nil
+}
+func (m *mockMemoryManager) RetrieveByTag(ctx context.Context, tags []string, limit int) ([]abstraction.MemoryEntry, error) {
+	return nil, nil
+}
+func (m *mockMemoryManager) Forget(ctx context.Context, id string) error {
+	return nil
+}
+func (m *mockMemoryManager) Summarize(ctx context.Context, entries []abstraction.MemoryEntry) (abstraction.MemoryEntry, error) {
+	return abstraction.MemoryEntry{}, nil
+}
+
+// --- MemoryContext Tests ---
+
+func TestDualLoopAgent_MemoryContextPopulated(t *testing.T) {
+	memMgr := &mockMemoryManager{
+		entries: []abstraction.MemoryEntry{
+			{ID: "mem1", Content: "User previously asked about Qwen models"},
+			{ID: "mem2", Content: "User prefers concise summaries"},
+		},
+	}
+
+	// Use a mock outer loop that captures the PlannerContext
+	var capturedPctx *planner.PlannerContext
+	innerResult := &loop.TaskResult{
+		StopReason: loop.StopReasonPlannerStopped,
+		TurnResults: []loop.TurnResult{
+			{Observations: []string{"done"}},
+		},
+	}
+	outerResult := &loop.WorkflowResult{
+		TaskResults:   []*loop.TaskResult{innerResult},
+		StopCondition: loop.StopCondition{Reason: loop.StopReasonGoalAchieved},
+	}
+
+	// Use a mock inner loop that captures the PlannerContext from the task
+	mockInner := &capturingInnerLoop{result: innerResult, capturedCtx: &capturedPctx}
+	mockOuter := &capturingOuterLoop{result: outerResult, capturedCtx: &capturedPctx}
+
+	dla := NewDualLoopAgent(
+		&mockPlannerExec{},
+		&mockSkillRegistry{ids: []string{"core/summarize"}},
+		&assistant.AssistantRuntime{AssistantID: "test"},
+		mockInner,
+		mockOuter,
+	)
+	dla.SetConversationStore(&mockConversationStore{})
+	dla.SetMemoryManager(memMgr)
+
+	_, err := dla.HandleMessage(context.Background(), agent.MessageRequest{
+		TenantID:  "t1",
+		UserID:    "u1",
+		SessionID: "s1",
+		Message:   "Summarize this text",
+	})
+	if err != nil {
+		t.Fatalf("HandleMessage failed: %v", err)
+	}
+
+	// Verify MemoryManager was called
+	if !memMgr.called {
+		t.Fatal("MemoryManager.RetrieveSimilar was not called")
+	}
+	if memMgr.query != "Summarize this text" {
+		t.Errorf("query = %q, want %q", memMgr.query, "Summarize this text")
+	}
+
+	// Verify PlannerContext has memory populated
+	if capturedPctx == nil {
+		t.Fatal("PlannerContext was nil")
+	}
+	if len(capturedPctx.MemoryContext) != 2 {
+		t.Fatalf("MemoryContext has %d entries, want 2", len(capturedPctx.MemoryContext))
+	}
+	if string(capturedPctx.MemoryContext[0].Content) != "User previously asked about Qwen models" {
+		t.Errorf("MemoryContext[0].Content = %q, want %q", capturedPctx.MemoryContext[0].Content, "User previously asked about Qwen models")
+	}
+}
+
+func TestDualLoopAgent_MemoryContextErrorFallback(t *testing.T) {
+	memMgr := &mockMemoryManager{
+		err: fmt.Errorf("vector store unavailable"),
+	}
+
+	innerResult := &loop.TaskResult{
+		StopReason: loop.StopReasonPlannerStopped,
+		TurnResults: []loop.TurnResult{{Observations: []string{"done"}}},
+	}
+	outerResult := &loop.WorkflowResult{
+		TaskResults:   []*loop.TaskResult{innerResult},
+		StopCondition: loop.StopCondition{Reason: loop.StopReasonGoalAchieved},
+	}
+
+	dla := NewDualLoopAgent(
+		&mockPlannerExec{},
+		&mockSkillRegistry{ids: []string{"core/summarize"}},
+		&assistant.AssistantRuntime{AssistantID: "test"},
+		&mockLoopInnerLoop{result: innerResult},
+		&mockLoopOuterLoop{result: outerResult},
+	)
+	dla.SetConversationStore(&mockConversationStore{})
+	dla.SetMemoryManager(memMgr)
+
+	resp, err := dla.HandleMessage(context.Background(), agent.MessageRequest{
+		TenantID:  "t1",
+		UserID:    "u1",
+		SessionID: "s1",
+		Message:   "test",
+	})
+	if err != nil {
+		t.Fatalf("HandleMessage should not fail on memory error, got: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected response even with memory error")
+	}
+}
+
+func TestDualLoopAgent_MemoryContextNilManager(t *testing.T) {
+	innerResult := &loop.TaskResult{
+		StopReason: loop.StopReasonPlannerStopped,
+		TurnResults: []loop.TurnResult{{Observations: []string{"done"}}},
+	}
+	outerResult := &loop.WorkflowResult{
+		TaskResults:   []*loop.TaskResult{innerResult},
+		StopCondition: loop.StopCondition{Reason: loop.StopReasonGoalAchieved},
+	}
+
+	dla := NewDualLoopAgent(
+		&mockPlannerExec{},
+		&mockSkillRegistry{ids: []string{"core/summarize"}},
+		&assistant.AssistantRuntime{AssistantID: "test"},
+		&mockLoopInnerLoop{result: innerResult},
+		&mockLoopOuterLoop{result: outerResult},
+	)
+	dla.SetConversationStore(&mockConversationStore{})
+	// No SetMemoryManager call — memoryManager stays nil
+
+	resp, err := dla.HandleMessage(context.Background(), agent.MessageRequest{
+		TenantID:  "t1",
+		UserID:    "u1",
+		SessionID: "s1",
+		Message:   "test",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected response")
+	}
+}
+
+// --- Capturing mocks for PlannerContext inspection ---
+
+type capturingInnerLoop struct {
+	result      *loop.TaskResult
+	err         error
+	capturedCtx **planner.PlannerContext
+}
+
+func (m *capturingInnerLoop) Run(ctx context.Context, task loop.TaskInput, ec *execution.ExecutionContext) (*loop.TaskResult, error) {
+	if m.capturedCtx != nil && task.PlannerContext != nil {
+		*m.capturedCtx = task.PlannerContext
+	}
+	return m.result, m.err
+}
+
+type capturingOuterLoop struct {
+	result      *loop.WorkflowResult
+	err         error
+	capturedCtx **planner.PlannerContext
+}
+
+func (m *capturingOuterLoop) Run(ctx context.Context, tasks []loop.TaskInput, ec *execution.ExecutionContext) (*loop.WorkflowResult, error) {
+	if m.capturedCtx != nil && len(tasks) > 0 && tasks[0].PlannerContext != nil {
+		*m.capturedCtx = tasks[0].PlannerContext
+	}
+	return m.result, m.err
+}

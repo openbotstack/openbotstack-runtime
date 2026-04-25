@@ -121,6 +121,18 @@ func (db *DB) Migrate() error {
 			is_default    INTEGER NOT NULL DEFAULT 0,
 			updated_at    TEXT NOT NULL DEFAULT ''
 		)`,
+		`CREATE TABLE IF NOT EXISTS sessions (
+			session_id           TEXT NOT NULL,
+			tenant_id            TEXT NOT NULL DEFAULT '',
+			user_id              TEXT NOT NULL DEFAULT '',
+			message_count        INTEGER NOT NULL DEFAULT 0,
+			last_message_preview TEXT NOT NULL DEFAULT '',
+			created_at           TEXT NOT NULL DEFAULT '',
+			updated_at           TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (session_id, tenant_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_sessions_tenant ON sessions(tenant_id, updated_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_sessions_tenant_user ON sessions(tenant_id, user_id, updated_at DESC)`,
 	}
 	tx, err := db.Begin()
 	if err != nil {

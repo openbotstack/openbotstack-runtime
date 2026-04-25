@@ -65,7 +65,7 @@ func TestAPIKeyMiddleware(t *testing.T) {
 	}{
 		{"valid key non-strict", false, "", true, true, 0},
 		{"valid key strict", true, "", true, true, 0},
-		{"invalid key non-strict", false, "obs_invalid", true, false, 0},
+		{"invalid key non-strict", false, "obs_invalid", true, false, http.StatusUnauthorized},
 		{"invalid key strict", true, "obs_invalid", true, false, http.StatusUnauthorized},
 		{"no header non-strict", false, "", false, false, 0},
 		{"no header strict", true, "", false, false, http.StatusUnauthorized},
@@ -205,11 +205,9 @@ func TestAPIKeyMiddleware_ExpiredKeyNonStrict(t *testing.T) {
 	}
 
 	called := false
-	var gotUser *auth.User
 	handler := APIKeyMiddleware(APIKeyMiddlewareConfig{DB: db.DB, Strict: false})(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			called = true
-			gotUser, _ = UserFromContext(r.Context())
 			w.WriteHeader(http.StatusOK)
 		}),
 	)
@@ -219,11 +217,12 @@ func TestAPIKeyMiddleware_ExpiredKeyNonStrict(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	if !called {
-		t.Fatal("next handler should have been called in non-strict mode for expired key")
+	// Expired key should always be rejected, regardless of Strict mode
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
 	}
-	if gotUser != nil {
-		t.Error("expected no user for expired key in non-strict mode")
+	if called {
+		t.Error("next handler should not have been called for expired key")
 	}
 }
 

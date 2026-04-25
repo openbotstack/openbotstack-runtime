@@ -23,6 +23,7 @@ type DefaultOuterLoop struct {
 	stopEvaluator *OuterStopEvaluator
 	logger        execution.ExecutionLogger
 	currentState  OuterState
+	progressCB    ProgressCallback
 }
 
 // NewDefaultOuterLoop creates a new DefaultOuterLoop.
@@ -46,6 +47,18 @@ func NewDefaultOuterLoop(
 // State returns the current outer loop state for observability.
 func (l *DefaultOuterLoop) State() OuterState {
 	return l.currentState
+}
+
+// SetProgressCallback configures a callback for intermediate execution events.
+func (l *DefaultOuterLoop) SetProgressCallback(cb ProgressCallback) {
+	l.progressCB = cb
+}
+
+// emitProgress calls the progress callback if set.
+func (l *DefaultOuterLoop) emitProgress(event ProgressEvent) {
+	if l.progressCB != nil {
+		l.progressCB(event)
+	}
 }
 
 // Run executes the task sequence via the outer loop state machine.
@@ -93,6 +106,7 @@ func (l *DefaultOuterLoop) Run(ctx context.Context, tasks []TaskInput, ec *execu
 			}
 		}
 
+		l.emitProgress(ProgressEvent{Type: "checkpoint", Content: fmt.Sprintf("task %d started", taskIdx)})
 		// STATE: TASK_EXECUTE
 		l.currentState = OuterTaskExecute
 		innerRes, err := l.innerLoop.Run(ctx, task, ec)
@@ -112,6 +126,11 @@ func (l *DefaultOuterLoop) Run(ctx context.Context, tasks []TaskInput, ec *execu
 		// Defect 2 Fix: Check if inner loop hit a safety limit.
 		// If it hit MaxTurns/MaxToolCalls/MaxRuntime, we should halt the entire workflow
 		// to prevent cascading failures in dependent tasks.
+		if innerRes.StopReason == StopReasonPlannerStopped {
+			l.emitProgress(ProgressEvent{Type: "checkpoint", Content: fmt.Sprintf("task %d completed", taskIdx)})
+		} else {
+			l.emitProgress(ProgressEvent{Type: "checkpoint", Content: fmt.Sprintf("task %d stopped: %s", taskIdx, innerRes.StopReason)})
+		}
 		if innerRes.StopReason != StopReasonPlannerStopped {
 			result.StopCondition = StopCondition{
 				Stopped: true,

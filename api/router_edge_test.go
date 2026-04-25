@@ -40,9 +40,9 @@ func TestChatEndpointNullBody(t *testing.T) {
 
 	handler.ServeHTTP(rr, req)
 
-	// null is valid JSON, so should be OK (but may have empty message)
-	if rr.Code != http.StatusOK {
-		t.Errorf("Expected status 200 for null body, got %d", rr.Code)
+	// null body decodes to empty message → 400
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("Expected status 400 for null body, got %d", rr.Code)
 	}
 }
 
@@ -191,8 +191,8 @@ func TestChatStreamEndpoint_SSEFormat(t *testing.T) {
 	if !strings.Contains(bodyStr, "data: Hello from stream!") {
 		t.Errorf("expected 'data: Hello from stream!' in SSE body, got: %s", bodyStr)
 	}
-	if !strings.Contains(bodyStr, "data: s1") {
-		t.Errorf("expected 'data: s1' (session ID) in SSE body, got: %s", bodyStr)
+	if !strings.Contains(bodyStr, `"session_id":"s1"`) {
+		t.Errorf("expected session_id in JSON SSE body, got: %s", bodyStr)
 	}
 }
 

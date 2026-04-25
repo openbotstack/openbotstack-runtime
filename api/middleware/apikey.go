@@ -21,10 +21,11 @@ type APIKeyMiddlewareConfig struct {
 // APIKeyMiddleware creates middleware that validates X-API-Key header.
 // Flow:
 // 1. Read X-API-Key header
-// 2. If present: SHA256(key) → query api_keys WHERE key_hash = ? AND revoked = 0
-// 3. If found: load user (join users table) → WithUser(ctx, user) + store role
-// 4. If not found and Strict: 401 Unauthorized
-// 5. If not found and !Strict: pass through without user
+// 2. If absent and Strict: 401 Unauthorized
+// 3. If absent and !Strict: pass through without user (anonymous)
+// 4. If present: SHA256(key) → query api_keys WHERE key_hash = ? AND revoked = 0
+// 5. If found: load user → inject into context
+// 6. If NOT found (invalid/expired): ALWAYS 401 — presenting a key means opting into auth
 func APIKeyMiddleware(config APIKeyMiddlewareConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -60,18 +61,15 @@ func APIKeyMiddleware(config APIKeyMiddlewareConfig) func(http.Handler) http.Han
 			).Scan(&userID, &tenantID, &userName, &userRole, &expiresAt)
 
 			if err == sql.ErrNoRows {
-				if config.Strict {
-					slog.WarnContext(r.Context(), "api key authentication failed",
-						"method", r.Method,
-						"path", r.URL.Path,
-						"status", http.StatusUnauthorized,
-						"error", "invalid key",
-						"remote_addr", r.RemoteAddr,
-					)
-					writeMiddlewareError(w, http.StatusUnauthorized, ErrUnauthorized, "invalid API key")
-					return
-				}
-				next.ServeHTTP(w, r)
+				// Key was provided but invalid — always reject
+				slog.WarnContext(r.Context(), "api key authentication failed",
+					"method", r.Method,
+					"path", r.URL.Path,
+					"status", http.StatusUnauthorized,
+					"error", "invalid key",
+					"remote_addr", r.RemoteAddr,
+				)
+				writeMiddlewareError(w, http.StatusUnauthorized, ErrUnauthorized, "invalid API key")
 				return
 			}
 			if err != nil {
@@ -90,18 +88,15 @@ func APIKeyMiddleware(config APIKeyMiddlewareConfig) func(http.Handler) http.Han
 			if expiresAt != "" {
 				exp, parseErr := time.Parse(time.RFC3339Nano, expiresAt)
 				if parseErr == nil && time.Now().UTC().After(exp) {
-					if config.Strict {
-						slog.WarnContext(r.Context(), "api key authentication failed",
-							"method", r.Method,
-							"path", r.URL.Path,
-							"status", http.StatusUnauthorized,
-							"error", "expired key",
-							"remote_addr", r.RemoteAddr,
-						)
-						writeMiddlewareError(w, http.StatusUnauthorized, ErrUnauthorized, "API key expired")
-						return
-					}
-					next.ServeHTTP(w, r)
+					// Expired key — always reject
+					slog.WarnContext(r.Context(), "api key authentication failed",
+						"method", r.Method,
+						"path", r.URL.Path,
+						"status", http.StatusUnauthorized,
+						"error", "expired key",
+						"remote_addr", r.RemoteAddr,
+					)
+					writeMiddlewareError(w, http.StatusUnauthorized, ErrUnauthorized, "API key expired")
 					return
 				}
 			}

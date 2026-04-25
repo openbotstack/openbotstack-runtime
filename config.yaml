@@ -3,11 +3,11 @@ server:
 
 providers:
   llm:
-    default: modelscope
-    modelscope:
-      base_url: "https://api-inference.modelscope.cn/v1"
-      api_key: "" # To be filled or used from ENV
-      model: "Qwen/Qwen2.5-Coder-32B-Instruct"
+    default: openai
+    openai:
+      base_url: "https://api.openai.com/v1"
+      api_key: ""  # Set via OBS_LLM_API_KEY environment variable
+      model: "gpt-4o-mini"
 
 observability:
   log_level: "info"

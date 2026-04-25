@@ -22,8 +22,12 @@ export function ChatPage() {
   const abortRef = useRef<AbortController | null>(null)
 
   const refreshSessions = useCallback(async () => {
-    const data = await listSessions()
-    setSessions(data)
+    try {
+      const data = await listSessions()
+      setSessions(data)
+    } catch {
+      // Auth errors handled by AuthProvider; non-critical failures show empty sidebar
+    }
   }, [])
 
   useEffect(() => {
@@ -216,6 +220,15 @@ export function ChatPage() {
       )
     } catch (err) {
       if ((err as Error).name === 'AbortError') return
+      if ((err as Error).name === 'AuthError') {
+        setMessages(prev =>
+          prev.map(m => {
+            if (m.id !== assistantMsgId) return m
+            return { ...m, content: 'Session expired. Please log in again.', streaming: false }
+          })
+        )
+        return
+      }
       await sendMessageFallback(messageText, assistantMsgId)
     } finally {
       abortRef.current = null

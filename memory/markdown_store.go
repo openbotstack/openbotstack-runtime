@@ -262,6 +262,186 @@ func (s *MarkdownMemoryStore) DataDir() string {
 	return s.dataDir
 }
 
+// ListSessions scans the filesystem for session files and returns summaries.
+// It reads the frontmatter from each .md file in the sessions directories.
+func (s *MarkdownMemoryStore) ListSessions(ctx context.Context, tenantID string) ([]SessionInfo, error) {
+	memoryDir := filepath.Join(s.dataDir, "memory")
+
+	// If tenantID specified, scan only that tenant's directory
+	var searchDirs []string
+	if tenantID != "" {
+		searchDirs = []string{filepath.Join(memoryDir, sanitizePath(tenantID))}
+	} else {
+		// Scan all tenants
+		entries, err := os.ReadDir(memoryDir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return []SessionInfo{}, nil
+			}
+			return nil, fmt.Errorf("memory: failed to read memory dir: %w", err)
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				searchDirs = append(searchDirs, filepath.Join(memoryDir, e.Name()))
+			}
+		}
+	}
+
+	var sessions []SessionInfo
+	for _, tenantDir := range searchDirs {
+		// Walk: tenantDir/users/*/sessions/*.md (excluding *_summary.md)
+		usersDir := filepath.Join(tenantDir, "users")
+		userEntries, err := os.ReadDir(usersDir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			continue
+		}
+		for _, ue := range userEntries {
+			if !ue.IsDir() {
+				continue
+			}
+			sessionsDir := filepath.Join(usersDir, ue.Name(), "sessions")
+			sessionFiles, err := os.ReadDir(sessionsDir)
+			if err != nil {
+				continue
+			}
+			for _, sf := range sessionFiles {
+				if sf.IsDir() || !strings.HasSuffix(sf.Name(), ".md") || strings.HasSuffix(sf.Name(), "_summary.md") {
+					continue
+				}
+
+				filePath := filepath.Join(sessionsDir, sf.Name())
+				lock := s.getLock(filePath)
+				lock.RLock()
+				data, err := os.ReadFile(filePath)
+				lock.RUnlock()
+				if err != nil {
+					continue
+				}
+
+				meta, _, err := ParseFrontmatter(data)
+				if err != nil {
+					continue
+				}
+
+				sessionID := meta["session_id"]
+				tID := meta["tenant_id"]
+				if sessionID == "" {
+					// Derive from filename
+					sessionID = strings.TrimSuffix(sf.Name(), ".md")
+				}
+
+				createdAt, _ := time.Parse(time.RFC3339Nano, meta["created_at"])
+				updatedAt, _ := time.Parse(time.RFC3339Nano, meta["updated_at"])
+				var entryCount int
+				_, _ = fmt.Sscanf(meta["message_count"], "%d", &entryCount)
+
+				si := SessionInfo{
+					SessionID:  sessionID,
+					TenantID:   tID,
+					EntryCount: entryCount,
+					CreatedAt:  createdAt,
+					UpdatedAt:  updatedAt,
+				}
+
+				sessions = append(sessions, si)
+			}
+		}
+	}
+
+	// Sort by updated_at descending
+	for i := 1; i < len(sessions); i++ {
+		for j := i; j > 0 && sessions[j].UpdatedAt.After(sessions[j-1].UpdatedAt); j-- {
+			sessions[j], sessions[j-1] = sessions[j-1], sessions[j]
+		}
+	}
+
+	return sessions, nil
+}
+
+// DeleteSession removes a session by scanning for its file.
+func (s *MarkdownMemoryStore) DeleteSessionBySessionID(ctx context.Context, sessionID string) error {
+	memoryDir := filepath.Join(s.dataDir, "memory")
+
+	// Walk all tenant/user directories to find the session file
+	tenantEntries, err := os.ReadDir(memoryDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("memory: failed to read memory dir: %w", err)
+	}
+
+	for _, te := range tenantEntries {
+		if !te.IsDir() {
+			continue
+		}
+		usersDir := filepath.Join(memoryDir, te.Name(), "users")
+		userEntries, err := os.ReadDir(usersDir)
+		if err != nil {
+			continue
+		}
+		for _, ue := range userEntries {
+			if !ue.IsDir() {
+				continue
+			}
+			sessionFile := filepath.Join(usersDir, ue.Name(), "sessions", sanitizePath(sessionID)+".md")
+			summaryFile := filepath.Join(usersDir, ue.Name(), "sessions", sanitizePath(sessionID)+"_summary.md")
+			// Try to remove both files
+			_ = os.Remove(sessionFile)
+			_ = os.Remove(summaryFile)
+		}
+	}
+	return nil
+}
+
+// GetHistoryBySessionID retrieves messages for a session by scanning the filesystem
+// to find the session file. Unlike GetHistory which requires tenantID and userID,
+// this method locates the file by session ID alone.
+func (s *MarkdownMemoryStore) GetHistoryBySessionID(ctx context.Context, sessionID string) ([]agent.Message, error) {
+	memoryDir := filepath.Join(s.dataDir, "memory")
+
+	tenantEntries, err := os.ReadDir(memoryDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []agent.Message{}, nil
+		}
+		return nil, fmt.Errorf("memory: failed to read memory dir: %w", err)
+	}
+
+	targetName := sanitizePath(sessionID) + ".md"
+	for _, te := range tenantEntries {
+		if !te.IsDir() {
+			continue
+		}
+		usersDir := filepath.Join(memoryDir, te.Name(), "users")
+		userEntries, err := os.ReadDir(usersDir)
+		if err != nil {
+			continue
+		}
+		for _, ue := range userEntries {
+			if !ue.IsDir() {
+				continue
+			}
+			filePath := filepath.Join(usersDir, ue.Name(), "sessions", targetName)
+			data, err := os.ReadFile(filePath)
+			if err != nil {
+				continue
+			}
+
+			_, body, parseErr := ParseFrontmatter(data)
+			if parseErr != nil {
+				continue
+			}
+			return ParseMessageBlocks(body), nil
+		}
+	}
+
+	return []agent.Message{}, nil
+}
+
 // --- internal helpers (3+1 layered paths) ---
 
 func (s *MarkdownMemoryStore) sessionPath(tenantID, userID, sessionID string) string {

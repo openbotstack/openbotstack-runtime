@@ -4,6 +4,7 @@ package webui
 import (
 	"embed"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"strings"
 )
@@ -27,7 +28,10 @@ func AdminHandler() http.Handler {
 func spaHandler(embedFS embed.FS, subDir string) http.Handler {
 	sub, err := fs.Sub(embedFS, subDir)
 	if err != nil {
-		panic("failed to create sub filesystem: " + err.Error())
+		slog.Error("failed to create sub filesystem", "dir", subDir, "error", err)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "frontend not available", http.StatusServiceUnavailable)
+		})
 	}
 	fileServer := http.FileServer(http.FS(sub))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -35,7 +39,6 @@ func spaHandler(embedFS embed.FS, subDir string) http.Handler {
 		if path == "" {
 			path = "index.html"
 		}
-		// Check if the file actually exists in the embedded FS
 		if f, err := sub.Open(path); err == nil {
 			f.Close()
 			fileServer.ServeHTTP(w, r)

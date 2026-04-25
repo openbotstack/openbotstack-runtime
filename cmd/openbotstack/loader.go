@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -34,13 +34,13 @@ func loadSkills(ctx context.Context, exec *executor.DefaultExecutor, dir string)
 		// Read manifest
 		data, err := os.ReadFile(manifestPath)
 		if err != nil {
-			fmt.Printf("Skipping %s: failed to read manifest: %v\n", entry.Name(), err)
+			slog.Warn("skipping skill: failed to read manifest", "skill", entry.Name(), "error", err)
 			continue
 		}
 
 		m, err := registry.ParseManifest(data)
 		if err != nil {
-			fmt.Printf("Skipping %s: invalid manifest: %v\n", entry.Name(), err)
+			slog.Warn("skipping skill: invalid manifest", "skill", entry.Name(), "error", err)
 			continue
 		}
 
@@ -49,7 +49,7 @@ func loadSkills(ctx context.Context, exec *executor.DefaultExecutor, dir string)
 		if _, err := os.Stat(wasmPath); err == nil {
 			wasmBytes, err = os.ReadFile(wasmPath)
 			if err != nil {
-				fmt.Printf("Skipping %s: failed to read wasm: %v\n", entry.Name(), err)
+				slog.Warn("skipping skill: failed to read wasm", "skill", entry.Name(), "error", err)
 				continue
 			}
 		}
@@ -69,9 +69,9 @@ func loadSkills(ctx context.Context, exec *executor.DefaultExecutor, dir string)
 		}
 
 		if err != nil {
-			fmt.Printf("Failed to load skill %s: %v\n", m.ID, err)
+			slog.Error("failed to load skill", "id", m.ID, "error", err)
 		} else {
-			fmt.Printf("Loaded skill: %s (%s)\n", m.ID, m.Name)
+			slog.Info("loaded skill", "id", m.ID, "name", m.Name)
 		}
 	}
 	return nil

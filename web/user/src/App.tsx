@@ -52,7 +52,7 @@ function SkillsPanel() {
     <div className="skills-container">
       <button
         className={`btn-skills ${open ? 'active' : ''}`}
-        onClick={() => setOpen(!open)}
+        onClick={() => { setOpen(!open); if (open) setError('') }}
         title="Browse Skills"
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -67,7 +67,7 @@ function SkillsPanel() {
             <button className="btn-skills-refresh" onClick={fetchSkills} title="Refresh">
               &#x21bb;
             </button>
-            <button className="btn-skills-close" onClick={() => setOpen(false)} title="Close">
+            <button className="btn-skills-close" onClick={() => { setOpen(false); setError('') }} title="Close">
               &#x2715;
             </button>
           </div>

@@ -50,8 +50,9 @@ export async function apiCall<T>(path: string, options?: RequestInit): Promise<T
   }
 
   const text = await resp.text()
-  if (!text) return undefined as T
-  return JSON.parse(text)
+  const trimmed = text.trim()
+  if (!trimmed) return undefined as T
+  return JSON.parse(trimmed)
 }
 
 export function getStoredKey(): string | null {
@@ -96,7 +97,8 @@ export interface ServerSession {
 export async function listSessions(): Promise<ServerSession[]> {
   try {
     return await apiCall<ServerSession[]>('/v1/sessions')
-  } catch {
+  } catch (e) {
+    if (e instanceof AuthError) throw e
     return []
   }
 }

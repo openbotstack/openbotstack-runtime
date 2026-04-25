@@ -27,13 +27,17 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
 	"github.com/openbotstack/openbotstack-core/assistant"
 	"github.com/openbotstack/openbotstack-core/control/agent"
+	"github.com/openbotstack/openbotstack-core/ai/router"
+	"github.com/openbotstack/openbotstack-core/ai/providers"
+	"github.com/openbotstack/openbotstack-core/control/skills"
+	plannerpkg "github.com/openbotstack/openbotstack-core/planner"
 	"github.com/openbotstack/openbotstack-runtime/api"
+	"github.com/openbotstack/openbotstack-runtime/api/middleware"
 	"github.com/openbotstack/openbotstack-runtime/config"
 	dualloop "github.com/openbotstack/openbotstack-runtime/agent"
 	executor "github.com/openbotstack/openbotstack-runtime/executor/skill_executor"
@@ -41,6 +45,7 @@ import (
 	"github.com/openbotstack/openbotstack-runtime/loop"
 	"github.com/openbotstack/openbotstack-runtime/memory"
 	contextassembler "github.com/openbotstack/openbotstack-runtime/context"
+	"github.com/openbotstack/openbotstack-runtime/internal/adapters"
 	"github.com/openbotstack/openbotstack-runtime/observability"
 	"github.com/openbotstack/openbotstack-runtime/persistence"
 	"github.com/openbotstack/openbotstack-runtime/ratelimit"
@@ -48,12 +53,6 @@ import (
 	"github.com/openbotstack/openbotstack-runtime/toolrunner/tool_invocation"
 	"github.com/openbotstack/openbotstack-runtime/sandbox/wasm"
 	"github.com/openbotstack/openbotstack-runtime/web/webui"
-
-	"github.com/openbotstack/openbotstack-runtime/api/middleware"
-	"github.com/openbotstack/openbotstack-core/ai/providers"
-	"github.com/openbotstack/openbotstack-core/ai/router"
-	"github.com/openbotstack/openbotstack-core/control/skills"
-	plannerpkg "github.com/openbotstack/openbotstack-core/planner"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
@@ -130,9 +129,12 @@ func main() {
 	providerName := cfg.Providers.LLM.Default
 	var providerConfig config.LLMProviderConfig
 
-	if providerName == "modelscope" {
+	switch providerName {
+	case "modelscope":
 		providerConfig = cfg.Providers.LLM.ModelScope
-	} else {
+	case "claude":
+		providerConfig = cfg.Providers.LLM.Claude
+	default:
 		providerConfig = cfg.Providers.LLM.OpenAI
 	}
 
@@ -142,6 +144,8 @@ func main() {
 		switch providerName {
 		case "modelscope":
 			llmProvider = providers.NewModelScopeProvider(providerConfig.BaseURL, providerConfig.APIKey, providerConfig.Model)
+		case "claude":
+			llmProvider = providers.NewClaudeProvider(providerConfig.BaseURL, providerConfig.APIKey, providerConfig.Model)
 		default:
 			llmProvider = providers.NewOpenAIProvider(providerConfig.BaseURL, providerConfig.APIKey, providerConfig.Model)
 		}
@@ -181,7 +185,7 @@ func main() {
 	exec := executor.NewDefaultExecutorWithRuntime(wasmRuntime, nil)
 
 	// Wire TextGenerator for declarative (non-Wasm) skill execution
-	exec.SetTextGenerator(&llmTextGenerator{router: modelRouter})
+	exec.SetTextGenerator(&adapters.LLMTextGenerator{Router: modelRouter})
 
 	// Register Host Functions with Wasm Runtime (linked to our hostFuncs)
 	if err := wasmRuntime.RegisterHostFunctions(context.Background(), hostFuncs); err != nil {
@@ -248,8 +252,29 @@ func main() {
 		}
 	}
 
+	// Seed provider config from config.yaml into SQLite (if not already present).
+	// This runs independently of OBS_SEED_DEFAULTS because provider config is
+	// operational state, not default user data.
+	if providerConfig.APIKey != "" {
+		var existing int
+		_ = pdb.QueryRow("SELECT COUNT(*) FROM provider_config WHERE provider_name = ?", providerName).Scan(&existing)
+		if existing == 0 {
+			seedNow := time.Now().UTC().Format(time.RFC3339Nano)
+			_, err := pdb.Exec(`INSERT INTO provider_config (provider_name, base_url, api_key, model, is_default, updated_at)
+				VALUES (?, ?, ?, ?, 1, ?)`,
+				providerName, providerConfig.BaseURL, providerConfig.APIKey, providerConfig.Model, seedNow)
+			if err != nil {
+				slog.Warn("failed to seed provider config into SQLite", "provider", providerName, "error", err)
+			} else {
+				slog.Info("seeded provider config into SQLite", "provider", providerName)
+			}
+		}
+	}
+
 	// Initialize stores with SQLite
-	memoryStore := memory.NewSQLiteMemoryStore(pdb.DB)
+	sessionStateStore := memory.NewSQLiteSessionStateStore(pdb.DB,
+		memory.WithStrictTenant(os.Getenv("OBS_AUTH_STRICT") == "true"),
+	)
 	quotaStore := ratelimit.NewSQLiteQuotaStore(pdb.DB)
 	rateLimiter := ratelimit.NewSQLiteRateLimiter(pdb.DB, quotaStore)
 
@@ -260,6 +285,9 @@ func main() {
 		AssistantID: "default",
 	}
 
+	// Create RegistryClient early for ToolRunner wiring
+	registryClient := toolrunner.NewRegistryClient(cfg.Sandbox.ToolRegistryURL)
+
 	// Create Agent (orchestrates Planner + Executor)
 	var apiAgent agent.Agent
 	if cfg.Agent.Mode == "dual_loop" {
@@ -269,7 +297,8 @@ func main() {
 			MaxTurnRuntime: cfg.Agent.DualLoop.MaxTurnRuntime,
 		}
 		compactor := loop.NewDefaultContextCompactor(cfg.Agent.DualLoop.MaxRetainedTurns)
-		innerLoop := loop.NewDefaultInnerLoop(innerCfg, dualPlanner, nil, compactor, nil)
+		toolRunner := toolrunner.NewRegistryToolRunner(registryClient)
+		innerLoop := loop.NewDefaultInnerLoop(innerCfg, dualPlanner, toolRunner, compactor, nil)
 		innerLoop.SetSkillExecutor(exec)
 
 		outerCfg := loop.OuterLoopConfig{
@@ -306,6 +335,18 @@ func main() {
 		convStore = memory.NewSummarizingConversationStore(markdownStore, summarizer)
 		slog.Info("conversation summarization enabled", "threshold", cfg.Memory.SummaryThreshold)
 	}
+
+	// Wrap with dual-write decorator (Markdown content + SQLite metadata)
+	convStore = memory.NewDualWriteConversationStore(convStore, sessionStateStore)
+
+	// Sync existing Markdown sessions to SQLite (one-time migration)
+	if err := memory.SyncMarkdownToSQLite(context.Background(), markdownStore, sessionStateStore); err != nil {
+		slog.Warn("failed to sync existing sessions to SQLite", "error", err)
+	}
+
+	// Start periodic reconciliation to repair any SQLite/Markdown drift
+	stopReconciliation := memory.StartReconciliation(context.Background(), markdownStore, sessionStateStore, 5*time.Minute)
+	defer stopReconciliation()
 
 	// Inject shared dependencies into agent (type-specific setter calls)
 	switch a := apiAgent.(type) {
@@ -365,6 +406,7 @@ func main() {
 		a.SetContextAssembler(contextAssembler)
 	case *dualloop.DualLoopAgent:
 		a.SetContextAssembler(contextAssembler)
+		a.SetMemoryManager(memoryBridge)
 	}
 	slog.Info("context assembler initialized")
 
@@ -374,7 +416,7 @@ func main() {
 	// call time, so setting HTTPFetch here is visible to already-registered functions.
 	httpAllowlist := wasm.NewHTTPAllowlist(cfg.Sandbox.HTTPAllowlist)
 	sandboxedClient := wasm.NewSandboxedHTTPClientWithSSRF(httpAllowlist, nil)
-	registryClient := toolrunner.NewRegistryClient(cfg.Sandbox.ToolRegistryURL)
+	// registryClient already created above (for ToolRunner wiring)
 	toolPipeline := tool_invocation.NewToolInvocationPipeline(sandboxedClient, registryClient, 30*time.Second)
 	tool_invocation.WireHTTPFetch(hostFuncs, toolPipeline)
 	slog.Info("tool invocation pipeline wired",
@@ -397,11 +439,11 @@ func main() {
 
 	// API routes
 	apiRouter := api.NewRouter(apiAgent)
-	skillAdmin := newSkillAdminAdapter(exec)
+	skillAdmin := adapters.NewSkillAdminAdapter(exec)
 	apiRouter.SetSkillProvider(exec)
 	apiRouter.SetSkillDisabledChecker(skillAdmin.IsDisabled)
 	apiRouter.SetExecutionStore(api.NewAuditExecutionStore(auditLogger))
-	apiRouter.SetHistoryProvider(&memoryHistoryProvider{store: memoryStore})
+	apiRouter.SetHistoryProvider(adapters.NewHistoryProvider(markdownStore, sessionStateStore))
 	apiRouter.SetBuildInfo(api.BuildInfo{
 		Version:   version,
 		Commit:    commit,
@@ -451,8 +493,8 @@ func main() {
 	// Admin endpoints require auth (API Key or JWT) AND admin role
 	adminRouter := api.NewAdminRouter(pdb.DB)
 	mux.Handle("/v1/admin/", authMW(adminRouter.Handler()))
-		adminRouter.SetProviderLister(&modelRouterLister{router: modelRouter})
-		adminRouter.SetProviderReloader(&providerReloader{router: modelRouter})
+		adminRouter.SetProviderLister(&adapters.ModelRouterLister{Router: modelRouter})
+		adminRouter.SetProviderReloader(&adapters.ProviderReloader{Router: modelRouter})
 		adminRouter.SetSkillAdmin(skillAdmin)
 
 	// UI routes (embedded frontends — dual SPA)
@@ -474,9 +516,9 @@ func main() {
 	metricsHandler := observability.MetricsMiddleware(correlationHandler)
 
 	// CORS middleware for web UI compatibility.
-	// Allows all origins for development; restrict via config for production.
+	// Configurable via config.yaml; defaults to ["*"] for development.
 	corsHandler := middleware.CORSMiddleware(middleware.CORSConfig{
-		AllowedOrigins:   []string{"*"},
+		AllowedOrigins:   cfg.CORS.AllowedOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Content-Type", "X-API-Key", "Authorization"},
 		AllowCredentials: true,
@@ -540,185 +582,6 @@ func main() {
 	fmt.Println("openbotstack stopped")
 }
 
-// memoryHistoryProvider adapts a memory.ShortTermStore to the api.HistoryProvider interface.
-type memoryHistoryProvider struct {
-	store memory.ShortTermStore
-}
-
-func (p *memoryHistoryProvider) GetSessionHistory(ctx context.Context, sessionID string) ([]api.Message, error) {
-	if p.store == nil {
-		return []api.Message{}, nil
-	}
-	entries, err := p.store.ListBySession(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
-
-	messages := make([]api.Message, 0, len(entries))
-	for _, entry := range entries {
-		// By default assume user role unless we track it explicitly in tags
-		// We'll map "role:assistant" tag if present, else default to "user"
-		role := "user"
-		for _, tag := range entry.Tags {
-			if tag == "role:assistant" {
-				role = "assistant"
-				break
-			}
-		}
-		messages = append(messages, api.Message{
-			Role:    role,
-			Content: entry.Content,
-		})
-	}
-	return messages, nil
-}
-
-func (p *memoryHistoryProvider) ListSessions(ctx context.Context) ([]api.SessionSummary, error) {
-	if p.store == nil {
-		return []api.SessionSummary{}, nil
-	}
-	sessions, err := p.store.ListSessions(ctx)
-	if err != nil {
-		return nil, err
-	}
-	summaries := make([]api.SessionSummary, 0, len(sessions))
-	for _, s := range sessions {
-		summaries = append(summaries, api.SessionSummary{
-			SessionID:  s.SessionID,
-			TenantID:   s.TenantID,
-			LastEntry:  s.LastEntry,
-			EntryCount: s.EntryCount,
-			CreatedAt:  s.CreatedAt.Format(time.RFC3339),
-			UpdatedAt:  s.UpdatedAt.Format(time.RFC3339),
-		})
-	}
-	return summaries, nil
-}
-
-func (p *memoryHistoryProvider) DeleteSession(ctx context.Context, sessionID string) error {
-	if p.store == nil {
-		return nil
-	}
-	return p.store.ClearSession(ctx, sessionID)
-}
-
-// modelRouterLister adapts a ModelRouter to the api.ProviderLister interface.
-type modelRouterLister struct {
-	router *router.DefaultRouter
-}
-
-func (m *modelRouterLister) ListProviders() []api.ProviderInfo {
-	ids := m.router.List()
-	result := make([]api.ProviderInfo, 0, len(ids))
-	for _, id := range ids {
-		provider, err := m.router.Route(nil, skills.ModelConstraints{})
-		caps := []string{}
-		if err == nil && provider != nil {
-			for _, c := range provider.Capabilities() {
-				caps = append(caps, string(c))
-			}
-		}
-		result = append(result, api.ProviderInfo{
-			ID:           id,
-			Capabilities: caps,
-		})
-	}
-	return result
-}
-
-// providerReloader adapts a DefaultRouter to the api.ProviderReloader interface.
-// It hot-reloads providers at runtime by creating a new provider instance
-// and replacing the old one in the router.
-type providerReloader struct {
-	router *router.DefaultRouter
-}
-
-func (p *providerReloader) ReloadProvider(providerName, baseURL, apiKey, model string) error {
-	var newProvider providers.ModelProvider
-	switch providerName {
-	case "modelscope":
-		newProvider = providers.NewModelScopeProvider(baseURL, apiKey, model)
-	case "siliconflow":
-		newProvider = providers.NewSiliconFlowProvider(baseURL, apiKey, model)
-	case "claude":
-		newProvider = providers.NewClaudeProvider(baseURL, apiKey, model)
-	default:
-		newProvider = providers.NewOpenAIProvider(baseURL, apiKey, model)
-	}
-	p.router.Replace(newProvider)
-	slog.Info("provider hot-reloaded", "provider", providerName, "model", model, "base_url", baseURL)
-	return nil
-}
-
-// skillAdminAdapter tracks skill enable/disable state for the admin API.
-// It also wraps the executor's SkillProvider to filter out disabled skills
-// from the user-facing /v1/skills endpoint.
-type skillAdminAdapter struct {
-	exec     api.SkillProvider
-	mu       sync.RWMutex
-	disabled map[string]bool
-}
-
-func newSkillAdminAdapter(exec api.SkillProvider) *skillAdminAdapter {
-	return &skillAdminAdapter{exec: exec, disabled: make(map[string]bool)}
-}
-
-// FilteredList returns skill IDs excluding disabled ones.
-func (sa *skillAdminAdapter) FilteredList() []string {
-	all := sa.exec.List()
-	sa.mu.RLock()
-	defer sa.mu.RUnlock()
-	result := make([]string, 0, len(all))
-	for _, id := range all {
-		if !sa.disabled[id] {
-			result = append(result, id)
-		}
-	}
-	return result
-}
-
-// IsDisabled checks if a skill is disabled.
-func (sa *skillAdminAdapter) IsDisabled(id string) bool {
-	sa.mu.RLock()
-	defer sa.mu.RUnlock()
-	return sa.disabled[id]
-}
-
-func (sa *skillAdminAdapter) ListSkills() ([]api.SkillAdminInfo, error) {
-	ids := sa.exec.List()
-	sa.mu.RLock()
-	defer sa.mu.RUnlock()
-	result := make([]api.SkillAdminInfo, 0, len(ids))
-	for _, id := range ids {
-		s, err := sa.exec.Get(id)
-		if err != nil {
-			continue
-		}
-		result = append(result, api.SkillAdminInfo{
-			ID:          s.ID(),
-			Name:        s.Name(),
-			Description: s.Description(),
-			Type:        "declarative",
-			Enabled:     !sa.disabled[id],
-		})
-	}
-	return result, nil
-}
-
-func (sa *skillAdminAdapter) SetSkillEnabled(skillID string, enabled bool) error {
-	sa.mu.Lock()
-	defer sa.mu.Unlock()
-	if enabled {
-		delete(sa.disabled, skillID)
-	} else {
-		sa.disabled[skillID] = true
-	}
-	return nil
-}
-
-// parseLogLevel converts a log level string to slog.Level.
-
-
 func parseLogLevel(s string) slog.Level {
 	switch strings.ToLower(s) {
 	case "debug":
@@ -730,26 +593,4 @@ func parseLogLevel(s string) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
-}
-
-// llmTextGenerator adapts a ModelRouter to the executor.TextGenerator interface.
-// Used for declarative skills that need LLM execution but have no Wasm binary.
-type llmTextGenerator struct {
-	router providers.ModelRouter
-}
-
-func (g *llmTextGenerator) GenerateText(ctx context.Context, prompt string) (string, error) {
-	provider, err := g.router.Route([]skills.CapabilityType{skills.CapTextGeneration}, skills.ModelConstraints{})
-	if err != nil {
-		return "", fmt.Errorf("no text generation provider: %w", err)
-	}
-	resp, err := provider.Generate(ctx, skills.GenerateRequest{
-		Messages: []skills.Message{
-			{Role: "user", Content: prompt},
-		},
-	})
-	if err != nil {
-		return "", err
-	}
-	return resp.Content, nil
 }

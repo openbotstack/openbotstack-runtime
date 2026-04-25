@@ -10,6 +10,8 @@ import (
 
 	"github.com/openbotstack/openbotstack-core/control/agent"
 	"github.com/openbotstack/openbotstack-runtime/api/middleware"
+	dualloop "github.com/openbotstack/openbotstack-runtime/agent"
+	"github.com/openbotstack/openbotstack-runtime/loop"
 )
 
 // ChatRequest is the input for chat endpoint.
@@ -185,6 +187,18 @@ func (r *Router) handleChat(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// Validate message content
+	if strings.TrimSpace(chatReq.Message) == "" {
+		slog.WarnContext(req.Context(), "request validation error",
+			"method", req.Method,
+			"path", req.URL.Path,
+			"status", http.StatusBadRequest,
+			"error", "empty message",
+		)
+		writeAPIError(w, http.StatusBadRequest, ErrInvalidRequest, "message is required")
+		return
+	}
+
 	// Delegate entirely to Agent - NO skill selection logic here
 	if r.agent == nil {
 		slog.ErrorContext(req.Context(), "handler error",
@@ -251,6 +265,12 @@ func (r *Router) handleChatStream(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// Validate message content
+	if strings.TrimSpace(chatReq.Message) == "" {
+		writeAPIError(w, http.StatusBadRequest, ErrInvalidRequest, "message is required")
+		return
+	}
+
 	if r.agent == nil {
 		writeAPIError(w, http.StatusServiceUnavailable, ErrAgentNotConfigured, "agent not configured")
 		return
@@ -269,7 +289,18 @@ func (r *Router) handleChatStream(w http.ResponseWriter, req *http.Request) {
 		agentReq.UserID = user.ID
 	}
 
-	agentResp, err := r.agent.HandleMessage(req.Context(), agentReq)
+	agentResp, err := func() (*agent.MessageResponse, error) {
+		// If the agent supports progress callbacks, wire SSE streaming
+		if dla, ok := r.agent.(*dualloop.DualLoopAgent); ok {
+			sseHandler := NewSSEHandler(w)
+			dla.SetProgressCallback(func(event loop.ProgressEvent) {
+				data, _ := json.Marshal(event)
+				_ = sseHandler.WriteEvent(SSEEvent{Event: "progress", Data: string(data)})
+			})
+			defer dla.SetProgressCallback(nil)
+		}
+		return r.agent.HandleMessage(req.Context(), agentReq)
+	}()
 	if err != nil {
 		slog.ErrorContext(req.Context(), "streaming handler error",
 			"method", req.Method,
@@ -283,9 +314,10 @@ func (r *Router) handleChatStream(w http.ResponseWriter, req *http.Request) {
 
 	// Stream the response as SSE events
 	handler := NewSSEHandler(w)
+	sessionJSON, _ := json.Marshal(map[string]string{"session_id": agentResp.SessionID})
 	_ = handler.WriteEvent(SSEEvent{
 		Event: "session",
-		Data:  agentResp.SessionID,
+		Data:  string(sessionJSON),
 	})
 	_ = handler.WriteEvent(SSEEvent{
 		Event: "done",

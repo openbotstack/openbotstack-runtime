@@ -6,11 +6,14 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/google/uuid"
+
 	agent "github.com/openbotstack/openbotstack-core/control/agent"
 	csSkills "github.com/openbotstack/openbotstack-core/control/skills"
 	"github.com/openbotstack/openbotstack-core/assistant"
 	corecontext "github.com/openbotstack/openbotstack-core/context"
 	"github.com/openbotstack/openbotstack-core/execution"
+	"github.com/openbotstack/openbotstack-core/memory/abstraction"
 	"github.com/openbotstack/openbotstack-core/planner"
 	"github.com/openbotstack/openbotstack-core/registry/skills"
 	"github.com/openbotstack/openbotstack-runtime/loop"
@@ -20,15 +23,16 @@ import (
 // It delegates task execution to the outer/inner loop pair instead of the
 // single-pass Plan→Execute pipeline used by DefaultAgent.
 type DualLoopAgent struct {
-	planner           planner.ExecutionPlanner
-	skillRegistry     agent.SkillRegistry
-	runtime           *assistant.AssistantRuntime
-	innerLoop         loop.InnerLoop
-	outerLoop         loop.OuterLoop
-	conversationStore agent.ConversationStore
-	contextAssembler  corecontext.ContextAssembler
+	planner            planner.ExecutionPlanner
+	skillRegistry      agent.SkillRegistry
+	runtime            *assistant.AssistantRuntime
+	innerLoop          loop.InnerLoop
+	outerLoop          loop.OuterLoop
+	conversationStore  agent.ConversationStore
+	contextAssembler   corecontext.ContextAssembler
+	memoryManager      abstraction.MemoryManager
 	maxHistoryMessages int
-	workflowResolver  WorkflowResolver
+	workflowResolver   WorkflowResolver
 }
 
 // NewDualLoopAgent creates a new DualLoopAgent with the given dependencies.
@@ -50,11 +54,13 @@ func NewDualLoopAgent(
 }
 
 // SetConversationStore configures the conversation memory backend.
+// Must be called before serving requests (not safe for concurrent use).
 func (a *DualLoopAgent) SetConversationStore(store agent.ConversationStore) {
 	a.conversationStore = store
 }
 
 // SetContextAssembler configures the context assembler for pre-planning enrichment.
+// Must be called before serving requests (not safe for concurrent use).
 func (a *DualLoopAgent) SetContextAssembler(ca corecontext.ContextAssembler) {
 	a.contextAssembler = ca
 }
@@ -69,8 +75,33 @@ func (a *DualLoopAgent) SetWorkflowResolver(r WorkflowResolver) {
 	a.workflowResolver = r
 }
 
+// SetMemoryManager configures the memory manager for semantic retrieval during planning.
+// Must be called before serving requests (not safe for concurrent use).
+func (a *DualLoopAgent) SetMemoryManager(mm abstraction.MemoryManager) {
+	a.memoryManager = mm
+}
+
+// SetProgressCallback configures a callback for streaming progress events to SSE clients.
+// This is called per-request by the SSE handler before HandleMessage.
+func (a *DualLoopAgent) SetProgressCallback(cb loop.ProgressCallback) {
+	if il, ok := a.innerLoop.(*loop.DefaultInnerLoop); ok {
+		il.SetProgressCallback(cb)
+	}
+	if ol, ok := a.outerLoop.(*loop.DefaultOuterLoop); ok {
+		ol.SetProgressCallback(cb)
+	}
+}
+
+// defaultMemoryRetrievalLimit is the default number of memories to retrieve during planning.
+const defaultMemoryRetrievalLimit = 5
+
 // HandleMessage implements agent.Agent.
 func (a *DualLoopAgent) HandleMessage(ctx context.Context, req agent.MessageRequest) (*agent.MessageResponse, error) {
+	// Auto-generate session ID if not provided
+	if req.SessionID == "" {
+		req.SessionID = uuid.NewString()
+	}
+
 	// Step 1: Gather available skills
 	skillDescriptors, err := a.gatherSkillDescriptors()
 	if err != nil {
@@ -109,12 +140,29 @@ func (a *DualLoopAgent) HandleMessage(ctx context.Context, req agent.MessageRequ
 		}
 	}
 
-	// Step 3: Build PlannerContext
+	// Step 3: Build PlannerContext with memory context
 	plannerSkills := agentSkillToPlannerSkill(skillDescriptors)
+
+	var memoryContext []assistant.SearchResult
+	if a.memoryManager != nil && req.Message != "" {
+		entries, err := a.memoryManager.RetrieveSimilar(ctx, req.Message, defaultMemoryRetrievalLimit)
+		if err != nil {
+			slog.WarnContext(ctx, "dual_loop_agent: memory retrieval failed", "error", err)
+		} else if len(entries) > 0 {
+			memoryContext = make([]assistant.SearchResult, len(entries))
+			for i, e := range entries {
+				memoryContext[i] = assistant.SearchResult{
+					Content: []byte(e.Content),
+					Score:   1.0,
+				}
+			}
+		}
+	}
+
 	pCtx := &planner.PlannerContext{
 		AssistantID:   a.runtime.AssistantID,
 		Soul:          a.runtime.Soul,
-		MemoryContext: nil, // V1: empty (MemoryContext requires MemoryManager.RetrieveSimilar integration)
+		MemoryContext: memoryContext,
 		Skills:        plannerSkills,
 		UserRequest:   req.Message,
 	}

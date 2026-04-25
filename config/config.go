@@ -66,6 +66,15 @@ type Config struct {
 	Sandbox       SandboxConfig       `yaml:"sandbox"`
 	Vector        VectorConfig        `yaml:"vector"`
 	Agent         AgentConfig         `yaml:"agent"`
+	CORS          CORSConfig          `yaml:"cors"`
+}
+
+// CORSConfig controls Cross-Origin Resource Sharing settings.
+type CORSConfig struct {
+	// AllowedOrigins specifies which origins may access the API.
+	// Use ["*"] for development; restrict in production.
+	// Default: ["*"]
+	AllowedOrigins []string `yaml:"allowed_origins"`
 }
 
 // AgentConfig controls agent execution mode and parameters.
@@ -108,6 +117,7 @@ type LLMConfig struct {
 	Default    string            `yaml:"default"`
 	ModelScope LLMProviderConfig `yaml:"modelscope"`
 	OpenAI     LLMProviderConfig `yaml:"openai"`
+	Claude     LLMProviderConfig `yaml:"claude"`
 }
 
 type LLMProviderConfig struct {
@@ -154,6 +164,9 @@ func defaultConfig() *Config {
 				MaxSessionRuntime: 60 * time.Second,
 				MaxRetainedTurns:  4,
 			},
+		},
+		CORS: CORSConfig{
+			AllowedOrigins: []string{"*"},
 		},
 	}
 }

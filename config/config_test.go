@@ -162,3 +162,39 @@ observability:
 		t.Errorf("OtelEnabled = %v, want false", cfg.Observability.OtelEnabled)
 	}
 }
+
+func TestCORSConfigDefaults(t *testing.T) {
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(cfg.CORS.AllowedOrigins) != 1 || cfg.CORS.AllowedOrigins[0] != "*" {
+		t.Errorf("default CORS.AllowedOrigins = %v, want [\"*\"]", cfg.CORS.AllowedOrigins)
+	}
+}
+
+func TestCORSConfigFromYAML(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	content := `
+cors:
+  allowed_origins:
+    - "https://app.example.com"
+    - "https://admin.example.com"
+`
+	if err := os.WriteFile(cfgPath, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write temp config: %v", err)
+	}
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(cfg.CORS.AllowedOrigins) != 2 {
+		t.Fatalf("CORS.AllowedOrigins length = %d, want 2", len(cfg.CORS.AllowedOrigins))
+	}
+	if cfg.CORS.AllowedOrigins[0] != "https://app.example.com" {
+		t.Errorf("CORS.AllowedOrigins[0] = %q, want %q", cfg.CORS.AllowedOrigins[0], "https://app.example.com")
+	}
+}
