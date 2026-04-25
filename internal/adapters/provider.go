@@ -35,21 +35,12 @@ func (m *ModelRouterLister) ListProviders() []api.ProviderInfo {
 
 // ProviderReloader adapts a DefaultRouter to the api.ProviderReloader interface.
 type ProviderReloader struct {
-	Router *router.DefaultRouter
+	Router  *router.DefaultRouter
+	Factory *providers.ProviderFactory
 }
 
 func (p *ProviderReloader) ReloadProvider(providerName, baseURL, apiKey, model string) error {
-	var newProvider providers.ModelProvider
-	switch providerName {
-	case "modelscope":
-		newProvider = providers.NewModelScopeProvider(baseURL, apiKey, model)
-	case "siliconflow":
-		newProvider = providers.NewSiliconFlowProvider(baseURL, apiKey, model)
-	case "claude":
-		newProvider = providers.NewClaudeProvider(baseURL, apiKey, model)
-	default:
-		newProvider = providers.NewOpenAIProvider(baseURL, apiKey, model)
-	}
+	newProvider := p.Factory.Create(providerName, baseURL, apiKey, model)
 	p.Router.Replace(newProvider)
 	slog.Info("provider hot-reloaded", "provider", providerName, "model", model, "base_url", baseURL)
 	return nil

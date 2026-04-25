@@ -138,17 +138,10 @@ func main() {
 		providerConfig = cfg.Providers.LLM.OpenAI
 	}
 
+	providerFactory := providers.NewProviderFactory()
+
 	if providerConfig.APIKey != "" {
-		// Create the correct provider type based on configuration
-		var llmProvider providers.ModelProvider
-		switch providerName {
-		case "modelscope":
-			llmProvider = providers.NewModelScopeProvider(providerConfig.BaseURL, providerConfig.APIKey, providerConfig.Model)
-		case "claude":
-			llmProvider = providers.NewClaudeProvider(providerConfig.BaseURL, providerConfig.APIKey, providerConfig.Model)
-		default:
-			llmProvider = providers.NewOpenAIProvider(providerConfig.BaseURL, providerConfig.APIKey, providerConfig.Model)
-		}
+		llmProvider := providerFactory.Create(providerName, providerConfig.BaseURL, providerConfig.APIKey, providerConfig.Model)
 
 		if err := modelRouter.Register(llmProvider); err != nil {
 			slog.Error("failed to register provider", "error", err)
@@ -494,7 +487,7 @@ func main() {
 	adminRouter := api.NewAdminRouter(pdb.DB)
 	mux.Handle("/v1/admin/", authMW(adminRouter.Handler()))
 		adminRouter.SetProviderLister(&adapters.ModelRouterLister{Router: modelRouter})
-		adminRouter.SetProviderReloader(&adapters.ProviderReloader{Router: modelRouter})
+		adminRouter.SetProviderReloader(&adapters.ProviderReloader{Router: modelRouter, Factory: providerFactory})
 		adminRouter.SetSkillAdmin(skillAdmin)
 
 	// UI routes (embedded frontends — dual SPA)
