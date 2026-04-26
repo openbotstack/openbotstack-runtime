@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -27,8 +28,10 @@ func UserFromContext(ctx context.Context) (*auth.User, bool) {
 type JWTMiddlewareConfig struct {
 	// SecretKey is used to verify the JWT signature.
 	SecretKey []byte
-	// Strict determines if requests without a valid token are rejected.
-	// If false, invalid or missing tokens just mean no User is attached to context.
+	// Strict determines if requests without an Authorization header are rejected.
+	// If false, requests with no Authorization header pass through without a User attached.
+	// If an Authorization header IS present but the token is invalid, the request is
+	// ALWAYS rejected with 401 regardless of Strict mode.
 	Strict bool
 }
 
@@ -60,53 +63,47 @@ func JWTMiddleware(config JWTMiddlewareConfig) func(http.Handler) http.Handler {
 
 			parts := strings.SplitN(authHeader, " ", 2)
 			if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-				if config.Strict {
-					slog.WarnContext(r.Context(), "request validation error",
-						"method", r.Method,
-						"path", r.URL.Path,
-						"status", http.StatusUnauthorized,
-						"error", "invalid authorization header format",
-					)
-					writeMiddlewareError(w, http.StatusUnauthorized, ErrUnauthorized, "invalid authorization header format")
-					return
-				}
-				next.ServeHTTP(w, r)
+				// Authorization header is PRESENT but malformed — always reject
+				slog.WarnContext(r.Context(), "request validation error",
+					"method", r.Method,
+					"path", r.URL.Path,
+					"status", http.StatusUnauthorized,
+					"error", "invalid authorization header format",
+				)
+				writeMiddlewareError(w, http.StatusUnauthorized, ErrUnauthorized, "invalid authorization header format")
 				return
 			}
 
 			tokenStr := parts[1]
 			token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
+				if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+					return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+				}
 				return config.SecretKey, nil
 			})
 
 			if err != nil || !token.Valid {
-				if config.Strict {
-					slog.WarnContext(r.Context(), "request validation error",
-						"method", r.Method,
-						"path", r.URL.Path,
-						"status", http.StatusUnauthorized,
-						"error", "invalid token",
-					)
-					writeMiddlewareError(w, http.StatusUnauthorized, ErrUnauthorized, "invalid token")
-					return
-				}
-				next.ServeHTTP(w, r)
+				// Authorization header is PRESENT but token is invalid — always reject
+				slog.WarnContext(r.Context(), "request validation error",
+					"method", r.Method,
+					"path", r.URL.Path,
+					"status", http.StatusUnauthorized,
+					"error", "invalid token",
+				)
+				writeMiddlewareError(w, http.StatusUnauthorized, ErrUnauthorized, "invalid token")
 				return
 			}
 
 			claims, ok := token.Claims.(jwt.MapClaims)
 			if !ok {
-				if config.Strict {
-					slog.WarnContext(r.Context(), "request validation error",
-						"method", r.Method,
-						"path", r.URL.Path,
-						"status", http.StatusUnauthorized,
-						"error", "invalid token claims",
-					)
-					writeMiddlewareError(w, http.StatusUnauthorized, ErrUnauthorized, "invalid token claims")
-					return
-				}
-				next.ServeHTTP(w, r)
+				// Authorization header is PRESENT but claims are invalid — always reject
+				slog.WarnContext(r.Context(), "request validation error",
+					"method", r.Method,
+					"path", r.URL.Path,
+					"status", http.StatusUnauthorized,
+					"error", "invalid token claims",
+				)
+				writeMiddlewareError(w, http.StatusUnauthorized, ErrUnauthorized, "invalid token claims")
 				return
 			}
 

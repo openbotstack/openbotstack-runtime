@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openbotstack/openbotstack-core/control/agent"
+	"github.com/openbotstack/openbotstack-core/execution"
 )
 
 const (
@@ -95,11 +95,10 @@ func TestFullSystem(t *testing.T) {
 		}
 
 		// Extract user request part only to avoid matching keywords in skill descriptions
-		// Planner format: "User message: <msg>\n\n"
+		// Planner format: "User request: <msg>\n\n"
 		var userRequest string
-		if idx := strings.Index(lastMsg, "User message:"); idx != -1 {
-			// Start after "User message: "
-			contentStart := idx + len("User message:")
+		if idx := strings.Index(lastMsg, "User request:"); idx != -1 {
+			contentStart := idx + len("User request:")
 			remainder := lastMsg[contentStart:]
 
 			// Find the end of the user message (next double newline or end of string)
@@ -115,27 +114,31 @@ func TestFullSystem(t *testing.T) {
 		fmt.Printf("MOCK LLM PARSED REQUEST: %q\n", userRequest)
 		msgLower := strings.ToLower(userRequest)
 
-		// Simple heuristic response generation
-		var plan agent.ExecutionPlan
+		// Return execution.ExecutionPlan format (steps array)
+		var plan execution.ExecutionPlan
+		makeStep := func(name string, args map[string]any) execution.ExecutionStep {
+			return execution.ExecutionStep{
+				Name: name, Type: execution.StepTypeSkill, Arguments: args,
+			}
+		}
 
 		if strings.Contains(msgLower, "summarize") {
-			plan = agent.ExecutionPlan{
-				SkillID:   "core/summarize",
-				Arguments: map[string]any{"text": "some text", "max_length": 100},
-				Reasoning: "User wants summary",
+			plan = execution.ExecutionPlan{
+				AssistantID: "default",
+				Steps:       []execution.ExecutionStep{makeStep("core/summarize", map[string]any{"text": "some text", "max_length": 100})},
+				Reasoning:   "User wants summary",
 			}
 		} else if strings.Contains(msgLower, "tax") {
-			plan = agent.ExecutionPlan{
-				SkillID:   "core/tax-calculator",
-				Arguments: map[string]any{"income": 50000, "currency": "USD"},
-				Reasoning: "User asked for tax calc",
+			plan = execution.ExecutionPlan{
+				AssistantID: "default",
+				Steps:       []execution.ExecutionStep{makeStep("core/tax-calculator", map[string]any{"income": 50000, "currency": "USD"})},
+				Reasoning:   "User asked for tax calc",
 			}
 		} else {
-			// Default fallback
-			plan = agent.ExecutionPlan{
-				SkillID:   "core/tax-calculator",
-				Arguments: map[string]any{"income": 50000, "currency": "USD"},
-				Reasoning: "Fallback plan",
+			plan = execution.ExecutionPlan{
+				AssistantID: "default",
+				Steps:       []execution.ExecutionStep{makeStep("core/tax-calculator", map[string]any{"income": 50000, "currency": "USD"})},
+				Reasoning:   "Fallback plan",
 			}
 		}
 

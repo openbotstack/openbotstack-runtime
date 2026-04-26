@@ -309,8 +309,9 @@ func main() {
 		)
 	} else {
 		da := agent.NewDefaultAgent(planner, exec, exec, art)
+		da.SetExecutionPlanner(dualPlanner)
 		apiAgent = da
-		slog.Info("single-pass agent initialized")
+		slog.Info("single-pass agent initialized (with execution planner)")
 	}
 
 	// Initialize Markdown Memory Store (3+1 layered model)

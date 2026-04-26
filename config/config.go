@@ -114,10 +114,11 @@ type ProvidersConfig struct {
 }
 
 type LLMConfig struct {
-	Default    string            `yaml:"default"`
-	ModelScope LLMProviderConfig `yaml:"modelscope"`
-	OpenAI     LLMProviderConfig `yaml:"openai"`
-	Claude     LLMProviderConfig `yaml:"claude"`
+	Default     string            `yaml:"default"`
+	ModelScope  LLMProviderConfig `yaml:"modelscope"`
+	OpenAI      LLMProviderConfig `yaml:"openai"`
+	Claude      LLMProviderConfig `yaml:"claude"`
+	SiliconFlow LLMProviderConfig `yaml:"siliconflow"`
 }
 
 type LLMProviderConfig struct {
@@ -198,7 +199,9 @@ func Load(path string) (*Config, error) {
 	// OpenAI specific overrides (used as default or fallback)
 	if val := os.Getenv("OBS_LLM_API_KEY"); val != "" {
 		cfg.Providers.LLM.OpenAI.APIKey = val
-		cfg.Providers.LLM.ModelScope.APIKey = val // Fallback if user switches provider
+		cfg.Providers.LLM.ModelScope.APIKey = val
+		cfg.Providers.LLM.Claude.APIKey = val
+		cfg.Providers.LLM.SiliconFlow.APIKey = val
 	}
 	if val := os.Getenv("OBS_LLM_URL"); val != "" {
 		cfg.Providers.LLM.OpenAI.BaseURL = val
