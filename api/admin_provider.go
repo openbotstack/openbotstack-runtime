@@ -70,23 +70,22 @@ func (ar *AdminRouter) getProviderConfig(w http.ResponseWriter, r *http.Request)
 		if err := rows.Scan(&name, &baseURL, &apiKey, &model, &isDefault); err != nil {
 			continue
 		}
+		apiKeySet := apiKey != ""
+		if encKey != nil && crypto.IsEncrypted(apiKey) {
+			dec, err := crypto.Decrypt(encKey, apiKey)
+			if err != nil {
+				slog.WarnContext(r.Context(), "failed to decrypt stored provider key",
+					"provider", name, "error", err)
+			} else {
+				apiKeySet = dec != ""
+			}
+		}
 		providers[name] = ProviderConfigEntry{
 			Name:      name,
 			BaseURL:   baseURL,
-			APIKeySet: apiKey != "",
+			APIKeySet: apiKeySet,
 			Model:     model,
 			IsDefault: isDefault == 1,
-		}
-		if encKey != nil && crypto.IsEncrypted(apiKey) {
-			if dec, err := crypto.Decrypt(encKey, apiKey); err == nil {
-				providers[name] = ProviderConfigEntry{
-					Name:      name,
-					BaseURL:   baseURL,
-					APIKeySet: dec != "",
-					Model:     model,
-					IsDefault: isDefault == 1,
-				}
-			}
 		}
 		if isDefault == 1 {
 			defaultProvider = name

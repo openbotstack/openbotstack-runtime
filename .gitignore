@@ -42,3 +42,8 @@ openbotstack
 
 # Data directory
 data/
+
+# Node.js (Playwright E2E test artifacts)
+node_modules/
+package-lock.json
+e2e_browser_test.js
