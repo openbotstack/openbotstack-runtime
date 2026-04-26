@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/openbotstack/openbotstack-runtime/internal/crypto"
 )
 
 func (ar *AdminRouter) handleProviders(w http.ResponseWriter, r *http.Request) {
@@ -49,6 +51,7 @@ func (ar *AdminRouter) handleProviderConfig(w http.ResponseWriter, r *http.Reque
 
 func (ar *AdminRouter) getProviderConfig(w http.ResponseWriter, r *http.Request) {
 	// Read all provider configs from SQLite
+	encKey := crypto.EncryptionKey()
 	rows, err := ar.db.Query("SELECT provider_name, base_url, api_key, model, is_default FROM provider_config")
 	if err != nil {
 		slog.ErrorContext(r.Context(), "admin handler error",
@@ -73,6 +76,17 @@ func (ar *AdminRouter) getProviderConfig(w http.ResponseWriter, r *http.Request)
 			APIKeySet: apiKey != "",
 			Model:     model,
 			IsDefault: isDefault == 1,
+		}
+		if encKey != nil && crypto.IsEncrypted(apiKey) {
+			if dec, err := crypto.Decrypt(encKey, apiKey); err == nil {
+				providers[name] = ProviderConfigEntry{
+					Name:      name,
+					BaseURL:   baseURL,
+					APIKeySet: dec != "",
+					Model:     model,
+					IsDefault: isDefault == 1,
+				}
+			}
 		}
 		if isDefault == 1 {
 			defaultProvider = name
@@ -158,13 +172,35 @@ func (ar *AdminRouter) updateProviderConfig(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Upsert provider config
-	// If api_key is empty, preserve the existing one
+	// If api_key is empty, preserve the existing one (decrypt if needed)
+	encKey := crypto.EncryptionKey()
 	var existingKey string
 	_ = tx.QueryRow("SELECT api_key FROM provider_config WHERE provider_name = ?", req.Provider).Scan(&existingKey)
 
 	apiKey := req.APIKey
-	if apiKey == "" {
-		apiKey = existingKey
+	if apiKey == "" && existingKey != "" {
+		// Preserve existing key (decrypt if encrypted)
+		if encKey != nil && crypto.IsEncrypted(existingKey) {
+			dec, err := crypto.Decrypt(encKey, existingKey)
+			if err != nil {
+				writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to decrypt existing key")
+				return
+			}
+			apiKey = dec
+		} else {
+			apiKey = existingKey
+		}
+	}
+
+	// Encrypt the key for storage
+	storedKey := apiKey
+	if encKey != nil && apiKey != "" {
+		enc, err := crypto.Encrypt(encKey, apiKey)
+		if err != nil {
+			writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to encrypt api key")
+			return
+		}
+		storedKey = enc
 	}
 
 	isDefaultInt := 0
@@ -175,8 +211,8 @@ func (ar *AdminRouter) updateProviderConfig(w http.ResponseWriter, r *http.Reque
 	_, err = tx.Exec(`INSERT INTO provider_config (provider_name, base_url, api_key, model, is_default, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(provider_name) DO UPDATE SET base_url = ?, api_key = ?, model = ?, is_default = ?, updated_at = ?`,
-		req.Provider, req.BaseURL, apiKey, req.Model, isDefaultInt, now,
-		req.BaseURL, apiKey, req.Model, isDefaultInt, now)
+		req.Provider, req.BaseURL, storedKey, req.Model, isDefaultInt, now,
+		req.BaseURL, storedKey, req.Model, isDefaultInt, now)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "admin handler error",
 			"method", r.Method, "path", r.URL.Path, "status", http.StatusInternalServerError, "error", err)

@@ -46,6 +46,7 @@ import (
 	"github.com/openbotstack/openbotstack-runtime/memory"
 	contextassembler "github.com/openbotstack/openbotstack-runtime/context"
 	"github.com/openbotstack/openbotstack-runtime/internal/adapters"
+	"github.com/openbotstack/openbotstack-runtime/internal/crypto"
 	"github.com/openbotstack/openbotstack-runtime/observability"
 	"github.com/openbotstack/openbotstack-runtime/persistence"
 	"github.com/openbotstack/openbotstack-runtime/ratelimit"
@@ -253,9 +254,19 @@ func main() {
 		_ = pdb.QueryRow("SELECT COUNT(*) FROM provider_config WHERE provider_name = ?", providerName).Scan(&existing)
 		if existing == 0 {
 			seedNow := time.Now().UTC().Format(time.RFC3339Nano)
+			// Encrypt API key for at-rest storage
+			seedKey := providerConfig.APIKey
+			if encKey := crypto.EncryptionKey(); encKey != nil {
+				enc, err := crypto.Encrypt(encKey, seedKey)
+				if err != nil {
+					slog.Warn("failed to encrypt provider api key for storage", "error", err)
+				} else {
+					seedKey = enc
+				}
+			}
 			_, err := pdb.Exec(`INSERT INTO provider_config (provider_name, base_url, api_key, model, is_default, updated_at)
 				VALUES (?, ?, ?, ?, 1, ?)`,
-				providerName, providerConfig.BaseURL, providerConfig.APIKey, providerConfig.Model, seedNow)
+				providerName, providerConfig.BaseURL, seedKey, providerConfig.Model, seedNow)
 			if err != nil {
 				slog.Warn("failed to seed provider config into SQLite", "provider", providerName, "error", err)
 			} else {
