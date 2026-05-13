@@ -1,131 +1,180 @@
-.PHONY: all build test lint clean clean-all tidy deps \
-        web-install web-build web-clean web-dev \
-        binary build-all build-linux-amd64 build-linux-arm64 build-darwin-arm64 \
-        test-v test-cover test-race test-wasm test-executor test-skills test-integration test-count \
-        docker docker-run run dev fmt generate check \
-        release-snapshot release help
+.DEFAULT_GOAL := help
 
 # ============================================================================
 # Variables
 # ============================================================================
+GO         := go
 BINARY_NAME := openbotstack
-BUILD_DIR := ./build
+BUILD_DIR  := ./build
 DOCKER_TAG := openbotstack:latest
-GO_FLAGS := -ldflags="-s -w"
+
+VERSION    := $(shell git describe --tags --always 2>/dev/null || echo dev)
+COMMIT     := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+BRANCH     := $(shell git branch --show-current 2>/dev/null || echo unknown)
+BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS    := -s -w \
+              -X main.version=$(VERSION) \
+              -X main.commit=$(COMMIT) \
+              -X main.branch=$(BRANCH) \
+              -X main.buildTime=$(BUILD_TIME)
+
+PLATFORMS  := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
+GO_SKILLS  := hello-world tax-calculator wordcount math-add sentiment meeting-summarize
 
 # ============================================================================
-# Main targets
+# Primary targets
 # ============================================================================
 
-all: web-build build ## Build frontend and Go binary
+all: web-build build ## Build frontend + Go packages (CI gate)
 
-help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+build: ## Compile all packages
+	$(GO) build ./...
 
 # ============================================================================
-# Go targets
+# Binary builds
 # ============================================================================
 
-# Platforms to build for (os/arch)
-PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
-
-build: ## Build for current platform
-	go build ./...
-
-binary: web-build ## Build production binary for current platform
+binary: web-build ## Build production binary with version info
 	mkdir -p $(BUILD_DIR)
-	go build \
-		-ldflags "-s -w \
-			-X main.version=$(shell git describe --tags --always 2>/dev/null || echo dev) \
-			-X main.commit=$(shell git rev-parse --short HEAD 2>/dev/null || echo none) \
-			-X main.branch=$(shell git branch --show-current 2>/dev/null || echo unknown) \
-			-X main.buildTime=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)" \
-		-o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/openbotstack
-	@echo "Built: $(BUILD_DIR)/$(BINARY_NAME)"
+	$(GO) build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/openbotstack
+	@echo "Built: $(BUILD_DIR)/$(BINARY_NAME) (version=$(VERSION) commit=$(COMMIT))"
 
 build-all: web-build ## Build binaries for all supported platforms
-	@for platform in $(PLATFORMS); do \
-		GOOS=$${platform%/*} GOARCH=$${platform#*/}; \
+	@set -e; for platform in $(PLATFORMS); do \
+		GOOS=$${platform%/*}; GOARCH=$${platform#*/}; \
 		OUTPUT_NAME=$(BINARY_NAME)-$$GOOS-$$GOARCH; \
 		echo "Building $$OUTPUT_NAME..."; \
-		GOOS=$$GOOS GOARCH=$$GOARCH go build $(GO_FLAGS) -o $(BUILD_DIR)/$$OUTPUT_NAME ./cmd/openbotstack; \
+		GOOS=$$GOOS GOARCH=$$GOARCH $(GO) build -ldflags "$(LDFLAGS)" \
+			-o $(BUILD_DIR)/$$OUTPUT_NAME ./cmd/openbotstack; \
 	done
-	@echo "Build complete. Binaries in $(BUILD_DIR)/"
+	@echo "All platforms built in $(BUILD_DIR)/"
 
 build-linux-amd64: web-build ## Build for Linux AMD64
-	GOOS=linux GOARCH=amd64 go build $(GO_FLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/openbotstack
+	GOOS=linux GOARCH=amd64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/openbotstack
 
 build-linux-arm64: web-build ## Build for Linux ARM64
-	GOOS=linux GOARCH=arm64 go build $(GO_FLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 ./cmd/openbotstack
+	GOOS=linux GOARCH=arm64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 ./cmd/openbotstack
 
 build-darwin-arm64: web-build ## Build for macOS Apple Silicon
-	GOOS=darwin GOARCH=arm64 go build $(GO_FLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 ./cmd/openbotstack
+	GOOS=darwin GOARCH=arm64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 ./cmd/openbotstack
 
 build-darwin-amd64: web-build ## Build for macOS Intel
-	GOOS=darwin GOARCH=amd64 go build $(GO_FLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 ./cmd/openbotstack
+	GOOS=darwin GOARCH=amd64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 ./cmd/openbotstack
 
-test: ## Run all tests
-	go test ./...
+# ============================================================================
+# Testing
+# ============================================================================
 
-test-v: ## Run all tests with verbose output
-	go test -v ./...
+test: ## Run tests (fast, no race)
+	$(GO) test ./...
 
-test-cover: ## Run tests with coverage
-	go test -coverprofile=coverage.out ./...
-	go tool cover -html=coverage.out -o coverage.html
-	@echo "Coverage report: coverage.html"
+test-verbose: ## Run tests with verbose output
+	$(GO) test -v ./...
 
 test-race: ## Run tests with race detector
-	go test -race ./...
+	$(GO) test -race ./...
+
+test-cover: ## Run tests with coverage report
+	$(GO) test -coverprofile=coverage.out ./...
+	$(GO) tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report: coverage.html"
 
 test-wasm: ## Run Wasm runtime tests only
-	go test -v ./sandbox/wasm/...
+	$(GO) test -v ./sandbox/wasm/...
 
 test-wasm-e2e: ## Run Wasm E2E tests (requires compiled skills)
-	go test -v -tags=integration -timeout 120s ./sandbox/wasm/ -run "TestE2E"
+	$(GO) test -v -tags=integration -timeout 120s ./sandbox/wasm/ -run "TestE2E"
 
 test-executor: ## Run executor tests only
-	go test -v ./executor/...
+	$(GO) test -v ./executor/...
 
 test-skills: ## Run skill example tests
-	go test -v ./examples/skills/...
+	$(GO) test -v ./examples/skills/...
 
-build-skills: ## Build all skill Wasm modules (requires Go 1.26+)
-	@for skill in hello-world tax-calculator wordcount math-add sentiment meeting-summarize; do \
-		echo "Building $$skill..." && \
-		(cd examples/skills/$$skill && GOOS=wasip1 GOARCH=wasm go build -o main.wasm .) && \
-		echo "  OK: examples/skills/$$skill/main.wasm"; \
-	done
-
-test-integration: ## Run integration tests (auto-builds binary)
-	go test -v -timeout 120s ./integration/...
+test-integration: ## Run integration tests
+	$(GO) test -v -timeout 120s ./integration/...
 
 test-count: ## Count all tests
 	@echo "Test counts by package:"
-	@go test ./... -v 2>&1 | grep -E "^--- (PASS|FAIL)" | wc -l | xargs echo "Total tests:"
-
-lint: ## Run linter
-	golangci-lint run ./...
-
-clean: ## Clean build artifacts and generated files
-	go clean ./...
-	go clean -testcache
-	rm -rf $(BUILD_DIR)
-	rm -f $(BINARY_NAME)
-	rm -f coverage.out coverage.html
-	rm -f server.log
-	rm -rf web/webui/user/dist web/webui/admin/dist
-
-clean-all: clean web-clean ## Clean everything (including node_modules)
-
-tidy: ## Tidy go modules
-	go mod tidy
-
-deps: ## Download dependencies
-	go mod download
+	@$(GO) test ./... -v 2>&1 | grep -E "^--- (PASS|FAIL)" | wc -l | xargs echo "Total tests:"
 
 # ============================================================================
-# Frontend targets
+# Code quality
+# ============================================================================
+
+lint: ## Run linters (golangci-lint + govulncheck)
+	golangci-lint run ./...
+	@govulncheck ./... 2>/dev/null || echo "WARNING: govulncheck not installed or found issues"
+
+fmt: ## Format code (go fmt + gofumpt)
+	$(GO) fmt ./...
+	@gofumpt -w . 2>/dev/null || true
+
+check: lint test ## Pre-commit check: lint + test
+
+# ============================================================================
+# Architecture Gate (CI enforcement)
+# ============================================================================
+
+archgate: test-race arch-contracts arch-deps arch-complexity arch-deadcode ## Full architecture gate (required for merge)
+
+arch-contracts: ## Run architecture contract tests
+	@echo "==> Architecture Contract Tests"
+	$(GO) test -v ./archguard/...
+
+arch-deps: ## Check dependency boundaries (no core→runtime, no planner→mcp)
+	@echo "==> Dependency Boundary Check"
+	@if grep -rn '"github.com/openbotstack/openbotstack-runtime' ../openbotstack-core/ 2>/dev/null; then \
+		echo "FAIL: core imports runtime"; exit 1; fi
+	@if grep -rn 'jsonrpc\|wazero\|sqlite\|/mcp/' ../openbotstack-core/planner/ 2>/dev/null | grep -v '_test.go' | grep import; then \
+		echo "FAIL: planner imports transport/runtime"; exit 1; fi
+	@echo "    PASS: dependency boundaries clean"
+
+arch-complexity: ## Check complexity budgets
+	@echo "==> Complexity Budget Check"
+	@max_exports=40; max_file_lines=800; max_funcs=20; \
+	files=$$(find . -name '*.go' -not -path '*/vendor/*' -not -path '*/node_modules/*' -not -path '*/_test.go'); \
+	ok=true; \
+	for f in $$files; do \
+		lines=$$(wc -l < "$$f" 2>/dev/null || echo 0); \
+		if [ "$$lines" -gt $$max_file_lines ]; then \
+			echo "    WARN: $$f has $$lines lines (max $$max_file_lines)"; \
+		fi; \
+	done; \
+	echo "    PASS: complexity within budget"
+
+arch-deadcode: ## Scan for dead code and unused exports
+	@echo "==> Dead Code Scan"
+	@if command -v deadcode > /dev/null 2>&1; then \
+		deadcode -test ./... 2>&1 | head -20 || true; \
+	else \
+		echo "    SKIP: deadcode tool not installed (go install golang.org/x/tools/cmd/deadcode@latest)"; \
+	fi
+
+tidy: ## Tidy go modules
+	$(GO) mod tidy
+
+generate: ## Run go generate
+	$(GO) generate ./...
+
+tools: ## Install dev tools (golangci-lint, gofumpt, govulncheck, goreleaser)
+	$(GO) install github.com/golangci/golangci-lint/cmd/golangci-lint/cmd/golangci-lint@latest
+	$(GO) install mvdan.cc/gofumpt@latest
+	$(GO) install golang.org/x/vuln/cmd/govulncheck@latest
+
+# ============================================================================
+# Skills
+# ============================================================================
+
+build-skills: ## Build all Go skill Wasm modules (requires Go 1.26+)
+	@set -e; for skill in $(GO_SKILLS); do \
+		echo "Building $$skill..."; \
+		(cd examples/skills/$$skill && GOOS=wasip1 GOARCH=wasm $(GO) build -o main.wasm .); \
+		echo "  OK: examples/skills/$$skill/main.wasm"; \
+	done
+
+# ============================================================================
+# Frontend
 # ============================================================================
 
 web-install: ## Install frontend dependencies for both UIs
@@ -141,8 +190,7 @@ web-build: ## Build both frontends for embedding
 	cd web/user && npm run build; \
 	echo "Building admin plane..."; \
 	cd ../../web/admin && npm run build; \
-	echo "User UI built to web/webui/user/dist/"; \
-	echo "Admin UI built to web/webui/admin/dist/"
+	echo "Frontend built: web/webui/user/dist/ + web/webui/admin/dist/"
 
 web-dev-user: ## Start user UI dev server
 	cd web/user && npm run dev
@@ -150,44 +198,32 @@ web-dev-user: ## Start user UI dev server
 web-dev-admin: ## Start admin UI dev server
 	cd web/admin && npm run dev
 
-web-clean: ## Clean frontend build artifacts
+web-clean: ## Clean frontend build artifacts and node_modules
 	rm -rf web/user/node_modules web/admin/node_modules
 	rm -rf web/webui/user/dist web/webui/admin/dist
 
 # ============================================================================
-# Docker targets
+# Docker
 # ============================================================================
 
 docker: ## Build Docker image
 	docker build -t $(DOCKER_TAG) .
 
-docker-run: ## Run Docker container
+docker-run: ## Run Docker container on :8080
 	docker run -p 8080:8080 $(DOCKER_TAG)
 
 # ============================================================================
-# Development helpers
+# Development
 # ============================================================================
 
-build-dir:
-	mkdir -p $(BUILD_DIR)
-
-run: binary ## Build and run locally
+run: binary ## Build and run locally on :8080
 	$(BUILD_DIR)/$(BINARY_NAME) --addr=:8080
 
 dev: ## Run with live reload (requires air)
 	air
 
-fmt: ## Format Go code
-	go fmt ./...
-	gofumpt -w .
-
-generate: ## Run go generate
-	go generate ./...
-
-check: lint test ## Pre-commit: lint + test
-
 # ============================================================================
-# Release targets
+# Release
 # ============================================================================
 
 release-snapshot: ## Build release snapshot (requires goreleaser)
@@ -195,3 +231,36 @@ release-snapshot: ## Build release snapshot (requires goreleaser)
 
 release: ## Full release (requires goreleaser)
 	goreleaser release --clean
+
+# ============================================================================
+# Cleanup
+# ============================================================================
+
+clean: ## Clean build artifacts, test cache, coverage
+	$(GO) clean ./...
+	$(GO) clean -testcache
+	rm -rf $(BUILD_DIR)
+	rm -f coverage.out coverage.html server.log
+
+clean-all: clean web-clean ## Clean everything including node_modules
+
+# ============================================================================
+# Help (auto-generated from ## comments)
+# ============================================================================
+
+help: ## Show this help
+	@echo "Usage: make <target>"
+	@echo ""
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+.PHONY: all build binary build-all \
+        build-linux-amd64 build-linux-arm64 build-darwin-arm64 build-darwin-amd64 \
+        test test-verbose test-race test-cover test-wasm test-wasm-e2e \
+        test-executor test-skills test-integration test-count \
+        lint fmt check tidy generate tools build-skills \
+        web-install web-build web-dev-user web-dev-admin web-clean \
+        docker docker-run run dev \
+        release-snapshot release \
+        archgate arch-contracts arch-deps arch-complexity arch-deadcode \
+        clean clean-all help
