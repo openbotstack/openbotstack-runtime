@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -76,7 +77,18 @@ func (ar *AdminRouter) handleAdminSessionAction(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	result, err := ar.db.Exec(`DELETE FROM session_entries WHERE session_id = ?`, sessionID)
+	// Optional tenant_id filter for safe cross-tenant admin operations.
+	// When provided, only deletes entries matching both session_id and tenant_id.
+	tenantID := r.URL.Query().Get("tenant_id")
+	var result sql.Result
+	var err error
+	if tenantID != "" {
+		result, err = ar.db.Exec(`DELETE FROM session_entries WHERE session_id = ? AND tenant_id = ?`, sessionID, tenantID)
+	} else {
+		slog.WarnContext(r.Context(), "admin session delete without tenant filter",
+			"method", r.Method, "path", r.URL.Path, "session_id", sessionID)
+		result, err = ar.db.Exec(`DELETE FROM session_entries WHERE session_id = ?`, sessionID)
+	}
 	if err != nil {
 		slog.ErrorContext(r.Context(), "admin handler error",
 			"method", r.Method, "path", r.URL.Path, "status", http.StatusInternalServerError, "error", err)

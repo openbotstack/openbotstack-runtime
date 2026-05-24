@@ -80,6 +80,7 @@ func TestSandboxedHTTPClientAllowed(t *testing.T) {
 
 	allowlist := wasm.NewHTTPAllowlist([]string{server.URL})
 	client := wasm.NewSandboxedHTTPClient(allowlist, nil)
+	client.SetBlockPrivateIPs(false)
 
 	body, statusCode, err := client.Fetch(context.Background(), server.URL, "GET", nil)
 	if err != nil {
@@ -98,6 +99,7 @@ func TestSandboxedHTTPClientAllowed(t *testing.T) {
 func TestSandboxedHTTPClientDenied(t *testing.T) {
 	allowlist := wasm.NewHTTPAllowlist([]string{"https://allowed.com"})
 	client := wasm.NewSandboxedHTTPClient(allowlist, nil)
+	client.SetBlockPrivateIPs(false)
 
 	_, _, err := client.Fetch(context.Background(), "https://evil.com", "GET", nil)
 	if err == nil {
@@ -119,6 +121,7 @@ func TestSandboxedHTTPClientTimeout(t *testing.T) {
 
 	allowlist := wasm.NewHTTPAllowlist([]string{server.URL})
 	client := wasm.NewSandboxedHTTPClient(allowlist, nil)
+	client.SetBlockPrivateIPs(false)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1)
 	defer cancel()
@@ -145,6 +148,7 @@ func TestSandboxedHTTPClientPOST(t *testing.T) {
 
 	allowlist := wasm.NewHTTPAllowlist([]string{server.URL})
 	client := wasm.NewSandboxedHTTPClient(allowlist, nil)
+	client.SetBlockPrivateIPs(false)
 
 	body, statusCode, err := client.Fetch(context.Background(), server.URL, "POST", []byte(`{"data": "test"}`))
 	if err != nil {
@@ -167,6 +171,7 @@ func TestSandboxedHTTPClientPOST(t *testing.T) {
 func TestSandboxedHTTPClientInvalidURL(t *testing.T) {
 	allowlist := wasm.NewHTTPAllowlist([]string{"*"})
 	client := wasm.NewSandboxedHTTPClient(allowlist, nil)
+	client.SetBlockPrivateIPs(false)
 
 	_, _, err := client.Fetch(context.Background(), "not-a-valid-url", "GET", nil)
 	if err == nil {
@@ -186,6 +191,7 @@ func TestSandboxedHTTPClientEmptyMethod(t *testing.T) {
 
 	allowlist := wasm.NewHTTPAllowlist([]string{server.URL})
 	client := wasm.NewSandboxedHTTPClient(allowlist, nil)
+	client.SetBlockPrivateIPs(false)
 
 	_, statusCode, err := client.Fetch(context.Background(), server.URL, "", nil)
 	if err != nil {

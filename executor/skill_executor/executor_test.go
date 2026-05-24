@@ -3,9 +3,11 @@ package skill_executor_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/openbotstack/openbotstack-core/audit"
 	"github.com/openbotstack/openbotstack-core/execution"
 	control_skills "github.com/openbotstack/openbotstack-core/control/skills"
 	executor "github.com/openbotstack/openbotstack-runtime/executor/skill_executor"
@@ -15,10 +17,13 @@ import (
 
 // mockSkill implements skills.Skill for testing.
 type mockSkill struct {
-	id        string
-	valid     bool
-	timeout   time.Duration
-	wasmBytes []byte
+	id            string
+	valid         bool
+	timeout       time.Duration
+	wasmBytes     []byte
+	permissions   []string
+	executionMode string
+	prompt        string
 }
 
 func (m *mockSkill) ID() string                      { return m.id }
@@ -27,7 +32,9 @@ func (m *mockSkill) Description() string             { return "Test skill " + m.
 func (m *mockSkill) Timeout() time.Duration          { return m.timeout }
 func (m *mockSkill) InputSchema() *control_skills.JSONSchema  { return nil }
 func (m *mockSkill) OutputSchema() *control_skills.JSONSchema { return nil }
-func (m *mockSkill) RequiredPermissions() []string   { return nil }
+func (m *mockSkill) RequiredPermissions() []string   { return m.permissions }
+func (m *mockSkill) ExecutionMode() string           { return m.executionMode }
+func (m *mockSkill) Prompt() string                  { return m.prompt }
 func (m *mockSkill) Validate() error {
 	if !m.valid {
 		return errors.New("invalid skill")
@@ -37,7 +44,7 @@ func (m *mockSkill) Validate() error {
 func (m *mockSkill) WasmBytes() []byte { return m.wasmBytes }
 
 func newMockSkill(id string, valid bool) *mockSkill {
-	return &mockSkill{id: id, valid: valid, timeout: 30 * time.Second}
+	return &mockSkill{id: id, valid: valid, timeout: 30 * time.Second, executionMode: "declarative"}
 }
 
 // schemaMockSkill extends mockSkill with an input schema.
@@ -263,6 +270,7 @@ func TestExecuteSuccess(t *testing.T) {
 	e := executor.NewDefaultExecutor()
 	ctx := context.Background()
 	_ = e.LoadSkill(ctx, newMockSkill("skill-1", true))
+	e.SetTextGenerator(&mockTextGenerator{response: "ok"})
 
 	result, err := e.Execute(ctx, execution.ExecutionRequest{
 		SkillID: "skill-1",
@@ -371,6 +379,7 @@ func TestFullLifecycle(t *testing.T) {
 	if err := e.LoadSkill(ctx, s); err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
+	e.SetTextGenerator(&mockTextGenerator{response: "ok"})
 	if e.SkillCount() != 1 {
 		t.Errorf("After load: expected 1, got %d", e.SkillCount())
 	}
@@ -417,6 +426,7 @@ func TestReloadSkill(t *testing.T) {
 
 func TestExecuteWithAuditSuccess(t *testing.T) {
 	e := executor.NewDefaultExecutor()
+	e.SetTextGenerator(&mockTextGenerator{response: "ok"})
 	ctx := context.Background()
 	_ = e.LoadSkill(ctx, newMockSkill("audit-skill", true))
 
@@ -446,7 +456,7 @@ func TestExecuteWithAuditSuccess(t *testing.T) {
 
 	// Check events by outcome (order depends on implementation)
 	// Find the "started" and "success" events
-	var startedEvt, successEvt *execution_logs.Event
+	var startedEvt, successEvt *audit.AuditEvent
 	for i := range events {
 		switch events[i].Outcome {
 		case "started":
@@ -510,7 +520,7 @@ func TestExecuteWithAuditFailure(t *testing.T) {
 	}
 
 	// Find the failure event
-	var failureEvt *execution_logs.Event
+	var failureEvt *audit.AuditEvent
 	for i := range events {
 		if events[i].Outcome == "failure" {
 			failureEvt = &events[i]
@@ -529,6 +539,7 @@ func TestExecuteWithNilAuditLogger(t *testing.T) {
 	e := executor.NewDefaultExecutor()
 	ctx := context.Background()
 	_ = e.LoadSkill(ctx, newMockSkill("no-audit", true))
+	e.SetTextGenerator(&mockTextGenerator{response: "ok"})
 
 	// No SetAuditLogger called -- auditLogger is nil
 
@@ -550,6 +561,7 @@ func TestSetAuditLoggerNilSafe(t *testing.T) {
 	e.SetAuditLogger(nil)
 	ctx := context.Background()
 	_ = e.LoadSkill(ctx, newMockSkill("nil-audit", true))
+	e.SetTextGenerator(&mockTextGenerator{response: "ok"})
 
 	result, err := e.Execute(ctx, execution.ExecutionRequest{SkillID: "nil-audit"})
 	if err != nil {
@@ -562,6 +574,7 @@ func TestSetAuditLoggerNilSafe(t *testing.T) {
 
 // mockTextGenerator implements executor.TextGenerator for testing.
 type mockTextGenerator struct {
+	mu       sync.Mutex
 	response string
 	err      error
 	called   bool
@@ -569,8 +582,10 @@ type mockTextGenerator struct {
 }
 
 func (m *mockTextGenerator) GenerateText(ctx context.Context, prompt string) (string, error) {
+	m.mu.Lock()
 	m.called = true
 	m.prompt = prompt
+	m.mu.Unlock()
 	return m.response, m.err
 }
 
@@ -578,14 +593,14 @@ func TestDeclarativeSkill_WithTextGenerator(t *testing.T) {
 	e := executor.NewDefaultExecutor()
 	ctx := context.Background()
 
-	skill := newMockSkill("core/summarize", true)
+	skill := newMockSkill("summarize", true)
 	_ = e.LoadSkill(ctx, skill)
 
 	mockLLM := &mockTextGenerator{response: "This is a summary of the text."}
 	e.SetTextGenerator(mockLLM)
 
 	result, err := e.Execute(ctx, execution.ExecutionRequest{
-		SkillID: "core/summarize",
+		SkillID: "summarize",
 		Input:   []byte(`{"text": "Long text to summarize"}`),
 	})
 	if err != nil {
@@ -604,7 +619,7 @@ func TestDeclarativeSkill_WithTextGenerator(t *testing.T) {
 		t.Error("Prompt was empty")
 	}
 	// Verify the prompt includes skill description and user input
-	if !contains(mockLLM.prompt, "Test skill core/summarize") {
+	if !contains(mockLLM.prompt, "Test skill summarize") {
 		t.Errorf("Prompt should include skill name, got: %s", mockLLM.prompt)
 	}
 	if !contains(mockLLM.prompt, "Long text to summarize") {
@@ -612,28 +627,24 @@ func TestDeclarativeSkill_WithTextGenerator(t *testing.T) {
 	}
 }
 
-func TestDeclarativeSkill_NoTextGenerator_Passthrough(t *testing.T) {
+func TestDeclarativeSkill_NoTextGenerator_Error(t *testing.T) {
 	e := executor.NewDefaultExecutor()
 	ctx := context.Background()
 
-	skill := newMockSkill("core/summarize", true)
+	skill := newMockSkill("summarize", true)
 	_ = e.LoadSkill(ctx, skill)
 	// No SetTextGenerator called
 
 	input := []byte(`{"text": "hello"}`)
 	result, err := e.Execute(ctx, execution.ExecutionRequest{
-		SkillID: "core/summarize",
+		SkillID: "summarize",
 		Input:   input,
 	})
-	if err != nil {
-		t.Fatalf("Execute failed: %v", err)
+	if err == nil {
+		t.Fatal("expected error when no text generator configured")
 	}
-	if result.Status != execution.StatusSuccess {
-		t.Errorf("Expected StatusSuccess, got %v", result.Status)
-	}
-	// Without TextGenerator, should passthrough the raw input
-	if string(result.Output) != string(input) {
-		t.Errorf("Expected passthrough input, got %q", string(result.Output))
+	if result.Status != execution.StatusFailed {
+		t.Errorf("Expected StatusFailed, got %v", result.Status)
 	}
 }
 
@@ -641,14 +652,14 @@ func TestDeclarativeSkill_LLMError(t *testing.T) {
 	e := executor.NewDefaultExecutor()
 	ctx := context.Background()
 
-	skill := newMockSkill("core/summarize", true)
+	skill := newMockSkill("summarize", true)
 	_ = e.LoadSkill(ctx, skill)
 
 	mockLLM := &mockTextGenerator{err: errors.New("LLM unavailable")}
 	e.SetTextGenerator(mockLLM)
 
 	result, err := e.Execute(ctx, execution.ExecutionRequest{
-		SkillID: "core/summarize",
+		SkillID: "summarize",
 		Input:   []byte("test"),
 	})
 	if err == nil {
@@ -685,10 +696,11 @@ func TestWasmSkill_FallbackToLLM(t *testing.T) {
 
 	// Load a skill WITH Wasm bytes (invalid Wasm that will fail)
 	skill := &mockSkill{
-		id:        "core/test-wasm",
-		valid:     true,
-		timeout:   5 * time.Second,
-		wasmBytes: []byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00}, // invalid Wasm header
+		id:          "core/test-wasm",
+		valid:       true,
+		timeout:     5 * time.Second,
+		wasmBytes:   []byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00}, // invalid Wasm header
+		permissions: []string{"llm:generate"},
 	}
 	_ = e.LoadSkill(ctx, skill)
 
@@ -778,7 +790,7 @@ func TestExecute_SchemaValidationPass(t *testing.T) {
 	ctx := context.Background()
 
 	skill := &schemaMockSkill{
-		mockSkill: mockSkill{id: "schema-skill-pass", valid: true, timeout: 30 * time.Second},
+		mockSkill: mockSkill{id: "schema-skill-pass", valid: true, timeout: 30 * time.Second, executionMode: "declarative"},
 		inputSchema: &control_skills.JSONSchema{
 			Type:     "object",
 			Required: []string{"text"},
@@ -788,6 +800,7 @@ func TestExecute_SchemaValidationPass(t *testing.T) {
 		},
 	}
 	_ = e.LoadSkill(ctx, skill)
+	e.SetTextGenerator(&mockTextGenerator{response: "ok"})
 
 	// Valid input with required field
 	result, err := e.Execute(ctx, execution.ExecutionRequest{
@@ -808,6 +821,7 @@ func TestExecute_NilSchemaSkipsValidation(t *testing.T) {
 
 	// Default mockSkill returns nil InputSchema
 	_ = e.LoadSkill(ctx, newMockSkill("nil-schema-skill", true))
+	e.SetTextGenerator(&mockTextGenerator{response: "ok"})
 
 	// Any input should pass since schema is nil
 	result, err := e.Execute(ctx, execution.ExecutionRequest{
@@ -819,5 +833,75 @@ func TestExecute_NilSchemaSkipsValidation(t *testing.T) {
 	}
 	if result.Status != execution.StatusSuccess {
 		t.Errorf("Expected StatusSuccess, got %v", result.Status)
+	}
+}
+
+// ==================== SKILL.md Prompt Tests ====================
+
+func TestDeclarativeSkill_WithSkillMDPrompt(t *testing.T) {
+	e := executor.NewDefaultExecutor()
+	ctx := context.Background()
+
+	// Skill with a SKILL.md-style prompt
+	skill := &mockSkill{
+		id:            "summarize-md",
+		valid:         true,
+		timeout:       30 * time.Second,
+		executionMode: "declarative",
+		prompt:        "You are a summarizer.\n\nInput:\n{{.Input}}\n\nProduce 3 bullet points.",
+	}
+	_ = e.LoadSkill(ctx, skill)
+
+	mockLLM := &mockTextGenerator{response: "- Point 1\n- Point 2\n- Point 3"}
+	e.SetTextGenerator(mockLLM)
+
+	result, err := e.Execute(ctx, execution.ExecutionRequest{
+		SkillID: "summarize-md",
+		Input:   []byte(`{"text": "Some article text"}`),
+	})
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if result.Status != execution.StatusSuccess {
+		t.Errorf("Expected StatusSuccess, got %v", result.Status)
+	}
+
+	// Verify the prompt uses the SKILL.md content, not the generic fallback
+	if !contains(mockLLM.prompt, "You are a summarizer") {
+		t.Errorf("Prompt should use SKILL.md content, got: %s", mockLLM.prompt)
+	}
+	if !contains(mockLLM.prompt, "Some article text") {
+		t.Errorf("Prompt should have {{.Input}} replaced, got: %s", mockLLM.prompt)
+	}
+	if contains(mockLLM.prompt, "You are performing the skill") {
+		t.Errorf("Prompt should NOT use generic fallback when SKILL.md is present, got: %s", mockLLM.prompt)
+	}
+}
+
+func TestDeclarativeSkill_NoPromptUsesGenericFallback(t *testing.T) {
+	e := executor.NewDefaultExecutor()
+	ctx := context.Background()
+
+	// Skill with no prompt (no SKILL.md)
+	skill := newMockSkill("core/no-prompt", true)
+	_ = e.LoadSkill(ctx, skill)
+
+	mockLLM := &mockTextGenerator{response: "generic response"}
+	e.SetTextGenerator(mockLLM)
+
+	result, err := e.Execute(ctx, execution.ExecutionRequest{
+		SkillID: "core/no-prompt",
+		Input:   []byte("test input"),
+	})
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if result.Status != execution.StatusSuccess {
+		t.Errorf("Expected StatusSuccess, got %v", result.Status)
+	}
+
+	// Verify the generic fallback is used
+	if !contains(mockLLM.prompt, "You are performing the skill") {
+		t.Errorf("Prompt should use generic fallback when no SKILL.md, got: %s", mockLLM.prompt)
 	}
 }

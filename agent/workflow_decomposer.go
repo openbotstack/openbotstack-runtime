@@ -7,7 +7,7 @@ import (
 	"github.com/openbotstack/openbotstack-core/assistant"
 	"github.com/openbotstack/openbotstack-core/execution"
 	"github.com/openbotstack/openbotstack-core/planner"
-	"github.com/openbotstack/openbotstack-runtime/loop"
+	"github.com/openbotstack/openbotstack-runtime/harness"
 )
 
 // Workflow describes a multi-step process. This is a local mirror of
@@ -27,9 +27,9 @@ type WorkflowResolver interface {
 	Resolve(message string) (Workflow, map[string]any, error)
 }
 
-// DecomposeToTasks converts a Workflow into a slice of TaskInput for the outer loop.
+// DecomposeToTasks converts a Workflow into a slice of TaskInput for the harness.
 // Each workflow step becomes a separate task with its own PlannerContext.
-func DecomposeToTasks(w Workflow, input map[string]any, baseCtx *planner.PlannerContext) ([]loop.TaskInput, error) {
+func DecomposeToTasks(w Workflow, input map[string]any, baseCtx *planner.PlannerContext) ([]harness.TaskInput, error) {
 	steps, err := w.Steps(input)
 	if err != nil {
 		return nil, fmt.Errorf("workflow %s steps failed: %w", w.ID(), err)
@@ -38,9 +38,9 @@ func DecomposeToTasks(w Workflow, input map[string]any, baseCtx *planner.Planner
 		return nil, fmt.Errorf("workflow %s produced zero steps", w.ID())
 	}
 
-	tasks := make([]loop.TaskInput, len(steps))
+	tasks := make([]harness.TaskInput, len(steps))
 	for i, step := range steps {
-		tasks[i] = loop.TaskInput{
+		tasks[i] = harness.TaskInput{
 			TaskDescription: fmt.Sprintf("Execute %s '%s' (workflow: %s)", step.Type, step.Name, w.Name()),
 			PlannerContext:  deepCopyPlannerContext(baseCtx, step),
 		}

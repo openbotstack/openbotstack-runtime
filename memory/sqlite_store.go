@@ -21,7 +21,6 @@ func NewSQLiteMemoryStore(db *sql.DB) *SQLiteMemoryStore {
 }
 
 // tenantFromCtx extracts the tenant_id from the authenticated user in context.
-// Returns "" if no user is present, allowing backward compatibility with pre-auth data.
 func tenantFromCtx(ctx context.Context) string {
 	if user, ok := middleware.UserFromContext(ctx); ok {
 		return user.TenantID

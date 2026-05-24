@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"runtime"
 	"strings"
@@ -72,7 +73,8 @@ func (c *ProviderHealthChecker) Check(ctx context.Context) ComponentHealth {
 	url := c.baseURL + "/models"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return ComponentHealth{Status: "unhealthy", DurationMs: time.Since(start).Milliseconds(), Error: err.Error()}
+		slog.ErrorContext(ctx, "provider health check request creation failed", "error", err)
+		return ComponentHealth{Status: "unhealthy", DurationMs: time.Since(start).Milliseconds(), Error: "provider connectivity check failed"}
 	}
 	if c.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
@@ -84,7 +86,7 @@ func (c *ProviderHealthChecker) Check(ctx context.Context) ComponentHealth {
 		return ComponentHealth{
 			Status:     "unhealthy",
 			DurationMs: durationMs,
-			Error:      fmt.Sprintf("connection failed: %v", err),
+			Error:      "provider connectivity check failed",
 		}
 	}
 	// Drain body to allow connection reuse in the transport pool.

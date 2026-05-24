@@ -3,22 +3,22 @@ package api
 import (
 	"context"
 
-	audit "github.com/openbotstack/openbotstack-runtime/logging/execution_logs"
+	"github.com/openbotstack/openbotstack-runtime/logging/execution_logs"
 )
 
 // AuditExecutionStore adapts AuditLogger to ExecutionStore.
 type AuditExecutionStore struct {
-	logger audit.AuditLogger
+	logger execution_logs.AuditLogger
 }
 
 // NewAuditExecutionStore creates an ExecutionStore backed by audit logs.
-func NewAuditExecutionStore(logger audit.AuditLogger) *AuditExecutionStore {
+func NewAuditExecutionStore(logger execution_logs.AuditLogger) *AuditExecutionStore {
 	return &AuditExecutionStore{logger: logger}
 }
 
 // QueryExecutions returns recent execution records from audit logs.
 func (s *AuditExecutionStore) QueryExecutions(ctx context.Context, limit int) ([]ExecutionRecord, error) {
-	events, err := s.logger.Query(ctx, audit.QueryFilter{
+	events, err := s.logger.Query(ctx, execution_logs.QueryFilter{
 		Action: "skills.execute",
 		Limit:  limit,
 	})

@@ -104,8 +104,13 @@ func NewSandboxedHTTPClient(allowlist *HTTPAllowlist, httpClient *http.Client) *
 	return &SandboxedHTTPClient{
 		allowlist:       allowlist,
 		client:          httpClient,
-		blockPrivateIPs: false, // opt-in for backward compatibility
+		blockPrivateIPs: true,
 	}
+}
+
+// SetBlockPrivateIPs controls whether private/loopback/link-local addresses are blocked.
+func (c *SandboxedHTTPClient) SetBlockPrivateIPs(block bool) {
+	c.blockPrivateIPs = block
 }
 
 // NewSandboxedHTTPClientWithSSRF creates a sandboxed HTTP client with SSRF protection.

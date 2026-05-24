@@ -14,6 +14,24 @@ export function SkillsAdminSection() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
+  const typeBadgeClass = (type: string) => {
+    switch (type) {
+      case 'declarative': return 'type-declarative'
+      case 'llm-assisted': return 'type-llm'
+      case 'deterministic': return 'type-deterministic'
+      default: return 'type-other'
+    }
+  }
+
+  const typeBadgeLabel = (type: string) => {
+    switch (type) {
+      case 'declarative': return 'AI'
+      case 'llm-assisted': return 'AI+Code'
+      case 'deterministic': return 'Code'
+      default: return type
+    }
+  }
+
   const fetchSkills = useCallback(async () => {
     try {
       const data = await apiCall<SkillInfo[]>('/v1/admin/skills')
@@ -67,7 +85,7 @@ export function SkillsAdminSection() {
               <tr key={s.id}>
                 <td className="mono">{s.id}</td>
                 <td>{s.name}</td>
-                <td><span className={`type-badge type-${s.type}`}>{s.type}</span></td>
+                <td><span className={`type-badge ${typeBadgeClass(s.type)}`}>{typeBadgeLabel(s.type)}</span></td>
                 <td className="skill-desc">{s.description}</td>
                 <td>
                   <span className={`status-badge ${s.enabled ? 'status-active' : 'status-revoked'}`}>

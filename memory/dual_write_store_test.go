@@ -218,32 +218,3 @@ func TestDualWrite_LongPreviewTruncated(t *testing.T) {
 	}
 }
 
-func TestReconciliation_RecoversMissingSQLiteMetadata(t *testing.T) {
-	mdDir := t.TempDir()
-	mdStore, _ := NewMarkdownMemoryStore(mdDir)
-	mockState := newMockSessionStateStore()
-
-	ctx := context.Background()
-	// Write directly to Markdown (simulating a scenario where SQLite missed)
-	ts := time.Now().UTC().Format(time.RFC3339Nano)
-	mdStore.AppendMessage(ctx, agent.SessionMessage{
-		TenantID: "t1", UserID: "u1", SessionID: "s1",
-		Role: "user", Content: "recovery test", Timestamp: ts,
-	})
-
-	// SQLite is empty — reconciliation should fix it
-	if len(mockState.sessions) != 0 {
-		t.Fatal("precondition: SQLite should be empty")
-	}
-
-	if err := SyncMarkdownToSQLite(ctx, mdStore, mockState); err != nil {
-		t.Fatalf("SyncMarkdownToSQLite: %v", err)
-	}
-
-	if len(mockState.sessions) != 1 {
-		t.Fatalf("after sync: SQLite sessions = %d, want 1", len(mockState.sessions))
-	}
-	if mockState.sessions["s1"].SessionID != "s1" {
-		t.Errorf("synced SessionID = %q, want %q", mockState.sessions["s1"].SessionID, "s1")
-	}
-}

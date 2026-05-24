@@ -40,7 +40,7 @@ services:
       # Memory
       - OBS_DATA_DIR=/app/data/memory
       # Skills
-      - OBS_SKILLS_PATH=/app/examples/skills
+      - OBS_SKILLS_PATH=/app/skills
       # Auth (see DEPLOYMENT.md for details)
       - OBS_AUTH_STRICT=false
       # Set JWT_SECRET to enable JWT authentication alongside API keys

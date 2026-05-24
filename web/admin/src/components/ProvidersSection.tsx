@@ -72,9 +72,16 @@ export function ProvidersSection() {
 
   const handleProviderChange = (id: string) => {
     const opt = PROVIDER_OPTIONS.find(o => o.id === id)
+    const prevOpt = PROVIDER_OPTIONS.find(o => o.id === formProvider)
     setFormProvider(id)
-    if (!formBaseURL && opt) setFormBaseURL(opt.defaultURL)
-    if (!formModel && opt) setFormModel(opt.defaultModel)
+    if (opt) {
+      // Update URL if it's empty or still set to a provider default
+      const isDefaultURL = !formBaseURL || (prevOpt && formBaseURL === prevOpt.defaultURL)
+      if (isDefaultURL) setFormBaseURL(opt.defaultURL)
+      // Update model if it's empty or still set to a provider default
+      const isDefaultModel = !formModel || (prevOpt && formModel === prevOpt.defaultModel)
+      if (isDefaultModel) setFormModel(opt.defaultModel)
+    }
   }
 
   const handleSave = async () => {

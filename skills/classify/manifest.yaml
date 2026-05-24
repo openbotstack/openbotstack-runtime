@@ -1,0 +1,41 @@
+version: 1.0.0
+id: classify
+name: Text Classifier
+description: Classifies text into user-defined categories with confidence scores
+execution:
+  mode: declarative
+input_schema:
+  type: object
+  properties:
+    text:
+      type: string
+      description: The text to classify
+    categories:
+      type: array
+      items:
+        type: string
+      description: List of category labels to classify against
+    multi_label:
+      type: boolean
+      description: Whether to allow multiple categories (default false)
+  required:
+    - text
+    - categories
+output_schema:
+  type: object
+  properties:
+    classifications:
+      type: array
+      items:
+        type: object
+        properties:
+          category:
+            type: string
+          confidence:
+            type: number
+      description: Classified categories with confidence scores, sorted by confidence descending
+    explanation:
+      type: string
+      description: Brief explanation of the classification reasoning
+permissions: []
+timeout: 120s

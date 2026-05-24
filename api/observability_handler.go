@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/openbotstack/openbotstack-core/registry/skills"
+	"github.com/openbotstack/openbotstack-runtime/internal/skillutil"
 )
 
 // SkillProvider provides access to loaded skills for the API.
@@ -27,17 +28,11 @@ type SkillResponse struct {
 	Enabled      bool        `json:"enabled"`
 }
 
-// skillTypeFromID infers skill type from metadata or ID convention.
-func skillTypeFromID(s skills.Skill) string {
-	// Check if the skill has Wasm bytes (indicates wasm type)
-	if ws, ok := s.(interface{ WasmBytes() []byte }); ok && len(ws.WasmBytes()) > 0 {
-		return "wasm"
+func skillVersion(s skills.Skill) string {
+	if v, ok := s.(interface{ Version() string }); ok && v.Version() != "" {
+		return v.Version()
 	}
-	// Check if the skill has LLM dependency
-	if _, ok := s.(interface{ UsesLLM() bool }); ok {
-		return "llm"
-	}
-	return "code"
+	return "unknown"
 }
 
 func (r *Router) handleSkills(w http.ResponseWriter, req *http.Request) {
@@ -76,8 +71,8 @@ func (r *Router) handleSkills(w http.ResponseWriter, req *http.Request) {
 			ID:          s.ID(),
 			Name:        s.Name(),
 			Description: s.Description(),
-			Type:        skillTypeFromID(s),
-			Version:     "1.0.0",
+			Type:        skillutil.SkillTypeFromID(s),
+			Version:     skillVersion(s),
 			Enabled:     enabled,
 		}
 

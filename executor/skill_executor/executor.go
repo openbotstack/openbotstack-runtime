@@ -6,14 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/openbotstack/openbotstack-core/audit"
+	"github.com/openbotstack/openbotstack-core/control/agent"
 	"github.com/openbotstack/openbotstack-core/execution"
 	"github.com/openbotstack/openbotstack-core/registry/skills"
-	"github.com/openbotstack/openbotstack-core/control/agent"
 	"github.com/openbotstack/openbotstack-core/validation"
 	"github.com/openbotstack/openbotstack-runtime/logging/execution_logs"
 	"github.com/openbotstack/openbotstack-runtime/observability"
@@ -48,6 +50,13 @@ type WasmSkill interface {
 // Used for declarative skills that have no Wasm binary.
 type TextGenerator interface {
 	GenerateText(ctx context.Context, prompt string) (string, error)
+}
+
+// StreamingTextGenerator extends TextGenerator with token-level streaming.
+// The executor type-asserts TextGenerator to check for streaming support.
+type StreamingTextGenerator interface {
+	TextGenerator
+	GenerateStreamText(ctx context.Context, prompt string, tokenFn func(string)) (string, error)
 }
 
 // DefaultExecutor implements SkillExecutor with real Wasm execution.
@@ -246,11 +255,12 @@ func (e *DefaultExecutor) Execute(ctx context.Context, req execution.ExecutionRe
 	e.mu.RUnlock()
 
 	// Emit audit: started
-	e.emitAudit(ctx, al, execution_logs.Event{
+	e.emitAudit(ctx, al, audit.AuditEvent{
 		ID:        uuid.NewString(),
 		TenantID:  req.TenantID,
 		UserID:    req.UserID,
 		RequestID: req.RequestID,
+		Source:    audit.SourceExecutor,
 		Action:    "skills.execute",
 		Resource:  "skill/" + req.SkillID,
 		Outcome:   "started",
@@ -263,12 +273,25 @@ func (e *DefaultExecutor) Execute(ctx context.Context, req execution.ExecutionRe
 	e.mu.RUnlock()
 
 	if !exists {
+		loadedIDs := make([]string, 0)
+		e.mu.RLock()
+		for id := range e.skills {
+			loadedIDs = append(loadedIDs, id)
+		}
+		e.mu.RUnlock()
+		slog.Warn("skill not found in executor", "requested", req.SkillID, "loaded", loadedIDs)
+	}
+
+	mode := skills.GetExecutionMode(s)
+
+	if !exists {
 		elapsed := time.Since(start)
-		e.emitAudit(ctx, al, execution_logs.Event{
+		e.emitAudit(ctx, al, audit.AuditEvent{
 			ID:        uuid.NewString(),
 			TenantID:  req.TenantID,
 			UserID:    req.UserID,
 			RequestID: req.RequestID,
+			Source:    audit.SourceExecutor,
 			Action:    "skills.execute",
 			Resource:  "skill/" + req.SkillID,
 			Outcome:   "failure",
@@ -288,16 +311,17 @@ func (e *DefaultExecutor) Execute(ctx context.Context, req execution.ExecutionRe
 	if err := validation.ValidateInput(req.Input, s.InputSchema()); err != nil {
 		elapsed := time.Since(start)
 		execStatus = "rejected"
-		e.emitAudit(ctx, al, execution_logs.Event{
+		e.emitAudit(ctx, al, audit.AuditEvent{
 			ID:        uuid.NewString(),
 			TenantID:  req.TenantID,
 			UserID:    req.UserID,
 			RequestID: req.RequestID,
+			Source:    audit.SourceExecutor,
 			Action:    "skills.execute",
 			Resource:  "skill/" + req.SkillID,
 			Outcome:   "rejected",
 			Duration:  elapsed,
-			Metadata:  map[string]string{"error": err.Error()},
+			Metadata:  map[string]string{"error": err.Error(), "execution_mode": mode},
 			Timestamp: time.Now(),
 		})
 		return &execution.ExecutionResult{
@@ -311,6 +335,9 @@ func (e *DefaultExecutor) Execute(ctx context.Context, req execution.ExecutionRe
 	timeout := req.Timeout
 	if timeout == 0 {
 		timeout = s.Timeout()
+	}
+	if timeout == 0 {
+		timeout = 60 * time.Second
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
@@ -333,24 +360,41 @@ func (e *DefaultExecutor) Execute(ctx context.Context, req execution.ExecutionRe
 			e.mu.RUnlock()
 
 			if ctx.Err() != context.DeadlineExceeded && tg != nil {
+				// Only fallback to LLM for skills that declare LLM permission
+				hasLLMPerm := false
+				for _, p := range s.RequiredPermissions() {
+					if p == "llm:generate" {
+						hasLLMPerm = true
+						break
+					}
+				}
+				if !hasLLMPerm {
+					goto wasmError
+				}
 				slog.WarnContext(ctx, "wasm execution failed, falling back to LLM",
 					"skill_id", req.SkillID, "error", err)
-				prompt := fmt.Sprintf("You are performing the skill: %s.\n\n%s\n\nUser input:\n%s",
-					s.Name(), s.Description(), string(req.Input))
-				llmCtx, llmCancel := context.WithTimeout(context.Background(), 60*time.Second)
-				llmOutput, llmErr := tg.GenerateText(llmCtx, prompt)
+				var fallbackPrompt string
+				if p := skills.GetPrompt(s); p != "" {
+					fallbackPrompt = strings.ReplaceAll(p, "{{.Input}}", string(req.Input))
+				} else {
+					fallbackPrompt = fmt.Sprintf("You are performing the skill: %s.\n\n%s\n\nUser input:\n%s",
+						s.Name(), s.Description(), string(req.Input))
+				}
+				llmCtx, llmCancel := context.WithTimeout(ctx, timeout)
+				llmOutput, llmErr := tg.GenerateText(llmCtx, fallbackPrompt)
 				llmCancel()
 				if llmErr == nil {
-					e.emitAudit(ctx, al, execution_logs.Event{
+					e.emitAudit(ctx, al, audit.AuditEvent{
 						ID:        uuid.NewString(),
 						TenantID:  req.TenantID,
 						UserID:    req.UserID,
 						RequestID: req.RequestID,
+						Source:    audit.SourceExecutor,
 						Action:    "skills.execute",
 						Resource:  "skill/" + req.SkillID,
 						Outcome:   "success",
 						Duration:  time.Since(start),
-						Metadata:  map[string]string{"fallback": "llm"},
+						Metadata:  map[string]string{"fallback": "llm", "execution_mode": mode},
 						Timestamp: time.Now(),
 					})
 					return &execution.ExecutionResult{
@@ -363,21 +407,23 @@ func (e *DefaultExecutor) Execute(ctx context.Context, req execution.ExecutionRe
 				slog.WarnContext(ctx, "LLM fallback also failed", "error", llmErr)
 			}
 
+		wasmError:
 			outcome := "failure"
 			execStatus = "failed"
 			if ctx.Err() == context.DeadlineExceeded {
 				outcome = "timeout"
 				execStatus = "timeout"
-				e.emitAudit(ctx, al, execution_logs.Event{
+				e.emitAudit(ctx, al, audit.AuditEvent{
 					ID:        uuid.NewString(),
 					TenantID:  req.TenantID,
 					UserID:    req.UserID,
 					RequestID: req.RequestID,
+					Source:    audit.SourceExecutor,
 					Action:    "skills.execute",
 					Resource:  "skill/" + req.SkillID,
 					Outcome:   outcome,
 					Duration:  elapsed,
-					Metadata:  map[string]string{"error": "execution timeout"},
+					Metadata:  map[string]string{"error": "execution timeout", "execution_mode": mode},
 					Timestamp: time.Now(),
 				})
 				return &execution.ExecutionResult{
@@ -386,16 +432,17 @@ func (e *DefaultExecutor) Execute(ctx context.Context, req execution.ExecutionRe
 					Duration: elapsed,
 				}, execution.ErrExecutionTimeout
 			}
-			e.emitAudit(ctx, al, execution_logs.Event{
+			e.emitAudit(ctx, al, audit.AuditEvent{
 				ID:        uuid.NewString(),
 				TenantID:  req.TenantID,
 				UserID:    req.UserID,
 				RequestID: req.RequestID,
+				Source:    audit.SourceExecutor,
 				Action:    "skills.execute",
 				Resource:  "skill/" + req.SkillID,
 				Outcome:   outcome,
 				Duration:  elapsed,
-				Metadata:  map[string]string{"error": err.Error()},
+				Metadata:  map[string]string{"error": err.Error(), "execution_mode": mode},
 				Timestamp: time.Now(),
 			})
 			return &execution.ExecutionResult{
@@ -405,15 +452,17 @@ func (e *DefaultExecutor) Execute(ctx context.Context, req execution.ExecutionRe
 			}, err
 		}
 
-		e.emitAudit(ctx, al, execution_logs.Event{
+		e.emitAudit(ctx, al, audit.AuditEvent{
 			ID:        uuid.NewString(),
 			TenantID:  req.TenantID,
 			UserID:    req.UserID,
 			RequestID: req.RequestID,
+			Source:    audit.SourceExecutor,
 			Action:    "skills.execute",
 			Resource:  "skill/" + req.SkillID,
 			Outcome:   "success",
 			Duration:  elapsed,
+			Metadata:  map[string]string{"execution_mode": mode},
 			Timestamp: time.Now(),
 		})
 		return &execution.ExecutionResult{
@@ -423,78 +472,117 @@ func (e *DefaultExecutor) Execute(ctx context.Context, req execution.ExecutionRe
 		}, nil
 	}
 
-	// Fallback for skills without Wasm (declarative/LLM-assisted skills)
+	// Non-Wasm path: only allowed for declarative skills
+	if mode != "declarative" {
+		elapsed := time.Since(start)
+		execStatus = "failed"
+		e.emitAudit(ctx, al, audit.AuditEvent{
+			ID:        uuid.NewString(),
+			TenantID:  req.TenantID,
+			UserID:    req.UserID,
+			RequestID: req.RequestID,
+			Source:    audit.SourceExecutor,
+			Action:    "skills.execute",
+			Resource:  "skill/" + req.SkillID,
+			Outcome:   "failure",
+			Duration:  elapsed,
+			Metadata:  map[string]string{"error": fmt.Sprintf("skill requires %s execution but no binary available", mode), "execution_mode": mode},
+			Timestamp: time.Now(),
+		})
+		return &execution.ExecutionResult{
+			Status:   execution.StatusFailed,
+			Error:    fmt.Sprintf("skill requires %s execution but no binary available", mode),
+			Duration: elapsed,
+		}, fmt.Errorf("skill %s requires %s execution but no binary available", req.SkillID, mode)
+	}
+
+	// Declarative skill execution path (LLM-based)
 	result := &execution.ExecutionResult{
 		Status:   execution.StatusSuccess,
 		Duration: time.Since(start),
 	}
 
-	select {
-	case <-ctx.Done():
-		result.Status = execution.StatusTimeout
-		execStatus = "timeout"
-		result.Error = "execution timeout"
-		e.emitAudit(ctx, al, execution_logs.Event{
+	// Try LLM-based execution for declarative skills
+	e.mu.RLock()
+	tg := e.textGenerator
+	e.mu.RUnlock()
+
+	if tg != nil {
+		// Build prompt: use SKILL.md content if available, else generic
+		var prompt string
+		if p := skills.GetPrompt(s); p != "" {
+			prompt = strings.ReplaceAll(p, "{{.Input}}", string(req.Input))
+		} else {
+			slog.WarnContext(ctx, "declarative skill has no SKILL.md; using generic fallback",
+				"skill_id", req.SkillID)
+			prompt = fmt.Sprintf("You are performing the skill: %s.\n\n%s\n\nUser input:\n%s",
+				s.Name(), s.Description(), string(req.Input))
+		}
+		var output string
+		var err error
+		if req.TokenFn != nil {
+			if stg, ok := tg.(StreamingTextGenerator); ok {
+				output, err = stg.GenerateStreamText(ctx, prompt, req.TokenFn)
+			} else {
+				output, err = tg.GenerateText(ctx, prompt)
+				if err == nil && output != "" {
+					req.TokenFn(output)
+				}
+			}
+		} else {
+			output, err = tg.GenerateText(ctx, prompt)
+		}
+		if err != nil {
+			result.Status = execution.StatusFailed
+			execStatus = "failed"
+			result.Error = "LLM generation failed: " + err.Error()
+			e.emitAudit(ctx, al, audit.AuditEvent{
+				ID:        uuid.NewString(),
+				TenantID:  req.TenantID,
+				UserID:    req.UserID,
+				RequestID: req.RequestID,
+				Source:    audit.SourceExecutor,
+				Action:    "skills.execute",
+				Resource:  "skill/" + req.SkillID,
+				Outcome:   "failure",
+				Duration:  time.Since(start),
+				Metadata:  map[string]string{"error": err.Error(), "execution_mode": mode},
+				Timestamp: time.Now(),
+			})
+			return result, err
+		}
+		result.Output = []byte(output)
+		result.Duration = time.Since(start)
+	} else {
+		result.Status = execution.StatusFailed
+		result.Error = "declarative skill requires LLM but no text generator configured"
+		e.emitAudit(ctx, al, audit.AuditEvent{
 			ID:        uuid.NewString(),
 			TenantID:  req.TenantID,
 			UserID:    req.UserID,
 			RequestID: req.RequestID,
+			Source:    audit.SourceExecutor,
 			Action:    "skills.execute",
 			Resource:  "skill/" + req.SkillID,
-			Outcome:   "timeout",
-			Duration:  result.Duration,
-			Metadata:  map[string]string{"error": "execution timeout"},
+			Outcome:   "failure",
+			Duration:  time.Since(start),
+			Metadata:  map[string]string{"error": "no LLM configured", "execution_mode": mode},
 			Timestamp: time.Now(),
 		})
-		return result, execution.ErrExecutionTimeout
-	default:
-		// Try LLM-based execution for declarative skills
-		e.mu.RLock()
-		tg := e.textGenerator
-		e.mu.RUnlock()
-
-		if tg != nil {
-			// Build prompt from skill description + user input
-			prompt := fmt.Sprintf("You are performing the skill: %s.\n\n%s\n\nUser input:\n%s",
-				s.Name(), s.Description(), string(req.Input))
-			llmCtx, llmCancel := context.WithTimeout(context.Background(), 60*time.Second)
-			output, err := tg.GenerateText(llmCtx, prompt)
-			llmCancel()
-			if err != nil {
-				result.Status = execution.StatusFailed
-				execStatus = "failed"
-				result.Error = "LLM generation failed: " + err.Error()
-				e.emitAudit(ctx, al, execution_logs.Event{
-					ID:        uuid.NewString(),
-					TenantID:  req.TenantID,
-					UserID:    req.UserID,
-					RequestID: req.RequestID,
-					Action:    "skills.execute",
-					Resource:  "skill/" + req.SkillID,
-					Outcome:   "failure",
-					Duration:  time.Since(start),
-					Metadata:  map[string]string{"error": err.Error()},
-					Timestamp: time.Now(),
-				})
-				return result, err
-			}
-			result.Output = []byte(output)
-			result.Duration = time.Since(start)
-		} else {
-			// No LLM available — return the raw input as passthrough
-			result.Output = req.Input
-		}
+		return result, fmt.Errorf("declarative skill %q requires LLM but no text generator is configured", req.SkillID)
 	}
 
-	e.emitAudit(ctx, al, execution_logs.Event{
+	e.emitAudit(ctx, al, audit.AuditEvent{
 		ID:        uuid.NewString(),
 		TenantID:  req.TenantID,
 		UserID:    req.UserID,
 		RequestID: req.RequestID,
+		Source:    audit.SourceExecutor,
 		Action:    "skills.execute",
 		Resource:  "skill/" + req.SkillID,
 		Outcome:   "success",
 		Duration:  result.Duration,
+		Metadata:  map[string]string{"execution_mode": mode},
 		Timestamp: time.Now(),
 	})
 	return result, nil
@@ -513,25 +601,39 @@ var ErrNilExecutionPlan = errors.New("executor: nil execution plan")
 // ExecuteFromPlan executes a validated execution plan.
 //
 // This is the PREFERRED entry point for skill execution. It:
-//  1. Validates the plan is not nil and has a skill ID
-//  2. Serializes plan.Arguments to JSON
+//  1. Validates the plan is not nil and has at least one step
+//  2. Extracts the skill ID and arguments from the first step
 //  3. Calls the underlying Execute method
 //
 // Direct calls to Execute with raw bytes are discouraged.
-func (e *DefaultExecutor) ExecuteFromPlan(ctx context.Context, plan *agent.ExecutionPlan, meta agent.ExecutionMeta) (*execution.ExecutionResult, error) {
+func (e *DefaultExecutor) ExecuteFromPlan(ctx context.Context, plan *execution.ExecutionPlan, meta agent.ExecutionMeta) (*execution.ExecutionResult, error) {
 	if plan == nil {
 		return nil, ErrNilExecutionPlan
 	}
 
-	if err := plan.Validate(); err != nil {
-		return &execution.ExecutionResult{
-			Status: execution.StatusRejected,
-			Error:  err.Error(),
-		}, err
+	// Plan must be validated and frozen by the caller (agent or harness).
+	if plan.IsFrozen() {
+		if len(plan.Steps) == 0 {
+			return &execution.ExecutionResult{
+				Status: execution.StatusRejected,
+				Error:  "empty execution plan",
+			}, fmt.Errorf("executor: empty execution plan")
+		}
+	} else {
+		// Not frozen yet — validate and freeze (backward compat for direct callers)
+		if err := plan.Validate(); err != nil {
+			return &execution.ExecutionResult{
+				Status: execution.StatusRejected,
+				Error:  err.Error(),
+			}, err
+		}
 	}
 
+	// Extract first step's skill ID and arguments
+	step := plan.Steps[0]
+
 	// Serialize arguments to JSON
-	inputBytes, err := plan.ArgumentsJSON()
+	inputBytes, err := step.ArgumentsJSON()
 	if err != nil {
 		return &execution.ExecutionResult{
 			Status: execution.StatusFailed,
@@ -541,7 +643,7 @@ func (e *DefaultExecutor) ExecuteFromPlan(ctx context.Context, plan *agent.Execu
 
 	// Build ExecutionRequest from plan
 	req := execution.ExecutionRequest{
-		SkillID:   plan.SkillID,
+		SkillID:   step.Name,
 		Input:     inputBytes,
 		TenantID:  meta.TenantID,
 		UserID:    meta.UserID,
@@ -598,7 +700,7 @@ func (e *DefaultExecutor) Get(id string) (skills.Skill, error) {
 
 // emitAudit logs an audit event if the logger is non-nil.
 // Errors are silently ignored to avoid disrupting execution flow.
-func (e *DefaultExecutor) emitAudit(ctx context.Context, al execution_logs.AuditLogger, event execution_logs.Event) {
+func (e *DefaultExecutor) emitAudit(ctx context.Context, al execution_logs.AuditLogger, event audit.AuditEvent) {
 	if al == nil {
 		return
 	}

@@ -18,7 +18,7 @@ import (
 // ==================== Edge Case Tests ====================
 
 func TestChatEndpointEmptyBody(t *testing.T) {
-	handler := api.NewRouter(&mockAgent{})
+	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}})
 
 	req := httptest.NewRequest("POST", "/v1/chat", bytes.NewReader([]byte{}))
 	req.Header.Set("Content-Type", "application/json")
@@ -32,7 +32,7 @@ func TestChatEndpointEmptyBody(t *testing.T) {
 }
 
 func TestChatEndpointNullBody(t *testing.T) {
-	handler := api.NewRouter(&mockAgent{})
+	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}})
 
 	req := httptest.NewRequest("POST", "/v1/chat", bytes.NewReader([]byte("null")))
 	req.Header.Set("Content-Type", "application/json")
@@ -47,7 +47,7 @@ func TestChatEndpointNullBody(t *testing.T) {
 }
 
 func TestChatEndpointVeryLongMessage(t *testing.T) {
-	handler := api.NewRouter(&mockAgent{})
+	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}})
 
 	// 100KB message
 	longMessage := strings.Repeat("a", 100*1024)
@@ -67,7 +67,7 @@ func TestChatEndpointVeryLongMessage(t *testing.T) {
 }
 
 func TestChatEndpointSpecialCharacters(t *testing.T) {
-	handler := api.NewRouter(&mockAgent{})
+	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}})
 
 	tests := []string{
 		`{"message": "Hello 你好 مرحبا"}`,            // Unicode
@@ -91,7 +91,7 @@ func TestChatEndpointSpecialCharacters(t *testing.T) {
 }
 
 func TestChatEndpointMissingFields(t *testing.T) {
-	handler := api.NewRouter(&mockAgent{})
+	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}})
 
 	// Only message, no tenant/user/session
 	body := `{"message": "Hello"}`
@@ -108,7 +108,7 @@ func TestChatEndpointMissingFields(t *testing.T) {
 }
 
 func TestChatEndpointExtraFields(t *testing.T) {
-	handler := api.NewRouter(&mockAgent{})
+	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}})
 
 	// Extra unknown field - should be ignored
 	body := `{"message": "Hello", "unknown_field": "value", "skill_id": "hacked"}`
@@ -132,7 +132,7 @@ func TestChatEndpointExtraFields(t *testing.T) {
 }
 
 func TestHistoryEndpointInvalidSession(t *testing.T) {
-	handler := api.NewRouter(&mockAgent{})
+	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}})
 
 	// Very long session ID
 	req := httptest.NewRequest("GET", "/v1/sessions/"+strings.Repeat("x", 10000)+"/history", nil)
@@ -147,7 +147,7 @@ func TestHistoryEndpointInvalidSession(t *testing.T) {
 }
 
 func TestHistoryEndpointNoSession(t *testing.T) {
-	handler := api.NewRouter(&mockAgent{})
+	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}})
 
 	req := httptest.NewRequest("GET", "/v1/sessions//history", nil)
 	rr := httptest.NewRecorder()
@@ -167,7 +167,7 @@ func TestChatStreamEndpoint_SSEFormat(t *testing.T) {
 		SessionID: "s1",
 		Message:   "Hello from stream!",
 	}
-	handler := api.NewRouter(&mockAgent{response: mockResp})
+	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{response: mockResp}})
 
 	body := strings.NewReader(`{"message":"hi","session_id":"s1"}`)
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/stream", body)
@@ -188,8 +188,8 @@ func TestChatStreamEndpoint_SSEFormat(t *testing.T) {
 	if !strings.Contains(bodyStr, "event: done") {
 		t.Errorf("expected 'event: done' in SSE body, got: %s", bodyStr)
 	}
-	if !strings.Contains(bodyStr, "data: Hello from stream!") {
-		t.Errorf("expected 'data: Hello from stream!' in SSE body, got: %s", bodyStr)
+	if !strings.Contains(bodyStr, `"type":"token","content":"Hello from stream!"`) {
+		t.Errorf("expected token event with message content in SSE body, got: %s", bodyStr)
 	}
 	if !strings.Contains(bodyStr, `"session_id":"s1"`) {
 		t.Errorf("expected session_id in JSON SSE body, got: %s", bodyStr)
@@ -197,7 +197,7 @@ func TestChatStreamEndpoint_SSEFormat(t *testing.T) {
 }
 
 func TestChatStreamEndpoint_MethodNotAllowed(t *testing.T) {
-	handler := api.NewRouter(nil)
+	handler := api.NewRouter(api.RouterConfig{})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/chat/stream", nil)
 	rr := httptest.NewRecorder()
@@ -219,7 +219,7 @@ func TestChatStreamEndpoint_MethodNotAllowed(t *testing.T) {
 }
 
 func TestChatStreamEndpoint_InvalidBody(t *testing.T) {
-	handler := api.NewRouter(&mockAgent{})
+	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/stream", strings.NewReader("not json"))
 	req.Header.Set("Content-Type", "application/json")
@@ -232,7 +232,7 @@ func TestChatStreamEndpoint_InvalidBody(t *testing.T) {
 }
 
 func TestChatStreamEndpoint_AgentNotConfigured(t *testing.T) {
-	handler := api.NewRouter(nil)
+	handler := api.NewRouter(api.RouterConfig{})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/stream", strings.NewReader(`{"message":"hi"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -247,7 +247,7 @@ func TestChatStreamEndpoint_AgentNotConfigured(t *testing.T) {
 // ==================== Concurrency Tests ====================
 
 func TestConcurrentRequests(t *testing.T) {
-	handler := api.NewRouter(&mockAgent{})
+	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}})
 
 	const numRequests = 50
 	done := make(chan bool, numRequests)
@@ -287,7 +287,7 @@ func TestConcurrentRequests(t *testing.T) {
 
 func TestChatStreamEndpointUsesAuthenticatedIdentity(t *testing.T) {
 	ca := &captureAgent{}
-	router := api.NewRouter(ca)
+	router := api.NewRouter(api.RouterConfig{Agent: ca})
 
 	// Set auth middleware that injects a user into context
 	router.SetAuthMiddleware(func(next http.Handler) http.Handler {

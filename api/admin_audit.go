@@ -1,12 +1,54 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"time"
 
+	"github.com/openbotstack/openbotstack-core/audit"
 	"github.com/openbotstack/openbotstack-runtime/api/middleware"
+	rtAudit "github.com/openbotstack/openbotstack-runtime/audit"
+	"github.com/openbotstack/openbotstack-runtime/logging/execution_logs"
 )
+
+// AuditQuerier queries audit events through the structured audit layer.
+type AuditQuerier interface {
+	Query(ctx context.Context, filter execution_logs.QueryFilter) ([]audit.AuditEvent, error)
+	Count(ctx context.Context, filter execution_logs.QueryFilter) (int, error)
+}
+
+func parseAuditFilter(r *http.Request, defaultLimit int) execution_logs.QueryFilter {
+	filter := execution_logs.QueryFilter{
+		TenantID: r.URL.Query().Get("tenant_id"),
+		UserID:   r.URL.Query().Get("user_id"),
+		Action:   r.URL.Query().Get("action"),
+		Source:   audit.Source(r.URL.Query().Get("source")),
+	}
+
+	if q := r.URL.Query().Get("from"); q != "" {
+		if t, err := time.Parse(time.RFC3339, q); err == nil {
+			filter.From = t
+		}
+	}
+	if q := r.URL.Query().Get("to"); q != "" {
+		if t, err := time.Parse(time.RFC3339, q); err == nil {
+			filter.To = t
+		}
+	}
+
+	filter.Limit = defaultLimit
+	if q := r.URL.Query().Get("limit"); q != "" {
+		if n, err := strconv.Atoi(q); err == nil && n > 0 && n <= 1000 {
+			filter.Limit = n
+		}
+	}
+
+	return filter
+}
 
 func (ar *AdminRouter) handleAudit(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -14,70 +56,94 @@ func (ar *AdminRouter) handleAudit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := `SELECT id, tenant_id, user_id, action, resource, outcome, duration_ms, timestamp
-		FROM audit_logs WHERE 1=1`
-	args := []interface{}{}
-
-	if q := r.URL.Query().Get("tenant_id"); q != "" {
-		query += " AND tenant_id = ?"
-		args = append(args, q)
-	}
-	if q := r.URL.Query().Get("action"); q != "" {
-		query += " AND action = ?"
-		args = append(args, q)
-	}
-	if q := r.URL.Query().Get("user_id"); q != "" {
-		query += " AND user_id = ?"
-		args = append(args, q)
+	if ar.auditQuerier == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, ErrUnavailable, "audit not configured")
+		return
 	}
 
-	query += " ORDER BY timestamp DESC"
+	filter := parseAuditFilter(r, 100)
 
-	limit := 100
-	if q := r.URL.Query().Get("limit"); q != "" {
-		if n, err := fmt.Sscanf(q, "%d", &limit); err != nil || n != 1 || limit > 1000 {
-			limit = 100
-		}
+	if filter.TenantID == "" {
+		slog.WarnContext(r.Context(), "admin audit query without tenant_id filter",
+			"method", r.Method, "path", r.URL.Path)
 	}
-	query += fmt.Sprintf(" LIMIT %d", limit)
 
-	rows, err := ar.db.Query(query, args...)
+	events, err := ar.auditQuerier.Query(r.Context(), filter)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "admin handler error",
-			"method", r.Method, "path", r.URL.Path, "status", http.StatusInternalServerError, "error", err)
+		slog.ErrorContext(r.Context(), "admin audit query failed", "error", err)
 		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to query audit logs")
 		return
 	}
-	defer func() { _ = rows.Close() }()
 
-	type AuditEntry struct {
-		ID         string `json:"id"`
-		TenantID   string `json:"tenant_id"`
-		UserID     string `json:"user_id"`
-		Action     string `json:"action"`
-		Resource   string `json:"resource"`
-		Outcome    string `json:"outcome"`
-		DurationMs int    `json:"duration_ms"`
-		Timestamp  string `json:"timestamp"`
+	envelopes := make([]audit.AuditEnvelope, len(events))
+	for i, e := range events {
+		envelopes[i] = e.ToEnvelope()
+	}
+	if envelopes == nil {
+		envelopes = []audit.AuditEnvelope{}
 	}
 
-	var result []AuditEntry
-	for rows.Next() {
-		var e AuditEntry
-		if err := rows.Scan(&e.ID, &e.TenantID, &e.UserID, &e.Action, &e.Resource, &e.Outcome, &e.DurationMs, &e.Timestamp); err != nil {
+	// Support ?format=<format_id> for industry-specific mapping (e.g. FHIR).
+	if format := r.URL.Query().Get("format"); format != "" {
+		if ar.eventMappers == nil {
+			writeAPIError(w, http.StatusBadRequest, ErrInvalidRequest, fmt.Sprintf("unknown format: %q", format))
+			return
+		}
+		mapper, ok := ar.eventMappers[format]
+		if !ok {
+			writeAPIError(w, http.StatusBadRequest, ErrInvalidRequest, fmt.Sprintf("unknown format: %q", format))
+			return
+		}
+		mapped, err := mapper.MapBatch(envelopes)
+		if err != nil {
+			slog.ErrorContext(r.Context(), "audit format mapping failed", "format", format, "error", err)
+			writeAPIError(w, http.StatusInternalServerError, ErrInternal, "format mapping failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, mapped)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, envelopes)
+}
+
+// handleAuditExport streams audit events as JSON Lines.
+func (ar *AdminRouter) handleAuditExport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	if ar.auditQuerier == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, ErrUnavailable, "audit not configured")
+		return
+	}
+
+	filter := parseAuditFilter(r, 10000)
+
+	events, err := ar.auditQuerier.Query(r.Context(), filter)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "audit export query failed", "error", err)
+		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to query audit logs")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	w.Header().Set("Content-Disposition", "attachment; filename=audit_export.ndjson")
+
+	for _, e := range events {
+		env := e.ToEnvelope()
+		line, err := json.Marshal(env)
+		if err != nil {
+			slog.WarnContext(r.Context(), "audit export: skipping event with marshal error",
+				"event_id", env.EventID, "error", err)
 			continue
 		}
-		result = append(result, e)
+		fmt.Fprintf(w, "%s\n", line)
 	}
-	if result == nil {
-		result = []AuditEntry{}
-	}
-	writeJSON(w, http.StatusOK, result)
 }
 
 // HandleMe returns the authenticated user's identity and role.
-// This is a user-level endpoint — any authenticated user can call it.
-// It must NOT be behind RequireAdmin middleware.
 func HandleMe(w http.ResponseWriter, r *http.Request) {
 	user, ok := middleware.UserFromContext(r.Context())
 	if !ok || user == nil {
@@ -91,4 +157,56 @@ func HandleMe(w http.ResponseWriter, r *http.Request) {
 		"name":      user.Name,
 		"role":      role,
 	})
+}
+
+// handleAuditCompliance generates a compliance report from audit events.
+// Registered at GET /v1/admin/audit/compliance.
+func (ar *AdminRouter) handleAuditCompliance(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	if ar.complianceGenerator == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, ErrUnavailable, "compliance report not configured")
+		return
+	}
+
+	// Parse query parameters
+	scope := audit.ComplianceScope{
+		TenantID: r.URL.Query().Get("tenant_id"),
+		UserID:   r.URL.Query().Get("user_id"),
+	}
+
+	var period audit.TimeRange
+	if q := r.URL.Query().Get("from"); q != "" {
+		if t, err := time.Parse(time.RFC3339, q); err == nil {
+			period.From = t
+		}
+	}
+	if q := r.URL.Query().Get("to"); q != "" {
+		if t, err := time.Parse(time.RFC3339, q); err == nil {
+			period.To = t
+		}
+	}
+
+	// Default period: last 30 days if not specified
+	if period.From.IsZero() {
+		period.From = time.Now().AddDate(0, 0, -30)
+	}
+	if period.To.IsZero() {
+		period.To = time.Now()
+	}
+
+	report, err := ar.complianceGenerator.Generate(r.Context(), rtAudit.ComplianceReportRequest{
+		Scope:  scope,
+		Period: period,
+	})
+	if err != nil {
+		slog.ErrorContext(r.Context(), "compliance report generation failed", "error", err)
+		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to generate compliance report")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, report)
 }

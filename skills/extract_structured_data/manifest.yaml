@@ -1,0 +1,25 @@
+version: 1.0.0
+id: extract_structured_data
+name: Structured Data Extractor
+description: Extracts structured JSON data from unstructured text
+execution:
+  mode: declarative
+input_schema:
+  type: object
+  properties:
+    text:
+      type: string
+      description: The unstructured text to extract data from
+    schema:
+      type: object
+      description: Optional JSON schema describing the expected output structure
+  required:
+    - text
+output_schema:
+  type: object
+  properties:
+    data:
+      type: object
+      description: The extracted structured data as a JSON object
+permissions: []
+timeout: 120s

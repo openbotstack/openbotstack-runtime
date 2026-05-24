@@ -13,7 +13,10 @@ import (
 
 const encPrefix = "enc:"
 
-var errInvalidCiphertext = errors.New("crypto: invalid ciphertext")
+var (
+	errInvalidCiphertext = errors.New("crypto: invalid ciphertext")
+	errNotEncrypted      = errors.New("crypto: value is not encrypted")
+)
 
 // DeriveKey returns a 32-byte AES-256 key from the given passphrase.
 func DeriveKey(passphrase string) []byte {
@@ -60,16 +63,15 @@ func Encrypt(key []byte, plaintext string) (string, error) {
 	return encPrefix + base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
-// Decrypt decrypts an AES-GCM encrypted string. If the value has no "enc:"
-// prefix, it is returned as-is (backward compatibility with plaintext values).
-// Returns empty string unchanged.
+// Decrypt decrypts an AES-GCM encrypted string. Returns an error if the value
+// is not encrypted (missing "enc:" prefix).
 func Decrypt(key []byte, encrypted string) (string, error) {
 	if key == nil || encrypted == "" {
 		return encrypted, nil
 	}
 
 	if !IsEncrypted(encrypted) {
-		return encrypted, nil
+		return "", errNotEncrypted
 	}
 
 	data, err := base64.StdEncoding.DecodeString(encrypted[len(encPrefix):])

@@ -82,16 +82,24 @@ func parseYAMLLines(data []byte, meta map[string]string) {
 
 // FormatMessageBlock creates a markdown section for one message.
 // Output: "\n## [timestamp] role\n\ncontent\n"
-func FormatMessageBlock(role, content, timestamp string) string {
-	return fmt.Sprintf("\n## [%s] %s\n\n%s\n", timestamp, role, content)
+// If executionID is set, it's embedded as "<!-- exec:ID -->" before content.
+func FormatMessageBlock(role, content, timestamp string, executionID string) string {
+	header := fmt.Sprintf("\n## [%s] %s\n", timestamp, role)
+	if executionID != "" {
+		return header + fmt.Sprintf("\n<!-- exec:%s -->\n\n%s\n", executionID, content)
+	}
+	return header + fmt.Sprintf("\n%s\n", content)
 }
 
 // messageHeaderRe matches "## [timestamp] role" lines.
 var messageHeaderRe = regexp.MustCompile(`^## \[([^\]]+)\]\s+(\S+)`)
 
+// execCommentRe matches "<!-- exec:UUID -->" comments embedded in message blocks.
+var execCommentRe = regexp.MustCompile(`^<!-- exec:(.+) -->$`)
+
 // ParseMessageBlocks extracts messages from the body section.
 // Parses "## [timestamp] role" headings followed by content.
-// Returns []agent.Message.
+// Returns []agent.Message with optional ExecutionID from "<!-- exec:ID -->" comments.
 func ParseMessageBlocks(body []byte) []agent.Message {
 	if len(body) == 0 {
 		return []agent.Message{}
@@ -102,8 +110,9 @@ func ParseMessageBlocks(body []byte) []agent.Message {
 	var (
 		currentRole    string
 		currentContent strings.Builder
+		currentExecID  string
 		inMessage      bool
-		contentStarted bool // tracks whether we've seen non-blank content after a header
+		contentStarted bool
 	)
 
 	flush := func() {
@@ -112,10 +121,12 @@ func ParseMessageBlocks(body []byte) []agent.Message {
 		}
 		content := strings.TrimRight(currentContent.String(), "\n")
 		messages = append(messages, agent.Message{
-			Role:    currentRole,
-			Content: content,
+			Role:        currentRole,
+			Content:     content,
+			ExecutionID: currentExecID,
 		})
 		currentContent.Reset()
+		currentExecID = ""
 		inMessage = false
 		contentStarted = false
 	}
@@ -131,8 +142,12 @@ func ParseMessageBlocks(body []byte) []agent.Message {
 			continue
 		}
 		if inMessage {
+			// Check for execution ID comment
+			if execMatches := execCommentRe.FindStringSubmatch(line); execMatches != nil {
+				currentExecID = execMatches[1]
+				continue
+			}
 			if !contentStarted {
-				// Skip leading blank lines between header and content
 				if line == "" {
 					continue
 				}

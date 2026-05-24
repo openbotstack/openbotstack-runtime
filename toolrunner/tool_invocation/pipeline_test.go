@@ -22,6 +22,7 @@ func TestInvoke_HTTPTool(t *testing.T) {
 	// Create pipeline with wildcard allowlist
 	allowlist := wasm.NewHTTPAllowlist([]string{"*"})
 	client := wasm.NewSandboxedHTTPClient(allowlist, nil)
+	client.SetBlockPrivateIPs(false)
 	pipeline := NewToolInvocationPipeline(client, nil, 10*time.Second)
 
 	result, err := pipeline.Invoke(context.Background(), ToolInvocation{
@@ -51,6 +52,7 @@ func TestInvoke_HTTPTool_Blocked(t *testing.T) {
 	// Empty allowlist blocks everything
 	allowlist := wasm.NewHTTPAllowlist([]string{})
 	client := wasm.NewSandboxedHTTPClient(allowlist, nil)
+	client.SetBlockPrivateIPs(false)
 	pipeline := NewToolInvocationPipeline(client, nil, 10*time.Second)
 
 	_, err := pipeline.Invoke(context.Background(), ToolInvocation{
@@ -137,6 +139,7 @@ func TestWireHTTPFetch(t *testing.T) {
 
 	allowlist := wasm.NewHTTPAllowlist([]string{"*"})
 	client := wasm.NewSandboxedHTTPClient(allowlist, nil)
+	client.SetBlockPrivateIPs(false)
 	pipeline := NewToolInvocationPipeline(client, nil, 10*time.Second)
 
 	hf := &wasm.HostFunctions{}

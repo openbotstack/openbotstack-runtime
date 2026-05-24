@@ -62,8 +62,8 @@ RUN apk --no-cache add ca-certificates tzdata
 COPY --from=backend /openbotstack /usr/local/bin/openbotstack
 COPY openbotstack-runtime/config.yaml /etc/openbotstack/config.yaml
 
-RUN mkdir -p /app/data /app/examples
-COPY --from=backend /build/openbotstack-runtime/examples/skills/ /app/examples/skills/
+RUN mkdir -p /app/data /app/skills
+COPY --from=backend /build/openbotstack-runtime/skills/ /app/skills/
 
 EXPOSE 8080
 VOLUME ["/app/data", "/app/openbotstack.db"]

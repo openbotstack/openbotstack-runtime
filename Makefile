@@ -19,7 +19,7 @@ LDFLAGS    := -s -w \
               -X main.buildTime=$(BUILD_TIME)
 
 PLATFORMS  := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
-GO_SKILLS  := hello-world tax-calculator wordcount math-add sentiment meeting-summarize
+GO_SKILLS  :=
 
 # ============================================================================
 # Primary targets
@@ -88,8 +88,8 @@ test-wasm-e2e: ## Run Wasm E2E tests (requires compiled skills)
 test-executor: ## Run executor tests only
 	$(GO) test -v ./executor/...
 
-test-skills: ## Run skill example tests
-	$(GO) test -v ./examples/skills/...
+test-skills: ## Run system skill tests
+	$(GO) test -v ./skills/...
 
 test-integration: ## Run integration tests
 	$(GO) test -v -timeout 120s ./integration/...
@@ -166,12 +166,8 @@ tools: ## Install dev tools (golangci-lint, gofumpt, govulncheck, goreleaser)
 # Skills
 # ============================================================================
 
-build-skills: ## Build all Go skill Wasm modules (requires Go 1.26+)
-	@set -e; for skill in $(GO_SKILLS); do \
-		echo "Building $$skill..."; \
-		(cd examples/skills/$$skill && GOOS=wasip1 GOARCH=wasm $(GO) build -o main.wasm .); \
-		echo "  OK: examples/skills/$$skill/main.wasm"; \
-	done
+build-skills: ## Build Go Wasm skills (if any in skills/ directory)
+	@echo "System skills are declarative — no Wasm build needed."
 
 # ============================================================================
 # Frontend

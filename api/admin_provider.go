@@ -290,8 +290,9 @@ func (ar *AdminRouter) handleProviderTest(w http.ResponseWriter, r *http.Request
 
 	httpReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, endpoint, nil)
 	if err != nil {
+		slog.ErrorContext(r.Context(), "provider test: request creation failed", "error", err)
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"success": false, "message": fmt.Sprintf("failed to create request: %v", err),
+			"success": false, "message": "failed to create connection test request",
 		})
 		return
 	}
@@ -302,9 +303,10 @@ func (ar *AdminRouter) handleProviderTest(w http.ResponseWriter, r *http.Request
 	latency := time.Since(start)
 
 	if err != nil {
+		slog.ErrorContext(r.Context(), "provider test: connection failed", "error", err, "latency_ms", latency.Milliseconds())
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"success":    false,
-			"message":    fmt.Sprintf("connection failed: %v", err),
+			"message":    "connection test failed",
 			"latency_ms": latency.Milliseconds(),
 		})
 		return

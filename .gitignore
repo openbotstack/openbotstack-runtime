@@ -43,7 +43,22 @@ openbotstack
 # Data directory
 data/
 
-# Node.js (Playwright E2E test artifacts)
+# Node.js
 node_modules/
 package-lock.json
-e2e_browser_test.js
+
+# Rust/Wasm build artifacts (Rust-based skills)
+target/
+
+# Test artifacts
+*.png
+planner_test/
+
+# macOS
+.DS_Store
+
+# Dev runtime data
+openbotstack.db
+openbotstack.db-*
+data/
+openbotstack

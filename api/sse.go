@@ -62,14 +62,29 @@ type SSEHandler struct {
 	flusher http.Flusher
 }
 
-// NewSSEHandler creates a new SSE handler.
+// NewSSEHandler creates a new SSE handler and immediately sends the response
+// headers plus an SSE comment to force the TCP connection to flush.
+// This ensures the client's ReadableStream is ready to receive events
+// before any server-side processing begins.
 func NewSSEHandler(w http.ResponseWriter) *SSEHandler {
 	// Set SSE headers
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	// Write response headers
+	w.WriteHeader(http.StatusOK)
+
+	// Send an SSE comment to force the HTTP response to flush to the network.
+	// Go's net/http may buffer the headers until the first Write call.
+	// SSE comments (lines starting with ':') are ignored by clients per spec.
+	_, _ = fmt.Fprint(w, ":ok\n\n")
 
 	flusher, _ := w.(http.Flusher)
+	if flusher != nil {
+		flusher.Flush()
+	}
 
 	return &SSEHandler{
 		w:       w,

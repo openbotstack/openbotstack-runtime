@@ -15,7 +15,7 @@ docker compose -f openbotstack-runtime/docker-compose.yml up -d
 open http://localhost:8080/ui/
 ```
 
-On first run, OpenBotStack seeds a default admin API key (printed to stdout once). See [Deployment Guide](../openbotstack-docs/guides/DEPLOYMENT.md) for details.
+On first run, OpenBotStack seeds a default admin API key (printed to stdout once). See the [Deployment Guide](https://github.com/openbotstack/openbotstack-docs/blob/main/guides/DEPLOYMENT.md) for details.
 
 ## Features
 
@@ -23,7 +23,7 @@ On first run, OpenBotStack seeds a default admin API key (printed to stdout once
 |---------|-------------|
 | Chat API | REST + SSE streaming (`/v1/chat`, `/v1/chat/stream`) |
 | Wasm Skills | Go wasip1 command mode via wazero (no TinyGo needed) |
-| Dual Loop Agent | Bounded outer/inner loop kernel (enable with `OBS_AGENT_MODE=dual_loop`) |
+| Harness Agent | Bounded execution with reasoning loop (enable with `OBS_AGENT_MODE=dual_loop`) |
 | Multi-Tenant | Tenant isolation with API key and JWT auth |
 | Admin API | Full CRUD for tenants, users, API keys, providers, skills |
 | Admin Console | Built-in web UI at `/admin/` for provider management |
@@ -46,9 +46,9 @@ On first run, OpenBotStack seeds a default admin API key (printed to stdout once
 └────────────────────────┬─────────────────────────────┘
                          │
 ┌────────────────────────┴─────────────────────────────┐
-│  Agent / Dual Loop                                   │
-│  Outer Loop (task orchestration)                      │
-│    └── Inner Loop (reasoning + tool calls, bounded)   │
+│  Agent / Harness                                     │
+│  ExecutionHarness (task orchestration)                │
+│    └── ReasoningLoop (LLM reasoning, bounded)        │
 └────────────────────────┬─────────────────────────────┘
                          │
 ┌────────────────────────┴─────────────────────────────┐
@@ -62,7 +62,7 @@ On first run, OpenBotStack seeds a default admin API key (printed to stdout once
 ## Testing
 
 ```bash
-make test          # All tests (440+)
+make test          # All tests (890+)
 make test-race     # With race detector
 make test-cover    # With coverage report
 make test-wasm     # Wasm runtime only
@@ -71,7 +71,7 @@ make test-skills   # Skill examples
 make check         # lint + test (pre-commit)
 ```
 
-See [Testing Guide](../openbotstack-docs/guides/TESTING.md) for details.
+See the [Testing Guide](https://github.com/openbotstack/openbotstack-docs/blob/main/guides/TESTING.md) for details.
 
 ## Skill Examples
 
@@ -81,11 +81,11 @@ See [Testing Guide](../openbotstack-docs/guides/TESTING.md) for details.
 | math-add | Deterministic | Math operations |
 | wordcount | Deterministic | Word counting |
 | tax-calculator | Deterministic | Tax calculation |
-| sentiment | LLM-Assisted | Sentiment analysis |
+| sentiment | Declarative | Sentiment analysis |
 | summarize | Declarative | Text summarization |
 | meeting-summarize | Declarative | Meeting notes |
 
-All examples in `examples/skills/`. See [Skill Development Guide](../openbotstack-docs/guides/SKILL_DEVELOPMENT_GUIDE.md).
+System-default skills in `skills/`. Example skills in `openbotstack-apps/examples/`. See the [Skill Development Guide](https://github.com/openbotstack/openbotstack-docs/blob/main/guides/SKILL_DEVELOPMENT_GUIDE.md).
 
 ## Configuration
 
@@ -101,7 +101,7 @@ OBS_LLM_MODEL=Qwen3.6-35B \
 ./openbotstack
 ```
 
-See [Configuration Reference](../openbotstack-docs/config/README.md) for all options.
+See the [Configuration Reference](https://github.com/openbotstack/openbotstack-docs/blob/main/config/README.md) for all options.
 
 ## HTTP API
 
@@ -120,17 +120,18 @@ See [Configuration Reference](../openbotstack-docs/config/README.md) for all opt
 | `GET /health`, `/healthz`, `/readyz` | Health checks |
 | `GET /metrics` | Prometheus metrics |
 
-Full API reference: [docs/api/README.md](../openbotstack-docs/api/README.md)
+Full API reference: [openbotstack-docs/api/README.md](https://github.com/openbotstack/openbotstack-docs/blob/main/api/README.md)
 
 ## Documentation
 
 | Document | Location |
 |----------|----------|
-| Deployment Guide | [openbotstack-docs/guides/DEPLOYMENT.md](../openbotstack-docs/guides/DEPLOYMENT.md) |
-| API Reference | [openbotstack-docs/api/README.md](../openbotstack-docs/api/README.md) |
-| Operations Manual | [openbotstack-docs/guides/OPERATIONS.md](../openbotstack-docs/guides/OPERATIONS.md) |
-| Configuration | [openbotstack-docs/config/README.md](../openbotstack-docs/config/README.md) |
-| Dual Loop Audit | [docs/audit-dual-loop.md](docs/audit-dual-loop.md) |
+| Project Index | [openbotstack-docs/README.md](https://github.com/openbotstack/openbotstack-docs#readme) |
+| Deployment Guide | [DEPLOYMENT.md](https://github.com/openbotstack/openbotstack-docs/blob/main/guides/DEPLOYMENT.md) |
+| API Reference | [api/README.md](https://github.com/openbotstack/openbotstack-docs/blob/main/api/README.md) |
+| Operations Manual | [OPERATIONS.md](https://github.com/openbotstack/openbotstack-docs/blob/main/guides/OPERATIONS.md) |
+| Configuration | [config/README.md](https://github.com/openbotstack/openbotstack-docs/blob/main/config/README.md) |
+| Harness Audit | [audit-dual-loop.md](docs/audit-dual-loop.md) |
 
 ## Contract
 
@@ -138,4 +139,4 @@ See [AI_CONTRACT.md](./AI_CONTRACT.md) for architectural boundaries.
 
 ## License
 
-MIT
+Apache 2.0 — see [LICENSE](./LICENSE)

@@ -27,7 +27,7 @@ func (m *mockAgent) HandleMessage(ctx context.Context, req agent.MessageRequest)
 }
 
 func newTestRouter() *api.Router {
-	return api.NewRouter(&mockAgent{})
+	return api.NewRouter(api.RouterConfig{Agent: &mockAgent{}})
 }
 
 func TestHealthEndpoint(t *testing.T) {

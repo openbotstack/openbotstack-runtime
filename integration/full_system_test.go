@@ -94,14 +94,20 @@ func TestFullSystem(t *testing.T) {
 			lastMsg = req.Messages[len(req.Messages)-1].Content
 		}
 
-		// Extract user request part only to avoid matching keywords in skill descriptions
-		// Planner format: "User request: <msg>\n\n"
+		// Extract user request part only to avoid matching keywords in skill descriptions.
+		// Planner format: "<user_request>\n<msg>\n</user_request>"
 		var userRequest string
-		if idx := strings.Index(lastMsg, "User request:"); idx != -1 {
+		if startTag := strings.Index(lastMsg, "<user_request>"); startTag != -1 {
+			contentStart := startTag + len("<user_request>")
+			remainder := lastMsg[contentStart:]
+			if endTag := strings.Index(remainder, "</user_request>"); endTag != -1 {
+				userRequest = strings.TrimSpace(remainder[:endTag])
+			} else {
+				userRequest = remainder
+			}
+		} else if idx := strings.Index(lastMsg, "User request:"); idx != -1 {
 			contentStart := idx + len("User request:")
 			remainder := lastMsg[contentStart:]
-
-			// Find the end of the user message (next double newline or end of string)
 			if endIdx := strings.Index(remainder, "\n\n"); endIdx != -1 {
 				userRequest = remainder[:endIdx]
 			} else {
@@ -125,19 +131,19 @@ func TestFullSystem(t *testing.T) {
 		if strings.Contains(msgLower, "summarize") {
 			plan = execution.ExecutionPlan{
 				AssistantID: "default",
-				Steps:       []execution.ExecutionStep{makeStep("core/summarize", map[string]any{"text": "some text", "max_length": 100})},
+				Steps:       []execution.ExecutionStep{makeStep("summarize", map[string]any{"text": "some text", "max_length": 100})},
 				Reasoning:   "User wants summary",
 			}
 		} else if strings.Contains(msgLower, "tax") {
 			plan = execution.ExecutionPlan{
 				AssistantID: "default",
-				Steps:       []execution.ExecutionStep{makeStep("core/tax-calculator", map[string]any{"income": 50000, "currency": "USD"})},
+				Steps:       []execution.ExecutionStep{makeStep("tax-calculator", map[string]any{"amount": 50000, "region": "US", "category": "goods"})},
 				Reasoning:   "User asked for tax calc",
 			}
 		} else {
 			plan = execution.ExecutionPlan{
 				AssistantID: "default",
-				Steps:       []execution.ExecutionStep{makeStep("core/tax-calculator", map[string]any{"income": 50000, "currency": "USD"})},
+				Steps:       []execution.ExecutionStep{makeStep("tax-calculator", map[string]any{"amount": 50000, "region": "US", "category": "goods"})},
 				Reasoning:   "Fallback plan",
 			}
 		}
@@ -239,7 +245,7 @@ func runTestCases(t *testing.T) {
 				Message: "Hello world",
 			},
 			wantStatus: 200,
-			wantSkill:  "core/tax-calculator",
+			wantSkill:  "tax-calculator",
 		},
 		{
 			name: "2. Summarize Intent",
@@ -248,7 +254,7 @@ func runTestCases(t *testing.T) {
 				Message: "Please summarize this",
 			},
 			wantStatus: 200,
-			wantSkill:  "core/summarize",
+			wantSkill:  "summarize",
 		},
 		{
 			name: "3. Tax Intent",
@@ -257,7 +263,7 @@ func runTestCases(t *testing.T) {
 				Message: "Calculate tax",
 			},
 			wantStatus: 200,
-			wantSkill:  "core/tax-calculator",
+			wantSkill:  "tax-calculator",
 		},
 		{
 			name:       "4. UI Redirect",

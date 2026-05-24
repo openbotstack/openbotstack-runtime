@@ -3,8 +3,6 @@ package memory
 import (
 	"context"
 	"fmt"
-	"log/slog"
-	"sort"
 	"strings"
 	"time"
 
@@ -16,21 +14,19 @@ import (
 var _ abstraction.MemoryManager = (*MarkdownMemoryBridge)(nil)
 
 // MarkdownMemoryBridge wraps MarkdownMemoryStore to implement abstraction.MemoryManager.
-// When vectorStore + embeddingSvc are configured, RetrieveSimilar uses semantic vector search
-// and falls back to keyword matching on failure. Without vector config, pure keyword matching.
-// This is the markdown-first bridge between core's memory abstraction and runtime's storage.
+// Retrieval is delegated to a pluggable RetrievalStrategy: KeywordStrategy by default,
+// or VectorFirstStrategy when vector search is configured.
 //
 // Design note: RetrieveByTag falls back to content-substring matching because the
 // underlying MarkdownMemoryStore does not store structured tags per message.
-// Full tag-based retrieval requires the vector layer (Phase 3.1).
 type MarkdownMemoryBridge struct {
-	store        *MarkdownMemoryStore
-	summarizer   *ConversationSummarizer
-	vectorStore  VectorStore       // optional: nil = keyword matching only
-	embeddingSvc *EmbeddingService // optional: nil = keyword matching only
+	store             *MarkdownMemoryStore
+	summarizer        *ConversationSummarizer
+	retrievalStrategy RetrievalStrategy
 }
 
 // NewMarkdownMemoryBridge creates a bridge from MarkdownMemoryStore to MemoryManager.
+// Uses keyword-only retrieval by default. Call SetRetrievalStrategy to override.
 func NewMarkdownMemoryBridge(store *MarkdownMemoryStore, summarizer *ConversationSummarizer) *MarkdownMemoryBridge {
 	return &MarkdownMemoryBridge{
 		store:      store,
@@ -38,11 +34,8 @@ func NewMarkdownMemoryBridge(store *MarkdownMemoryStore, summarizer *Conversatio
 	}
 }
 
-// SetVectorStore configures an optional vector store for semantic search.
-func (b *MarkdownMemoryBridge) SetVectorStore(vs VectorStore) { b.vectorStore = vs }
-
-// SetEmbeddingService configures an optional embedding service for vector generation.
-func (b *MarkdownMemoryBridge) SetEmbeddingService(es *EmbeddingService) { b.embeddingSvc = es }
+// SetRetrievalStrategy configures the retrieval strategy (e.g., VectorFirstStrategy).
+func (b *MarkdownMemoryBridge) SetRetrievalStrategy(rs RetrievalStrategy) { b.retrievalStrategy = rs }
 
 // memoryBridgeKey is the context key for MemoryScope.
 type memoryBridgeKey struct{}
@@ -117,128 +110,20 @@ func (b *MarkdownMemoryBridge) StoreLongTerm(ctx context.Context, entry abstract
 	return b.store.StoreSummary(ctx, tenantID, userID, sessionID, entry.Content)
 }
 
-// RetrieveSimilar performs semantic search against the vector store if configured,
-// falling back to keyword-based matching against session history.
+// RetrieveSimilar delegates to the configured RetrievalStrategy, defaulting to keyword.
 func (b *MarkdownMemoryBridge) RetrieveSimilar(ctx context.Context, query string, limit int) ([]abstraction.MemoryEntry, error) {
 	if b.store == nil {
 		return nil, nil
 	}
-
 	scope := memoryScopeFromContext(ctx)
 	if scope.TenantID == "" || scope.UserID == "" || scope.SessionID == "" {
 		return nil, nil
 	}
-
-	// Try vector semantic search first (if configured)
-	if b.vectorStore != nil && b.embeddingSvc != nil {
-		results, err := b.vectorSearch(ctx, scope, query, limit)
-		if err == nil && len(results) > 0 {
-			return results, nil
-		}
-		if err != nil {
-			slog.WarnContext(ctx, "memory bridge: vector search failed, falling back to keyword",
-				"error", err)
-		}
+	strategy := b.retrievalStrategy
+	if strategy == nil {
+		strategy = &KeywordStrategy{store: b.store}
 	}
-
-	// Fallback: keyword matching
-	return b.keywordSearch(ctx, scope, query, limit)
-}
-
-// vectorSearch performs semantic search via embedding + vector store.
-func (b *MarkdownMemoryBridge) vectorSearch(ctx context.Context, scope MemoryScope, query string, limit int) ([]abstraction.MemoryEntry, error) {
-	embedding, err := b.embeddingSvc.Embed(ctx, query)
-	if err != nil {
-		return nil, fmt.Errorf("embed query: %w", err)
-	}
-
-	results, err := b.vectorStore.Search(ctx, embedding, SearchOptions{
-		TenantID: scope.TenantID,
-		UserID:   scope.UserID,
-		Limit:    limit,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("vector search: %w", err)
-	}
-
-	entries := make([]abstraction.MemoryEntry, 0, len(results))
-	for _, r := range results {
-		entries = append(entries, abstraction.MemoryEntry{
-			ID:        r.ID,
-			Content:   r.Content,
-			Embedding: r.Embedding,
-			Tags:      []string{"role:" + r.Role},
-			Metadata: map[string]string{
-				"tenant_id":  r.TenantID,
-				"user_id":    r.UserID,
-				"session_id": r.SessionID,
-				"score":      fmt.Sprintf("%.4f", r.Score),
-			},
-		})
-	}
-	return entries, nil
-}
-
-// keywordSearch performs keyword-based matching against session history.
-func (b *MarkdownMemoryBridge) keywordSearch(ctx context.Context, scope MemoryScope, query string, limit int) ([]abstraction.MemoryEntry, error) {
-
-	// Get all history for this session
-	msgs, err := b.store.GetHistory(ctx, scope.TenantID, scope.UserID, scope.SessionID, 0)
-	if err != nil {
-		slog.WarnContext(ctx, "memory bridge: failed to get history for similar retrieval",
-			"error", err)
-		return nil, abstraction.ErrRetrieveFailed
-	}
-
-	if len(msgs) == 0 {
-		return nil, nil
-	}
-
-	// Tokenize query
-	tokens := tokenize(query)
-	if len(tokens) == 0 {
-		return nil, nil
-	}
-
-	// Score each message by keyword overlap
-	type scored struct {
-		msg   agent.Message
-		score int
-	}
-	var candidates []scored
-	for _, m := range msgs {
-		s := score(tokens, m.Content)
-		if s > 0 {
-			candidates = append(candidates, scored{msg: m, score: s})
-		}
-	}
-
-	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].score > candidates[j].score
-	})
-
-	if limit <= 0 {
-		limit = 10
-	}
-	if limit > len(candidates) {
-		limit = len(candidates)
-	}
-
-	results := make([]abstraction.MemoryEntry, 0, limit)
-	for i := 0; i < limit; i++ {
-		results = append(results, abstraction.MemoryEntry{
-			ID:      fmt.Sprintf("msg_%d", i),
-			Content: candidates[i].msg.Content,
-			Tags:    []string{"role:" + candidates[i].msg.Role},
-			Metadata: map[string]string{
-				"tenant_id":  scope.TenantID,
-				"user_id":    scope.UserID,
-				"session_id": scope.SessionID,
-			},
-		})
-	}
-
-	return results, nil
+	return strategy.Search(ctx, scope, query, limit)
 }
 
 // RetrieveByTag performs a best-effort scan of session history for tag matches.

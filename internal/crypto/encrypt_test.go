@@ -51,16 +51,13 @@ func TestEncrypt_EmptyValue(t *testing.T) {
 	}
 }
 
-func TestDecrypt_PlaintextPassthrough(t *testing.T) {
+func TestDecrypt_PlaintextRejected(t *testing.T) {
 	key := DeriveKey("test")
 	plaintext := "sk-plain-key"
 
-	result, err := Decrypt(key, plaintext)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result != plaintext {
-		t.Errorf("plaintext without prefix should pass through, got %q", result)
+	_, err := Decrypt(key, plaintext)
+	if err == nil {
+		t.Fatal("expected error for non-encrypted value, got nil")
 	}
 }
 

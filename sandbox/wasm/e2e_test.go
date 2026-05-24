@@ -16,9 +16,9 @@ import (
 // loadSkillWasm reads a compiled Wasm module from the examples directory.
 func loadSkillWasm(t *testing.T, skillName string) []byte {
 	t.Helper()
-	wasmPath := filepath.Join("..", "..", "examples", "skills", skillName, "main.wasm")
+	wasmPath := filepath.Join("..", "..", "skills", skillName, "main.wasm")
 	if _, err := os.Stat(wasmPath); os.IsNotExist(err) {
-		t.Skipf("%s/main.wasm not found - run 'GOOS=wasip1 GOARCH=wasm go build -o main.wasm .' in examples/skills/%s/", skillName, skillName)
+		t.Skipf("%s/main.wasm not found - run 'GOOS=wasip1 GOARCH=wasm go build -o main.wasm .' in skills/%s/", skillName, skillName)
 	}
 	wasmBytes, err := os.ReadFile(wasmPath)
 	if err != nil {

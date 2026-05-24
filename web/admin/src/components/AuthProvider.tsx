@@ -37,6 +37,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     validateKey(key)
       .then(me => {
         if (me.role !== 'admin') {
+          setRole(me.role)
           setForbidden(true)
         } else {
           storeAuth(key, me.role)

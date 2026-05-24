@@ -44,12 +44,31 @@ type Runtime struct {
 	engine wazero.Runtime
 	mu     sync.Mutex
 	hf     *HostFunctions
+	limits Limits
 }
 
 // NewRuntime creates a new Wasm runtime.
 func NewRuntime() (*Runtime, error) {
+	return NewRuntimeWithLimits(DefaultLimits())
+}
+
+// NewRuntimeWithLimits creates a new Wasm runtime with custom resource limits.
+func NewRuntimeWithLimits(limits Limits) (*Runtime, error) {
 	ctx := context.Background()
-	engine := wazero.NewRuntime(ctx)
+
+	// Enforce memory limit at the runtime level (pages = bytes / 64KB).
+	var rtConfig wazero.RuntimeConfig
+	if limits.MaxMemoryBytes > 0 {
+		pages := uint32(limits.MaxMemoryBytes / 65536)
+		if pages < 1 {
+			pages = 1
+		}
+		rtConfig = wazero.NewRuntimeConfig().WithMemoryLimitPages(pages)
+	} else {
+		rtConfig = wazero.NewRuntimeConfig()
+	}
+
+	engine := wazero.NewRuntimeWithConfig(ctx, rtConfig)
 
 	// Instantiate WASI
 	if _, err := wasi_snapshot_preview1.Instantiate(ctx, engine); err != nil {
@@ -59,6 +78,7 @@ func NewRuntime() (*Runtime, error) {
 
 	return &Runtime{
 		engine: engine,
+		limits: limits,
 	}, nil
 }
 
@@ -136,6 +156,7 @@ func (r *Runtime) Execute(ctx context.Context, wasmBytes []byte, input []byte, l
 	// WithStartFunctions() disables the default auto-call of _start during
 	// InstantiateModule, which prevents clock_time_get nil pointer crashes
 	// with Go wasip1 runtime initialization.
+	// Memory limit is enforced at the Runtime level via WithMemoryLimitPages.
 	config := wazero.NewModuleConfig().
 		WithName("skill").
 		WithStdin(stdinReader).

@@ -4,23 +4,25 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"github.com/openbotstack/openbotstack-core/audit"
 )
 
 // InMemoryAuditLogger implements AuditLogger using an in-memory slice.
 type InMemoryAuditLogger struct {
 	mu     sync.RWMutex
-	events []Event
+	events []audit.AuditEvent
 }
 
 // NewInMemoryAuditLogger creates a new in-memory audit logger.
 func NewInMemoryAuditLogger() *InMemoryAuditLogger {
 	return &InMemoryAuditLogger{
-		events: make([]Event, 0),
+		events: make([]audit.AuditEvent, 0),
 	}
 }
 
 // Log records an audit event.
-func (l *InMemoryAuditLogger) Log(ctx context.Context, event Event) error {
+func (l *InMemoryAuditLogger) Log(ctx context.Context, event audit.AuditEvent) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -33,11 +35,11 @@ func (l *InMemoryAuditLogger) Log(ctx context.Context, event Event) error {
 }
 
 // Query retrieves audit events matching the filter.
-func (l *InMemoryAuditLogger) Query(ctx context.Context, filter QueryFilter) ([]Event, error) {
+func (l *InMemoryAuditLogger) Query(ctx context.Context, filter QueryFilter) ([]audit.AuditEvent, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
-	result := make([]Event, 0)
+	result := make([]audit.AuditEvent, 0)
 	for _, e := range l.events {
 		if l.matches(e, filter) {
 			result = append(result, e)
@@ -67,7 +69,7 @@ func (l *InMemoryAuditLogger) Count(ctx context.Context, filter QueryFilter) (in
 }
 
 // matches checks if an event matches the filter.
-func (l *InMemoryAuditLogger) matches(e Event, f QueryFilter) bool {
+func (l *InMemoryAuditLogger) matches(e audit.AuditEvent, f QueryFilter) bool {
 	if f.TenantID != "" && e.TenantID != f.TenantID {
 		return false
 	}
@@ -78,6 +80,9 @@ func (l *InMemoryAuditLogger) matches(e Event, f QueryFilter) bool {
 		return false
 	}
 	if f.Action != "" && e.Action != f.Action {
+		return false
+	}
+	if f.Source != "" && e.Source != f.Source {
 		return false
 	}
 	if !f.From.IsZero() && e.Timestamp.Before(f.From) {

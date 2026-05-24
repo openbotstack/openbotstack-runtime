@@ -34,7 +34,7 @@ func (m *mockHealthChecker) Check(ctx context.Context) ComponentHealth {
 }
 
 func TestHealthzEndpoint(t *testing.T) {
-	router := NewRouter(nil)
+	router := NewRouter(RouterConfig{})
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -52,7 +52,7 @@ func TestHealthzEndpoint(t *testing.T) {
 }
 
 func TestReadyzAllHealthy(t *testing.T) {
-	router := NewRouter(nil)
+	router := NewRouter(RouterConfig{})
 	router.SetBuildInfo(BuildInfo{Version: "1.0", Commit: "abc", Branch: "main", BuildTime: "2026-01-01"})
 	router.SetHealthCheckers(
 		&mockHealthChecker{name: "storage", status: "healthy"},
@@ -79,7 +79,7 @@ func TestReadyzAllHealthy(t *testing.T) {
 }
 
 func TestReadyzUnhealthyComponent(t *testing.T) {
-	router := NewRouter(nil)
+	router := NewRouter(RouterConfig{})
 	router.SetBuildInfo(BuildInfo{Version: "1.0"})
 	router.SetHealthCheckers(
 		&mockHealthChecker{name: "storage", status: "healthy"},
@@ -103,7 +103,7 @@ func TestReadyzUnhealthyComponent(t *testing.T) {
 }
 
 func TestReadyzNoCheckers(t *testing.T) {
-	router := NewRouter(nil)
+	router := NewRouter(RouterConfig{})
 	router.SetBuildInfo(BuildInfo{Version: "dev"})
 
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
@@ -116,7 +116,7 @@ func TestReadyzNoCheckers(t *testing.T) {
 }
 
 func TestVersionEndpoint(t *testing.T) {
-	router := NewRouter(nil)
+	router := NewRouter(RouterConfig{})
 	router.SetBuildInfo(BuildInfo{
 		Version:   "1.0.0",
 		Commit:    "abc123",
@@ -144,7 +144,7 @@ func TestVersionEndpoint(t *testing.T) {
 }
 
 func TestVersionEndpointDevDefaults(t *testing.T) {
-	router := NewRouter(nil)
+	router := NewRouter(RouterConfig{})
 	router.SetBuildInfo(BuildInfo{})
 
 	req := httptest.NewRequest(http.MethodGet, "/version", nil)
@@ -164,7 +164,7 @@ func TestVersionEndpointDevDefaults(t *testing.T) {
 }
 
 func TestReadyzCheckerTimeout(t *testing.T) {
-	router := NewRouter(nil)
+	router := NewRouter(RouterConfig{})
 	router.SetBuildInfo(BuildInfo{Version: "1.0"})
 	router.SetHealthCheckers(
 		&mockHealthChecker{name: "slow", status: "healthy", delay: 10 * time.Second},

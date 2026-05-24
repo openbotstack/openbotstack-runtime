@@ -107,7 +107,104 @@ export async function deleteSession(sessionId: string): Promise<void> {
   await apiCall<void>(`/v1/sessions/${sessionId}`, { method: 'DELETE' })
 }
 
-export async function getSessionHistory(sessionId: string): Promise<{ role: string; content: string }[]> {
-  const data = await apiCall<{ session_id: string; messages: { role: string; content: string }[] }>(`/v1/sessions/${sessionId}/history`)
+export async function getSessionHistory(sessionId: string): Promise<{ role: string; content: string; execution_id?: string }[]> {
+  const data = await apiCall<{ session_id: string; messages: { role: string; content: string; execution_id?: string }[] }>(`/v1/sessions/${sessionId}/history`)
   return data.messages || []
+}
+
+// --- Reasoning API ---
+
+export interface ReasoningEvent {
+  step_id?: string
+  type: 'plan' | 'thought' | 'tool_call' | 'observation' | 'decision'
+  summary: string
+  input?: unknown
+  output?: unknown
+  duration_ms?: number
+  children?: ReasoningEvent[]
+}
+
+export interface ReasoningResponse {
+  execution_id: string
+  tree: ReasoningEvent
+  text: string
+  debug?: {
+    audit_trail: {
+      trace_id: string
+      step_id: string
+      step_name: string
+      step_type: string
+      timestamp: string
+      status: string
+      error?: string
+      duration_ms: number
+    }[]
+  }
+}
+
+export async function getReasoning(executionId: string, debug?: boolean): Promise<ReasoningResponse> {
+  const path = `/v1/execution/${encodeURIComponent(executionId)}/reasoning${debug ? '?debug=true' : ''}`
+  return apiCall<ReasoningResponse>(path)
+}
+
+// --- Reasoning display helpers ---
+
+// isSafeContent checks that reasoning content doesn't contain obvious
+// injection vectors. The UI uses react-markdown which sanitizes HTML,
+// but defense-in-depth requires server-side validation too.
+export function isSafeContent(text: string): boolean {
+  if (!text) return true
+  // Block script tags and event handlers
+  if (/<script[\s>]/i.test(text)) return false
+  if (/\bon\w+\s*=/i.test(text)) return false
+  if (/javascript:/i.test(text)) return false
+  return true
+}
+
+// formatStepSummary produces a human-readable step label.
+export function formatStepSummary(step: ReasoningEvent, index: number): string {
+  const name = step.summary || 'Unknown step'
+  const duration = step.duration_ms ? ` (${step.duration_ms}ms)` : ''
+  return `Step ${index + 1}: ${name}${duration}`
+}
+
+// getConfidenceFromOutput extracts a confidence/score from tool output.
+// Returns null if no confidence indicator found.
+export function getConfidenceFromOutput(output: unknown): number | null {
+  if (!output || typeof output !== 'object') return null
+  const obj = output as Record<string, unknown>
+  if (typeof obj.score === 'number') return obj.score
+  if (typeof obj.confidence === 'number') return obj.confidence
+  return null
+}
+
+// isUncertain checks if the output indicates low confidence.
+export function isUncertain(output: unknown, threshold = 0.5): boolean {
+  const conf = getConfidenceFromOutput(output)
+  if (conf === null) return false
+  return conf < threshold
+}
+
+// UNCERTAINTY_PHRASES are prepended to outputs with low confidence.
+export const UNCERTAINTY_PHRASES = [
+  '⚠️ This assessment has low confidence.',
+  '⚠️ Results are uncertain — verify with additional data.',
+  '⚠️ Insufficient data for a reliable conclusion.',
+]
+
+// getUncertaintyPhrase returns a warning phrase based on confidence level.
+export function getUncertaintyPhrase(output: unknown): string {
+  const conf = getConfidenceFromOutput(output)
+  if (conf === null) return ''
+  if (conf < 0.3) return UNCERTAINTY_PHRASES[2]
+  if (conf < 0.5) return UNCERTAINTY_PHRASES[1]
+  if (conf < 0.7) return UNCERTAINTY_PHRASES[0]
+  return ''
+}
+
+// hasConflictMarker checks if tool output contains conflict indicators.
+export function hasConflictMarker(output: unknown): boolean {
+  if (!output || typeof output !== 'object') return false
+  const obj = output as Record<string, unknown>
+  return obj.conflict !== undefined || obj.mismatch !== undefined || obj.discrepancy !== undefined
 }

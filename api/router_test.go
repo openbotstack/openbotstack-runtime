@@ -36,7 +36,7 @@ func (m *mockAgent) HandleMessage(ctx context.Context, req agent.MessageRequest)
 }
 
 func TestHealthEndpoint(t *testing.T) {
-	handler := api.NewRouter(&mockAgent{})
+	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}})
 	req := httptest.NewRequest("GET", "/health", nil)
 	rr := httptest.NewRecorder()
 
@@ -59,7 +59,7 @@ func TestChatEndpoint(t *testing.T) {
 		Message:   "Hello! I'm here to help.",
 		SkillUsed: "core/greeting",
 	}
-	handler := api.NewRouter(&mockAgent{response: mockResp})
+	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{response: mockResp}})
 
 	body := api.ChatRequest{
 		TenantID:  "tenant-1",
@@ -90,7 +90,7 @@ func TestChatEndpoint(t *testing.T) {
 }
 
 func TestChatEndpointBadRequest(t *testing.T) {
-	handler := api.NewRouter(&mockAgent{})
+	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}})
 
 	req := httptest.NewRequest("POST", "/v1/chat", bytes.NewReader([]byte("invalid")))
 	req.Header.Set("Content-Type", "application/json")
@@ -104,7 +104,7 @@ func TestChatEndpointBadRequest(t *testing.T) {
 }
 
 func TestChatEndpointAgentError(t *testing.T) {
-	handler := api.NewRouter(&mockAgent{err: errors.New("agent unavailable")})
+	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{err: errors.New("agent unavailable")}})
 
 	body := api.ChatRequest{Message: "Hello"}
 	bodyBytes, _ := json.Marshal(body)
@@ -121,7 +121,7 @@ func TestChatEndpointAgentError(t *testing.T) {
 }
 
 func TestChatEndpointNilAgent(t *testing.T) {
-	handler := api.NewRouter(nil)
+	handler := api.NewRouter(api.RouterConfig{})
 
 	body := api.ChatRequest{Message: "Hello"}
 	bodyBytes, _ := json.Marshal(body)
@@ -138,7 +138,7 @@ func TestChatEndpointNilAgent(t *testing.T) {
 }
 
 func TestHistoryEndpoint(t *testing.T) {
-	handler := api.NewRouter(&mockAgent{})
+	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}})
 
 	req := httptest.NewRequest("GET", "/v1/sessions/session-1/history", nil)
 	rr := httptest.NewRecorder()
@@ -151,7 +151,7 @@ func TestHistoryEndpoint(t *testing.T) {
 }
 
 func TestNotFoundEndpoint(t *testing.T) {
-	handler := api.NewRouter(&mockAgent{})
+	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}})
 
 	req := httptest.NewRequest("GET", "/nonexistent", nil)
 	rr := httptest.NewRecorder()
@@ -164,7 +164,7 @@ func TestNotFoundEndpoint(t *testing.T) {
 }
 
 func TestChatEndpointMethodNotAllowed(t *testing.T) {
-	handler := api.NewRouter(&mockAgent{})
+	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}})
 
 	req := httptest.NewRequest("GET", "/v1/chat", nil)
 	rr := httptest.NewRecorder()
@@ -191,7 +191,7 @@ func (c *captureAgent) HandleMessage(ctx context.Context, req agent.MessageReque
 
 func TestChatEndpointUsesAuthenticatedIdentity(t *testing.T) {
 	ca := &captureAgent{}
-	router := api.NewRouter(ca)
+	router := api.NewRouter(api.RouterConfig{Agent: ca})
 
 	// Set auth middleware that injects a user into context
 	router.SetAuthMiddleware(func(next http.Handler) http.Handler {
@@ -233,12 +233,12 @@ func TestChatEndpointUsesAuthenticatedIdentity(t *testing.T) {
 // mockHistoryProvider implements api.HistoryProvider for testing.
 type mockHistoryProvider struct {
 	sessions    []api.SessionSummary
-	history     []api.Message
+	history     []agent.Message
 	deleteErr   error
 	deletedID   string
 }
 
-func (m *mockHistoryProvider) GetSessionHistory(ctx context.Context, sessionID string) ([]api.Message, error) {
+func (m *mockHistoryProvider) GetSessionHistory(ctx context.Context, sessionID string) ([]agent.Message, error) {
 	return m.history, nil
 }
 
@@ -252,7 +252,7 @@ func (m *mockHistoryProvider) DeleteSession(ctx context.Context, sessionID strin
 }
 
 func TestListSessionsEndpoint(t *testing.T) {
-	handler := api.NewRouter(&mockAgent{})
+	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}})
 	handler.SetHistoryProvider(&mockHistoryProvider{
 		sessions: []api.SessionSummary{
 			{SessionID: "s1", TenantID: "t1", LastEntry: "hello", EntryCount: 3, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-02T00:00:00Z"},
@@ -282,7 +282,7 @@ func TestListSessionsEndpoint(t *testing.T) {
 }
 
 func TestListSessionsEmpty(t *testing.T) {
-	handler := api.NewRouter(&mockAgent{})
+	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}})
 	// No history provider set
 
 	req := httptest.NewRequest("GET", "/v1/sessions", nil)
@@ -301,7 +301,7 @@ func TestListSessionsEmpty(t *testing.T) {
 }
 
 func TestDeleteSessionEndpoint(t *testing.T) {
-	handler := api.NewRouter(&mockAgent{})
+	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}})
 	mockHistory := &mockHistoryProvider{}
 	handler.SetHistoryProvider(mockHistory)
 
@@ -318,7 +318,7 @@ func TestDeleteSessionEndpoint(t *testing.T) {
 }
 
 func TestDeleteSessionMissingID(t *testing.T) {
-	handler := api.NewRouter(&mockAgent{})
+	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}})
 	handler.SetHistoryProvider(&mockHistoryProvider{})
 
 	req := httptest.NewRequest("DELETE", "/v1/sessions/", nil)
@@ -331,7 +331,7 @@ func TestDeleteSessionMissingID(t *testing.T) {
 }
 
 func TestDeleteSessionNoProvider(t *testing.T) {
-	handler := api.NewRouter(&mockAgent{})
+	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}})
 	// No history provider set
 
 	req := httptest.NewRequest("DELETE", "/v1/sessions/session-123", nil)
@@ -344,9 +344,9 @@ func TestDeleteSessionNoProvider(t *testing.T) {
 }
 
 func TestSessionHistoryEndpointWithProvider(t *testing.T) {
-	handler := api.NewRouter(&mockAgent{})
+	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}})
 	handler.SetHistoryProvider(&mockHistoryProvider{
-		history: []api.Message{
+		history: []agent.Message{
 			{Role: "user", Content: "Hello"},
 			{Role: "assistant", Content: "Hi there!"},
 		},
@@ -372,7 +372,7 @@ func TestSessionHistoryEndpointWithProvider(t *testing.T) {
 
 func TestChatEndpointNoAuthUsesBodyIdentity(t *testing.T) {
 	ca := &captureAgent{}
-	router := api.NewRouter(ca)
+	router := api.NewRouter(api.RouterConfig{Agent: ca})
 	// No auth middleware set
 
 	body := api.ChatRequest{

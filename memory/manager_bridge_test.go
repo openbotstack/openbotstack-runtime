@@ -415,8 +415,7 @@ func TestRetrieveSimilar_VectorSearchWithMock(t *testing.T) {
 	)
 
 	bridge := NewMarkdownMemoryBridge(store, nil)
-	bridge.SetVectorStore(vectorStore)
-	bridge.SetEmbeddingService(embeddingSvc)
+	bridge.SetRetrievalStrategy(NewVectorFirstStrategy(store, vectorStore, embeddingSvc))
 
 	scopeCtx := ScopeWithMemory(ctx, MemoryScope{TenantID: "t1", UserID: "u1", SessionID: "s1"})
 	results, err := bridge.RetrieveSimilar(scopeCtx, "semantic query", 5)
@@ -474,8 +473,7 @@ func TestRetrieveSimilar_FallbackToKeyword(t *testing.T) {
 	)
 
 	bridge := NewMarkdownMemoryBridge(store, nil)
-	bridge.SetVectorStore(vectorStore)
-	bridge.SetEmbeddingService(embeddingSvc)
+	bridge.SetRetrievalStrategy(NewVectorFirstStrategy(store, vectorStore, embeddingSvc))
 
 	scopeCtx := ScopeWithMemory(ctx, MemoryScope{TenantID: "t1", UserID: "u1", SessionID: "s1"})
 	results, err := bridge.RetrieveSimilar(scopeCtx, "weather Tokyo", 5)
@@ -522,8 +520,7 @@ func TestRetrieveSimilar_EmbeddingFailureFallsBack(t *testing.T) {
 	)
 
 	bridge := NewMarkdownMemoryBridge(store, nil)
-	bridge.SetVectorStore(&mockVectorStoreForBridge{})
-	bridge.SetEmbeddingService(embeddingSvc)
+	bridge.SetRetrievalStrategy(NewVectorFirstStrategy(store, &mockVectorStoreForBridge{}, embeddingSvc))
 
 	scopeCtx := ScopeWithMemory(ctx, MemoryScope{TenantID: "t1", UserID: "u1", SessionID: "s1"})
 	results, err := bridge.RetrieveSimilar(scopeCtx, "keyword search", 5)
@@ -562,8 +559,7 @@ func TestRetrieveSimilar_VectorReturnsEmpty(t *testing.T) {
 	)
 
 	bridge := NewMarkdownMemoryBridge(store, nil)
-	bridge.SetVectorStore(vectorStore)
-	bridge.SetEmbeddingService(embeddingSvc)
+	bridge.SetRetrievalStrategy(NewVectorFirstStrategy(store, vectorStore, embeddingSvc))
 
 	scopeCtx := ScopeWithMemory(ctx, MemoryScope{TenantID: "t1", UserID: "u1", SessionID: "s1"})
 	results, err := bridge.RetrieveSimilar(scopeCtx, "keyword match", 5)

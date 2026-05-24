@@ -8,73 +8,53 @@ import (
 	"github.com/openbotstack/openbotstack-core/planner"
 )
 
-func TestAgentSkillToPlannerSkill_Empty(t *testing.T) {
-	result := agentSkillToPlannerSkill(nil)
-	if result == nil {
-		t.Fatal("expected non-nil slice")
+func TestSkillDescriptorTypeIdentity(t *testing.T) {
+	// Verify that agent.SkillDescriptor, planner.SkillDescriptor, and
+	// skills.SkillDescriptor are the same type (type aliases).
+	// If this compiles, the aliases are correct.
+	var sd skills.SkillDescriptor = skills.SkillDescriptor{
+		ID:          "core/test",
+		Name:        "Test",
+		Description: "A test skill",
+		InputSchema: &skills.JSONSchema{Type: "object"},
 	}
-	if len(result) != 0 {
-		t.Errorf("expected 0 items, got %d", len(result))
+
+	// agent.SkillDescriptor must be assignable from skills.SkillDescriptor
+	var _ agent.SkillDescriptor = sd
+
+	// planner.SkillDescriptor must be assignable from skills.SkillDescriptor
+	var _ planner.SkillDescriptor = sd
+
+	// Slice of agent.SkillDescriptor must be assignable to planner.SkillDescriptor slice
+	agentSlice := []agent.SkillDescriptor{sd}
+	var plannerSlice []planner.SkillDescriptor = agentSlice
+	if len(plannerSlice) != 1 {
+		t.Errorf("expected 1 item, got %d", len(plannerSlice))
+	}
+	if plannerSlice[0].ID != "core/test" {
+		t.Errorf("ID = %q, want %q", plannerSlice[0].ID, "core/test")
 	}
 }
 
-func TestAgentSkillToPlannerSkill_Conversion(t *testing.T) {
-	input := []agent.SkillDescriptor{
-		{
-			ID:          "core/summarize",
-			Name:        "Summarize",
-			Description: "Summarizes text",
-			InputSchema: &skills.JSONSchema{
-				Type: "object",
-				Properties: map[string]*skills.JSONSchema{
-					"text": {Type: "string"},
-				},
-			},
-		},
-		{
-			ID:          "core/math-add",
-			Name:        "Math Add",
-			Description: "Adds two numbers",
-		},
+func TestSkillDescriptorDirectPassThrough(t *testing.T) {
+	// Verify that agent skill descriptors can be passed directly to
+	// planner.PlannerContext without any conversion function.
+	descs := []agent.SkillDescriptor{
+		{ID: "s1", Name: "Skill1", Description: "First"},
+		{ID: "s2", Name: "Skill2", Description: "Second"},
 	}
 
-	result := agentSkillToPlannerSkill(input)
-
-	if len(result) != 2 {
-		t.Fatalf("expected 2 items, got %d", len(result))
+	pCtx := &planner.PlannerContext{
+		Skills: descs,
 	}
 
-	// Verify first skill
-	if result[0].ID != "core/summarize" {
-		t.Errorf("ID = %q, want %q", result[0].ID, "core/summarize")
+	if len(pCtx.Skills) != 2 {
+		t.Fatalf("expected 2 skills, got %d", len(pCtx.Skills))
 	}
-	if result[0].Name != "Summarize" {
-		t.Errorf("Name = %q, want %q", result[0].Name, "Summarize")
+	if pCtx.Skills[0].ID != "s1" {
+		t.Errorf("Skills[0].ID = %q, want %q", pCtx.Skills[0].ID, "s1")
 	}
-	if result[0].Description != "Summarizes text" {
-		t.Errorf("Description = %q, want %q", result[0].Description, "Summarizes text")
+	if pCtx.Skills[1].Name != "Skill2" {
+		t.Errorf("Skills[1].Name = %q, want %q", pCtx.Skills[1].Name, "Skill2")
 	}
-	if result[0].InputSchema == nil {
-		t.Error("InputSchema should not be nil")
-	}
-	if result[0].InputSchema.Type != "object" {
-		t.Errorf("InputSchema.Type = %q, want %q", result[0].InputSchema.Type, "object")
-	}
-
-	// Verify second skill
-	if result[1].ID != "core/math-add" {
-		t.Errorf("ID = %q, want %q", result[1].ID, "core/math-add")
-	}
-	if result[1].InputSchema != nil {
-		t.Error("InputSchema should be nil when not set")
-	}
-}
-
-func TestAgentSkillToPlannerSkill_TypeCompatibility(t *testing.T) {
-	// Verify the result type is planner.SkillDescriptor
-	input := []agent.SkillDescriptor{
-		{ID: "test", Name: "Test", Description: "A test"},
-	}
-
-	var _ []planner.SkillDescriptor = agentSkillToPlannerSkill(input)
 }

@@ -16,7 +16,7 @@ This repository implements the EXECUTION PLANE of OpenBotStack.
 - Timeout, retry, and sandbox mechanisms
 - Execution logging and traces
 - Runtime-level error handling
-- `loop/` — **dual bounded loop kernel** (outer task loop + inner reasoning turn loop, ADR-012)
+- `harness/` — **harness-based execution** (ExecutionHarness + ReasoningLoop + StepExecutor, ADR-018)
 
 ## IT MUST NOT:
 - Define assistant identity or persona

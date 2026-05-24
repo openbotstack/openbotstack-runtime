@@ -54,10 +54,13 @@ func (db *DB) Migrate() error {
 			outcome     TEXT NOT NULL DEFAULT '',
 			duration_ms INTEGER NOT NULL DEFAULT 0,
 			metadata    TEXT NOT NULL DEFAULT '{}',
-			timestamp   TEXT NOT NULL DEFAULT ''
+			timestamp   TEXT NOT NULL DEFAULT '',
+source      TEXT NOT NULL DEFAULT '',
+signature   TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_tenant_time ON audit_logs(tenant_id, timestamp)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_request ON audit_logs(request_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_source ON audit_logs(source)`,
 		`CREATE TABLE IF NOT EXISTS quotas (
 			tenant_id                  TEXT PRIMARY KEY,
 			tenant_tokens_per_minute   INTEGER NOT NULL DEFAULT 0,
@@ -133,6 +136,19 @@ func (db *DB) Migrate() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_tenant ON sessions(tenant_id, updated_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_tenant_user ON sessions(tenant_id, user_id, updated_at DESC)`,
+			`CREATE TABLE IF NOT EXISTS mcp_servers (
+				id         TEXT PRIMARY KEY,
+				name       TEXT NOT NULL DEFAULT '',
+				transport  TEXT NOT NULL DEFAULT '',
+				command    TEXT NOT NULL DEFAULT '',
+				args       TEXT NOT NULL DEFAULT '[]',
+				url        TEXT NOT NULL DEFAULT '',
+				env        TEXT NOT NULL DEFAULT '{}',
+				auth       TEXT NOT NULL DEFAULT '',
+				enabled    INTEGER NOT NULL DEFAULT 1,
+				created_at TEXT NOT NULL DEFAULT '',
+				updated_at TEXT NOT NULL DEFAULT ''
+			)`,
 	}
 	tx, err := db.Begin()
 	if err != nil {
@@ -146,6 +162,18 @@ func (db *DB) Migrate() error {
 		}
 	}
 	return tx.Commit()
+}
+
+// MigrateSignatureColumn adds the signature column to audit_logs for chain signing.
+func (db *DB) MigrateSignatureColumn() error {
+	_, err := db.Exec("ALTER TABLE audit_logs ADD COLUMN signature TEXT NOT NULL DEFAULT ''")
+	if err != nil {
+		if strings.Contains(err.Error(), "duplicate column name") {
+			return nil
+		}
+		return fmt.Errorf("add signature column: %w", err)
+	}
+	return nil
 }
 
 // MigrateTenantColumn adds tenant_id to session_entries if it does not already exist.

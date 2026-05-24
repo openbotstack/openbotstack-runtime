@@ -7,31 +7,46 @@ import (
 )
 
 func (ar *AdminRouter) handleAdminSkills(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	switch r.Method {
+	case http.MethodGet:
+		if ar.skillAdmin == nil {
+			writeJSON(w, http.StatusOK, []SkillAdminInfo{})
+			return
+		}
+
+		skills, err := ar.skillAdmin.ListSkills()
+		if err != nil {
+			slog.ErrorContext(r.Context(), "admin handler error",
+				"method", r.Method, "path", r.URL.Path, "status", http.StatusInternalServerError, "error", err)
+			writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to list skills")
+			return
+		}
+		if skills == nil {
+			skills = []SkillAdminInfo{}
+		}
+		writeJSON(w, http.StatusOK, skills)
+
+	case http.MethodPost:
+		// POST /v1/admin/skills — reload all skills from disk
+		if ar.skillAdmin == nil {
+			writeAPIError(w, http.StatusInternalServerError, ErrInternal, "skill admin not configured")
+			return
+		}
+		if err := ar.skillAdmin.ReloadSkills(r.Context()); err != nil {
+			slog.ErrorContext(r.Context(), "admin handler error",
+				"method", r.Method, "path", r.URL.Path, "status", http.StatusInternalServerError, "error", err)
+			writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to reload skills")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "reloaded"})
+
+	default:
 		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
-		return
 	}
-
-	if ar.skillAdmin == nil {
-		writeJSON(w, http.StatusOK, []SkillAdminInfo{})
-		return
-	}
-
-	skills, err := ar.skillAdmin.ListSkills()
-	if err != nil {
-		slog.ErrorContext(r.Context(), "admin handler error",
-			"method", r.Method, "path", r.URL.Path, "status", http.StatusInternalServerError, "error", err)
-		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to list skills")
-		return
-	}
-	if skills == nil {
-		skills = []SkillAdminInfo{}
-	}
-	writeJSON(w, http.StatusOK, skills)
 }
 
-// handleSkillAction handles enable/disable actions for /v1/admin/skills/{skillID}/{action}
-// Path format: /v1/admin/skills/{skillID}/enable or /v1/admin/skills/{skillID}/disable
+// handleSkillAction handles actions for /v1/admin/skills/{skillID}/{action}
+// Actions: enable, disable, reload
 // skillID may contain slashes (e.g., "core/summarize").
 func (ar *AdminRouter) handleSkillAction(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -41,7 +56,6 @@ func (ar *AdminRouter) handleSkillAction(w http.ResponseWriter, r *http.Request)
 
 	// Parse: /v1/admin/skills/{skillID}/{action}
 	path := strings.TrimPrefix(r.URL.Path, "/v1/admin/skills/")
-	// Split into parts — the last part is the action, everything before is the skillID
 	lastSlash := strings.LastIndex(path, "/")
 	if lastSlash < 0 {
 		writeAPIError(w, http.StatusBadRequest, ErrInvalidRequest, "invalid path format")
@@ -55,25 +69,37 @@ func (ar *AdminRouter) handleSkillAction(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	var enabled bool
 	switch action {
 	case "enable":
-		enabled = true
+		if err := ar.skillAdmin.SetSkillEnabled(skillID, true); err != nil {
+			slog.ErrorContext(r.Context(), "admin handler error",
+				"method", r.Method, "path", r.URL.Path, "status", http.StatusInternalServerError, "error", err)
+			writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to update skill")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"id": skillID, "enabled": true})
+
 	case "disable":
-		enabled = false
+		if err := ar.skillAdmin.SetSkillEnabled(skillID, false); err != nil {
+			slog.ErrorContext(r.Context(), "admin handler error",
+				"method", r.Method, "path", r.URL.Path, "status", http.StatusInternalServerError, "error", err)
+			writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to update skill")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"id": skillID, "enabled": false})
+
+	case "reload":
+		if err := ar.skillAdmin.ReloadSkill(r.Context(), skillID); err != nil {
+			slog.ErrorContext(r.Context(), "admin handler error",
+				"method", r.Method, "path", r.URL.Path, "status", http.StatusInternalServerError, "error", err)
+			writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to reload skill")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"id": skillID, "status": "reloaded"})
+
 	default:
-		writeAPIError(w, http.StatusBadRequest, ErrInvalidRequest, "action must be 'enable' or 'disable'")
-		return
+		writeAPIError(w, http.StatusBadRequest, ErrInvalidRequest, "action must be 'enable', 'disable', or 'reload'")
 	}
-
-	if err := ar.skillAdmin.SetSkillEnabled(skillID, enabled); err != nil {
-		slog.ErrorContext(r.Context(), "admin handler error",
-			"method", r.Method, "path", r.URL.Path, "status", http.StatusInternalServerError, "error", err)
-		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to update skill")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{"id": skillID, "enabled": enabled})
 }
 
 // handleAdminSessions returns all sessions across all tenants (admin view).

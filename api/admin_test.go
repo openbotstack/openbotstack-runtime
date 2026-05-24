@@ -2,18 +2,34 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openbotstack/openbotstack-core/access/auth"
+	"github.com/openbotstack/openbotstack-core/audit"
+	rtAudit "github.com/openbotstack/openbotstack-runtime/audit"
 	"github.com/openbotstack/openbotstack-runtime/api/middleware"
+	"github.com/openbotstack/openbotstack-runtime/logging/execution_logs"
 	"github.com/openbotstack/openbotstack-runtime/persistence"
 )
+
+// mockAuditQuerier returns empty results for all queries.
+type mockAuditQuerier struct{}
+
+func (m *mockAuditQuerier) Query(_ context.Context, _ execution_logs.QueryFilter) ([]audit.AuditEvent, error) {
+	return []audit.AuditEvent{}, nil
+}
+func (m *mockAuditQuerier) Count(_ context.Context, _ execution_logs.QueryFilter) (int, error) {
+	return 0, nil
+}
 
 // setupAdminTest creates a full admin test environment with an in-memory DB,
 // seeded defaults, and a handler wrapped with admin role injection.
@@ -33,7 +49,7 @@ func setupAdminTest(t *testing.T) (*persistence.DB, http.Handler) {
 		t.Fatalf("SeedDefaults: %v", err)
 	}
 
-	adminRouter := NewAdminRouter(db.DB)
+	adminRouter := NewAdminRouter(AdminRouterConfig{DB: db.DB, AuditQuerier: &mockAuditQuerier{}})
 
 	// Wrap with middleware that injects admin user + role
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -884,8 +900,9 @@ func TestAdminSkillsMethodNotAllowed(t *testing.T) {
 	_, handler := setupAdminTest(t)
 
 	rec := doAdminRequest(t, handler, "POST", "/v1/admin/skills", nil)
-	if rec.Code != http.StatusMethodNotAllowed {
-		t.Errorf("status = %d, want %d", rec.Code, http.StatusMethodNotAllowed)
+	// POST to /v1/admin/skills is now reload-all (returns 500 when no skill admin configured)
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
 	}
 }
 
@@ -909,7 +926,7 @@ func TestAdminEndpointRejectsNonAdmin(t *testing.T) {
 		t.Fatalf("Migrate: %v", err)
 	}
 
-	adminRouter := NewAdminRouter(db.DB)
+	adminRouter := NewAdminRouter(AdminRouterConfig{DB: db.DB})
 	// Do NOT inject admin role — use bare handler
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		adminRouter.Handler().ServeHTTP(w, r)
@@ -970,7 +987,7 @@ func TestUpdateProviderConfig(t *testing.T) {
 	db, _ := setupAdminTest(t)
 
 	// Setup mock reloader
-	ar := NewAdminRouter(db.DB)
+	ar := NewAdminRouter(AdminRouterConfig{DB: db.DB})
 	// Re-wrap handler to access the admin router directly
 	mockReloader := &mockProviderReloader{}
 	ar.SetProviderReloader(mockReloader)
@@ -1070,7 +1087,7 @@ func TestTestProviderConnectionValidation(t *testing.T) {
 func TestSetDefaultProvider(t *testing.T) {
 	db, _ := setupAdminTest(t)
 
-	ar := NewAdminRouter(db.DB)
+	ar := NewAdminRouter(AdminRouterConfig{DB: db.DB})
 	mockReloader := &mockProviderReloader{}
 	ar.SetProviderReloader(mockReloader)
 
@@ -1108,5 +1125,300 @@ func TestSetDefaultProvider(t *testing.T) {
 	json.Unmarshal(rec2.Body.Bytes(), &resp)
 	if resp["default"] != "openai" {
 		t.Errorf("default = %v, want 'openai'", resp["default"])
+	}
+}
+
+// --- Compliance Report Handler Tests ---
+
+func setupComplianceTest(t *testing.T, events []audit.AuditEvent) http.Handler {
+	t.Helper()
+	db, err := persistence.Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	if _, err := db.SeedDefaults(); err != nil {
+		t.Fatalf("SeedDefaults: %v", err)
+	}
+
+	querier := &staticAuditQuerier{events: events}
+	generator := rtAudit.NewComplianceReportGenerator(querier, nil)
+
+	adminRouter := NewAdminRouter(AdminRouterConfig{
+		DB:                  db.DB,
+		AuditQuerier:        &mockAuditQuerier{},
+		ComplianceGenerator: generator,
+	})
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user := &auth.User{ID: "admin", TenantID: "default", Name: "Admin"}
+		ctx := middleware.WithUser(r.Context(), user)
+		ctx = middleware.WithUserRole(ctx, "admin")
+		adminRouter.Handler().ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// staticAuditQuerier returns a fixed set of events for compliance tests.
+type staticAuditQuerier struct {
+	events []audit.AuditEvent
+}
+
+func (s *staticAuditQuerier) Query(_ context.Context, _ execution_logs.QueryFilter) ([]audit.AuditEvent, error) {
+	return s.events, nil
+}
+
+func TestComplianceEndpoint_BasicReport(t *testing.T) {
+	events := []audit.AuditEvent{
+		{ID: "e1", TenantID: "default", Action: "skills.execute", Outcome: "success", Timestamp: time.Now().Add(-time.Hour)},
+		{ID: "e2", TenantID: "default", Action: "policy.check", Outcome: "allowed", Timestamp: time.Now().Add(-30 * time.Minute)},
+		{ID: "e3", TenantID: "default", Action: "policy.enforce", Outcome: "denied", Resource: "skill/admin-delete", Timestamp: time.Now().Add(-15 * time.Minute)},
+	}
+	handler := setupComplianceTest(t, events)
+
+	rec := doAdminRequest(t, handler, "GET", "/v1/admin/audit/compliance", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var report audit.ComplianceReport
+	if err := json.NewDecoder(rec.Body).Decode(&report); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if report.ID == "" {
+		t.Error("report ID should not be empty")
+	}
+	if report.Summary.TotalEvents != 3 {
+		t.Errorf("TotalEvents = %d, want 3", report.Summary.TotalEvents)
+	}
+	if report.PolicyCompliance.TotalChecks != 2 {
+		t.Errorf("TotalChecks = %d, want 2", report.PolicyCompliance.TotalChecks)
+	}
+	if report.PolicyCompliance.Denied != 1 {
+		t.Errorf("Denied = %d, want 1", report.PolicyCompliance.Denied)
+	}
+}
+
+func TestComplianceEndpoint_WithTenantFilter(t *testing.T) {
+	events := []audit.AuditEvent{
+		{ID: "e1", TenantID: "tenant-a", Action: "test", Outcome: "success", Timestamp: time.Now()},
+		{ID: "e2", TenantID: "tenant-b", Action: "test", Outcome: "success", Timestamp: time.Now()},
+	}
+	handler := setupComplianceTest(t, events)
+
+	rec := doAdminRequest(t, handler, "GET", "/v1/admin/audit/compliance?tenant_id=tenant-a", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var report audit.ComplianceReport
+	json.NewDecoder(rec.Body).Decode(&report)
+	// The generator queries with tenant filter; static querier returns all events
+	// but the report scope should reflect the requested tenant
+	if report.Scope.TenantID != "tenant-a" {
+		t.Errorf("Scope.TenantID = %q, want 'tenant-a'", report.Scope.TenantID)
+	}
+}
+
+func TestComplianceEndpoint_WithTimeRange(t *testing.T) {
+	events := []audit.AuditEvent{
+		{ID: "e1", TenantID: "default", Action: "test", Outcome: "success", Timestamp: time.Now()},
+	}
+	handler := setupComplianceTest(t, events)
+
+	from := time.Now().Add(-24 * time.Hour).Format(time.RFC3339)
+	to := time.Now().Format(time.RFC3339)
+
+	rec := doAdminRequest(t, handler, "GET", "/v1/admin/audit/compliance?from="+from+"&to="+to, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var report audit.ComplianceReport
+	json.NewDecoder(rec.Body).Decode(&report)
+	if report.Period.From.IsZero() || report.Period.To.IsZero() {
+		t.Error("period should be set from query params")
+	}
+}
+
+func TestComplianceEndpoint_MethodNotAllowed(t *testing.T) {
+	handler := setupComplianceTest(t, nil)
+	rec := doAdminRequest(t, handler, "POST", "/v1/admin/audit/compliance", nil)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusMethodNotAllowed)
+	}
+}
+
+func TestComplianceEndpoint_NotConfigured(t *testing.T) {
+	// AdminRouter without ComplianceGenerator
+	db, err := persistence.Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+	db.Migrate()
+	db.SeedDefaults()
+
+	adminRouter := NewAdminRouter(AdminRouterConfig{DB: db.DB})
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user := &auth.User{ID: "admin", TenantID: "default", Name: "Admin"}
+		ctx := middleware.WithUser(r.Context(), user)
+		ctx = middleware.WithUserRole(ctx, "admin")
+		adminRouter.Handler().ServeHTTP(w, r.WithContext(ctx))
+	})
+
+	rec := doAdminRequest(t, handler, "GET", "/v1/admin/audit/compliance", nil)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
+	}
+}
+
+func TestComplianceEndpoint_EmptyEvents(t *testing.T) {
+	handler := setupComplianceTest(t, nil)
+
+	rec := doAdminRequest(t, handler, "GET", "/v1/admin/audit/compliance", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var report audit.ComplianceReport
+	json.NewDecoder(rec.Body).Decode(&report)
+	if report.Summary.TotalEvents != 0 {
+		t.Errorf("TotalEvents = %d, want 0 for empty events", report.Summary.TotalEvents)
+	}
+}
+
+// --- Audit Format Mapper Tests ---
+
+// mockAuditEventMapper is a test double for audit.AuditEventMapper.
+type mockAuditEventMapper struct {
+	format string
+	result any
+	err    error
+}
+
+func (m *mockAuditEventMapper) Format() string                                       { return m.format }
+func (m *mockAuditEventMapper) Map(envelope audit.AuditEnvelope) (any, error)        { return m.result, m.err }
+func (m *mockAuditEventMapper) MapBatch(envelopes []audit.AuditEnvelope) (any, error) { return m.result, m.err }
+
+// setupAuditFormatTest creates an admin test environment with event mappers.
+func setupAuditFormatTest(t *testing.T, mappers map[string]audit.AuditEventMapper) http.Handler {
+	t.Helper()
+	db, err := persistence.Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	if _, err := db.SeedDefaults(); err != nil {
+		t.Fatalf("SeedDefaults: %v", err)
+	}
+
+	adminRouter := NewAdminRouter(AdminRouterConfig{
+		DB:           db.DB,
+		AuditQuerier: &mockAuditQuerier{},
+		EventMappers: mappers,
+	})
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user := &auth.User{ID: "admin", TenantID: "default", Name: "Admin"}
+		ctx := middleware.WithUser(r.Context(), user)
+		ctx = middleware.WithUserRole(ctx, "admin")
+		adminRouter.Handler().ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func TestAuditEndpoint_FormatQuery_UnknownFormat(t *testing.T) {
+	mappers := map[string]audit.AuditEventMapper{
+		"fhir_auditevent": &mockAuditEventMapper{format: "fhir_auditevent"},
+	}
+	handler := setupAuditFormatTest(t, mappers)
+
+	rec := doAdminRequest(t, handler, "GET", "/v1/admin/audit?format=unknown_format", nil)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+
+	var errResp APIErrorResponse
+	if err := json.NewDecoder(rec.Body).Decode(&errResp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if errResp.Error.Code != ErrInvalidRequest {
+		t.Errorf("error code = %q, want %q", errResp.Error.Code, ErrInvalidRequest)
+	}
+}
+
+func TestAuditEndpoint_FormatQuery_NoMappers(t *testing.T) {
+	handler := setupAuditFormatTest(t, nil)
+
+	rec := doAdminRequest(t, handler, "GET", "/v1/admin/audit?format=fhir_auditevent", nil)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+}
+
+func TestAuditEndpoint_FormatQuery_ValidMapper(t *testing.T) {
+	mappers := map[string]audit.AuditEventMapper{
+		"test_format": &mockAuditEventMapper{
+			format: "test_format",
+			result: map[string]any{"mapped": true},
+		},
+	}
+	handler := setupAuditFormatTest(t, mappers)
+
+	rec := doAdminRequest(t, handler, "GET", "/v1/admin/audit?format=test_format", nil)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if mapped, _ := resp["mapped"].(bool); !mapped {
+		t.Error("expected mapped=true in response")
+	}
+}
+
+func TestAuditEndpoint_FormatQuery_MapperError(t *testing.T) {
+	mappers := map[string]audit.AuditEventMapper{
+		"fail_format": &mockAuditEventMapper{
+			format: "fail_format",
+			err:    fmt.Errorf("mapping explosion"),
+		},
+	}
+	handler := setupAuditFormatTest(t, mappers)
+
+	rec := doAdminRequest(t, handler, "GET", "/v1/admin/audit?format=fail_format", nil)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusInternalServerError, rec.Body.String())
+	}
+}
+
+func TestAuditEndpoint_NoFormat_DefaultsToEnvelopes(t *testing.T) {
+	handler := setupAuditFormatTest(t, nil)
+
+	rec := doAdminRequest(t, handler, "GET", "/v1/admin/audit", nil)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp []interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	// Empty audit log, default envelope format
+	if len(resp) != 0 {
+		t.Errorf("expected 0 entries, got %d", len(resp))
 	}
 }

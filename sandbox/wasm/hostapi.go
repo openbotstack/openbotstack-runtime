@@ -2,6 +2,7 @@ package wasm
 
 import (
 	"context"
+	"sync"
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
@@ -24,6 +25,8 @@ type HostFunctions struct {
 	// Log writes to structured log.
 	Log func(ctx context.Context, level string, msg string)
 
+	mu sync.Mutex
+
 	// inputBuffer holds input data for the skill
 	inputBuffer []byte
 
@@ -33,16 +36,22 @@ type HostFunctions struct {
 
 // SetInput sets the input buffer for the skills.
 func (hf *HostFunctions) SetInput(input []byte) {
+	hf.mu.Lock()
+	defer hf.mu.Unlock()
 	hf.inputBuffer = input
 }
 
 // GetOutput returns the output buffer from the skills.
 func (hf *HostFunctions) GetOutput() []byte {
+	hf.mu.Lock()
+	defer hf.mu.Unlock()
 	return hf.outputBuffer
 }
 
 // ClearBuffers resets input and output buffers.
 func (hf *HostFunctions) ClearBuffers() {
+	hf.mu.Lock()
+	defer hf.mu.Unlock()
 	hf.inputBuffer = nil
 	hf.outputBuffer = nil
 }
@@ -53,12 +62,16 @@ func RegisterHostFunctions(ctx context.Context, r wazero.Runtime, hf *HostFuncti
 		// get_input_len returns the length of input data
 		NewFunctionBuilder().
 		WithFunc(func(ctx context.Context) uint32 {
+			hf.mu.Lock()
+			defer hf.mu.Unlock()
 			return uint32(len(hf.inputBuffer))
 		}).
 		Export("get_input_len").
 		// get_input copies input data to guest memory
 		NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, m api.Module, ptr uint32) uint32 {
+			hf.mu.Lock()
+			defer hf.mu.Unlock()
 			if len(hf.inputBuffer) == 0 {
 				return 0
 			}
@@ -78,8 +91,10 @@ func RegisterHostFunctions(ctx context.Context, r wazero.Runtime, hf *HostFuncti
 		WithFunc(func(ctx context.Context, m api.Module, ptr, len uint32) {
 			data, ok := m.Memory().Read(ptr, len)
 			if ok {
+				hf.mu.Lock()
 				hf.outputBuffer = make([]byte, len)
 				copy(hf.outputBuffer, data)
+				hf.mu.Unlock()
 			}
 		}).
 		Export("set_output").
@@ -88,12 +103,12 @@ func RegisterHostFunctions(ctx context.Context, r wazero.Runtime, hf *HostFuncti
 		WithFunc(func(ctx context.Context, m api.Module, promptPtr, promptLen, resultPtr uint32) uint32 {
 			prompt, ok := m.Memory().Read(promptPtr, promptLen)
 			if !ok || hf.LLMGenerate == nil {
-				return 0
+				return 0xFFFFFFFF
 			}
 
 			result, err := hf.LLMGenerate(ctx, string(prompt))
 			if err != nil {
-				return 0
+				return 0xFFFFFFFF
 			}
 
 			resultBytes := []byte(result)

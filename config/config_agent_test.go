@@ -10,8 +10,8 @@ import (
 func TestConfig_AgentDefaults(t *testing.T) {
 	cfg := defaultConfig()
 
-	if cfg.Agent.Mode != "single_pass" {
-		t.Errorf("Agent.Mode = %q, want %q", cfg.Agent.Mode, "single_pass")
+	if cfg.Agent.Mode != "harness" {
+		t.Errorf("Agent.Mode = %q, want %q", cfg.Agent.Mode, "harness")
 	}
 	if cfg.Agent.DualLoop.MaxTurns != 8 {
 		t.Errorf("DualLoop.MaxTurns = %d, want 8", cfg.Agent.DualLoop.MaxTurns)
@@ -19,14 +19,14 @@ func TestConfig_AgentDefaults(t *testing.T) {
 	if cfg.Agent.DualLoop.MaxToolCalls != 20 {
 		t.Errorf("DualLoop.MaxToolCalls = %d, want 20", cfg.Agent.DualLoop.MaxToolCalls)
 	}
-	if cfg.Agent.DualLoop.MaxTurnRuntime != 30*time.Second {
-		t.Errorf("DualLoop.MaxTurnRuntime = %v, want 30s", cfg.Agent.DualLoop.MaxTurnRuntime)
+	if cfg.Agent.DualLoop.MaxTurnRuntime != 120*time.Second {
+		t.Errorf("DualLoop.MaxTurnRuntime = %v, want 120s", cfg.Agent.DualLoop.MaxTurnRuntime)
 	}
 	if cfg.Agent.DualLoop.MaxWorkflowSteps != 5 {
 		t.Errorf("DualLoop.MaxWorkflowSteps = %d, want 5", cfg.Agent.DualLoop.MaxWorkflowSteps)
 	}
-	if cfg.Agent.DualLoop.MaxSessionRuntime != 60*time.Second {
-		t.Errorf("DualLoop.MaxSessionRuntime = %v, want 60s", cfg.Agent.DualLoop.MaxSessionRuntime)
+	if cfg.Agent.DualLoop.MaxSessionRuntime != 300*time.Second {
+		t.Errorf("DualLoop.MaxSessionRuntime = %v, want 300s", cfg.Agent.DualLoop.MaxSessionRuntime)
 	}
 	if cfg.Agent.DualLoop.MaxRetainedTurns != 4 {
 		t.Errorf("DualLoop.MaxRetainedTurns = %d, want 4", cfg.Agent.DualLoop.MaxRetainedTurns)

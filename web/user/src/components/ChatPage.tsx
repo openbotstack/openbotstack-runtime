@@ -1,12 +1,15 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useAuth } from './AuthProvider'
-import { listSessions, deleteSession, getSessionHistory, authHeaders, checkAuthStatus, type ServerSession } from '../lib/api'
+import { listSessions, deleteSession, getSessionHistory, authHeaders, checkAuthStatus, getReasoning, type ServerSession, type ReasoningResponse } from '../lib/api'
+import { MessageContent } from './MessageContent'
+import { ReasoningView } from './ReasoningView'
 
 interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
   skillUsed?: string
+  executionId?: string
   streaming?: boolean
 }
 
@@ -18,6 +21,7 @@ export function ChatPage() {
   const [sessionId, setSessionId] = useState<string>('')
   const [sessions, setSessions] = useState<ServerSession[]>([])
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [progressText, setProgressText] = useState('')
   const messagesEnd = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
 
@@ -51,6 +55,7 @@ export function ChatPage() {
         id: `${sid}-${i}`,
         role: m.role as 'user' | 'assistant',
         content: m.content,
+        executionId: m.execution_id || undefined,
       }))
       setMessages(history)
       setSessionId(sid)
@@ -145,6 +150,62 @@ export function ChatPage() {
             const parsed = JSON.parse(dataLine)
 
             switch (eventType) {
+              case 'progress': {
+                const progType: string = parsed.type || ''
+                const progContent: string = parsed.content || parsed.tool || ''
+
+                // Token events feed message content. planning_token events
+                // carry raw plan JSON — internal feedback only, not user-facing.
+                if (progType === 'token') {
+                  if (progContent) {
+                    setMessages(prev =>
+                      prev.map(m => {
+                        if (m.id !== assistantMsgId) return m
+                        return { ...m, content: m.content + progContent }
+                      })
+                    )
+                  }
+                  break
+                }
+
+                let status = ''
+                switch (progType) {
+                  case 'analyzing':
+                    status = progContent || '正在分析请求...'
+                    break
+                  case 'loading_context':
+                    status = progContent || '正在加载上下文...'
+                    break
+                  case 'planning':
+                    status = '正在规划...'
+                    break
+                  case 'planning_generating':
+                    status = '正在生成执行计划...'
+                    break
+                  case 'planning_complete':
+                    status = '执行计划已生成，开始执行...'
+                    break
+                  case 'step_start':
+                    status = progContent ? `正在执行: ${progContent}` : '开始执行...'
+                    break
+                  case 'step_complete':
+                    status = progContent ? `已完成: ${progContent}` : '步骤完成'
+                    break
+                  case 'approval_required':
+                    status = progContent ? `等待审批: ${progContent}` : '等待审批...'
+                    break
+                  case 'approval_granted':
+                    status = progContent ? `审批通过: ${progContent}` : '审批通过'
+                    break
+                  default:
+                    status = progContent || progType
+                }
+                if (status) {
+                  setProgressText(status)
+                }
+                break
+              }
+
               case 'session':
                 if (parsed.session_id) {
                   finalSessionId = parsed.session_id
@@ -154,6 +215,9 @@ export function ChatPage() {
                 }
                 break
 
+              // Kept for backward compatibility with older backends that may send
+              // SSE event: token directly. Current backend routes all tokens through
+              // event: progress (handled in case 'progress' above).
               case 'token': {
                 const token: string = parsed.token ?? ''
                 setMessages(prev =>
@@ -166,14 +230,16 @@ export function ChatPage() {
               }
 
               case 'done': {
-                const finalContent: string = parsed.message ?? dataLine
+                const finalContent: string = parsed.message ?? ''
+                setProgressText('')
                 setMessages(prev =>
                   prev.map(m => {
                     if (m.id !== assistantMsgId) return m
                     return {
                       ...m,
-                      content: finalContent || m.content,
+                      content: finalContent || m.content || 'No response',
                       skillUsed: parsed.skill_used || undefined,
+                      executionId: parsed.execution_id || undefined,
                       streaming: false,
                     }
                   })
@@ -272,6 +338,7 @@ export function ChatPage() {
             ...m,
             content: data.message || 'No response',
             skillUsed: data.skill_used || undefined,
+            executionId: data.execution_id || undefined,
             streaming: false,
           }
         })
@@ -307,6 +374,7 @@ export function ChatPage() {
     const messageText = input
     setInput('')
     setLoading(true)
+    setProgressText('')
 
     try {
       await sendMessageStream(messageText, assistantMsgId)
@@ -368,12 +436,15 @@ export function ChatPage() {
           {messages.map(msg => (
             <div key={msg.id} className={`message ${msg.role} ${msg.streaming ? 'streaming' : ''}`}>
               <div className="role">{msg.role}</div>
-              <div className="content">
-                {msg.content}
-                {msg.streaming && <span className="streaming-cursor" />}
-              </div>
+              {msg.streaming && progressText && (
+                <div className="progress-status">{progressText}</div>
+              )}
+              <MessageContent content={msg.content} streaming={!!msg.streaming} />
               {msg.skillUsed && (
                 <div className="skill-tag">Skill: {msg.skillUsed}</div>
+              )}
+              {msg.executionId && !msg.streaming && (
+                <ReasoningPanel executionId={msg.executionId} />
               )}
             </div>
           ))}
@@ -393,6 +464,37 @@ export function ChatPage() {
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+function ReasoningPanel({ executionId }: { executionId: string }) {
+  const [data, setData] = useState<ReasoningResponse | null>(null)
+  const [visible, setVisible] = useState(false)
+  const [debug, _setDebug] = useState(false)
+
+  const loadReasoning = useCallback(async () => {
+    if (data) {
+      setVisible(!visible)
+      return
+    }
+    try {
+      const resp = await getReasoning(executionId, debug)
+      setData(resp)
+      setVisible(true)
+    } catch {
+      // Reasoning not available for this execution
+    }
+  }, [executionId, debug, data, visible])
+
+  return (
+    <div>
+      <button className="btn-reasoning" onClick={loadReasoning}>
+        {visible ? 'Hide Reasoning' : 'View Reasoning'}
+      </button>
+      {visible && data && (
+        <ReasoningView data={data} debug={debug} />
+      )}
     </div>
   )
 }

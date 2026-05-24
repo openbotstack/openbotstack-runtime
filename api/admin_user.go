@@ -187,10 +187,20 @@ func (ar *AdminRouter) updateUser(w http.ResponseWriter, r *http.Request, userID
 }
 
 func (ar *AdminRouter) deleteUser(w http.ResponseWriter, r *http.Request, userID string) {
-	// Delete associated API keys first (avoid FK constraint violation)
-	_, _ = ar.db.Exec(`DELETE FROM api_keys WHERE user_id = ?`, userID)
+	tx, err := ar.db.Begin()
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to begin transaction")
+		return
+	}
+	defer tx.Rollback()
 
-	result, err := ar.db.Exec(`DELETE FROM users WHERE id = ?`, userID)
+	if _, err := tx.Exec(`DELETE FROM api_keys WHERE user_id = ?`, userID); err != nil {
+		slog.ErrorContext(r.Context(), "failed to delete user API keys", "error", err)
+		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to delete user API keys")
+		return
+	}
+
+	result, err := tx.Exec(`DELETE FROM users WHERE id = ?`, userID)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "admin handler error",
 			"method", r.Method, "path", r.URL.Path, "status", http.StatusInternalServerError, "error", err)
@@ -200,6 +210,11 @@ func (ar *AdminRouter) deleteUser(w http.ResponseWriter, r *http.Request, userID
 	n, _ := result.RowsAffected()
 	if n == 0 {
 		writeAPIError(w, http.StatusNotFound, ErrNotFound, "user not found")
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to commit transaction")
 		return
 	}
 

@@ -46,7 +46,7 @@ func TestProviderHotReload_PreservesURL(t *testing.T) {
 
 	modelRouter := router.NewDefaultRouter()
 	factory := providers.NewProviderFactory()
-	adminRouter := api.NewAdminRouter(db.DB)
+	adminRouter := api.NewAdminRouter(api.AdminRouterConfig{DB: db.DB})
 	adminRouter.SetProviderReloader(&adapters.ProviderReloader{Router: modelRouter, Factory: factory})
 
 	apiKeyMW := middleware.APIKeyMiddleware(middleware.APIKeyMiddlewareConfig{DB: db.DB, Strict: false})
@@ -109,7 +109,7 @@ func TestProviderHotReload_ExplicitURLOverrides(t *testing.T) {
 
 	modelRouter := router.NewDefaultRouter()
 	factory := providers.NewProviderFactory()
-	adminRouter := api.NewAdminRouter(db.DB)
+	adminRouter := api.NewAdminRouter(api.AdminRouterConfig{DB: db.DB})
 	adminRouter.SetProviderReloader(&adapters.ProviderReloader{Router: modelRouter, Factory: factory})
 
 	apiKeyMW := middleware.APIKeyMiddleware(middleware.APIKeyMiddlewareConfig{DB: db.DB, Strict: false})

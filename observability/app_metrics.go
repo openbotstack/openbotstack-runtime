@@ -9,10 +9,15 @@ import (
 )
 
 var (
-	skillExecCount    metric.Int64Counter
-	skillExecDuration metric.Float64Histogram
-	llmTokenUsage     metric.Int64Histogram
+	skillExecCount      metric.Int64Counter
+	skillExecDuration   metric.Float64Histogram
+	llmTokenUsage       metric.Int64Histogram
 	activeRequestsGauge metric.Int64UpDownCounter
+	plannerLatency      metric.Float64Histogram
+	providerLatency     metric.Float64Histogram
+	timeoutCount        metric.Int64Counter
+	retryCount          metric.Int64Counter
+	wasmFailureTotal    metric.Int64Counter
 )
 
 // InitAppMetrics creates application-specific metric instruments.
@@ -46,6 +51,43 @@ func InitAppMetrics() error {
 
 	activeRequestsGauge, err = meter.Int64UpDownCounter("active_requests",
 		metric.WithDescription("Currently active requests"),
+	)
+	if err != nil {
+		return err
+	}
+
+	plannerLatency, err = meter.Float64Histogram("planner_latency_ms",
+		metric.WithDescription("Execution planner latency in milliseconds"),
+		metric.WithUnit("ms"),
+	)
+	if err != nil {
+		return err
+	}
+
+	providerLatency, err = meter.Float64Histogram("provider_latency_ms",
+		metric.WithDescription("LLM provider response latency in milliseconds"),
+		metric.WithUnit("ms"),
+	)
+	if err != nil {
+		return err
+	}
+
+	timeoutCount, err = meter.Int64Counter("timeout_count",
+		metric.WithDescription("Total number of step/session timeouts"),
+	)
+	if err != nil {
+		return err
+	}
+
+	retryCount, err = meter.Int64Counter("retry_count",
+		metric.WithDescription("Total number of step retry attempts"),
+	)
+	if err != nil {
+		return err
+	}
+
+	wasmFailureTotal, err = meter.Int64Counter("wasm_failure_total",
+		metric.WithDescription("Total number of Wasm skill execution failures"),
 	)
 	if err != nil {
 		return err
@@ -96,6 +138,53 @@ func ActiveRequestDecrement(ctx context.Context, endpoint string) {
 	if activeRequestsGauge != nil {
 		activeRequestsGauge.Add(ctx, -1, metric.WithAttributes(
 			attribute.String("endpoint", endpoint),
+		))
+	}
+}
+
+// RecordPlannerLatency records execution planner latency.
+func RecordPlannerLatency(ctx context.Context, durationMs float64, success bool) {
+	if plannerLatency != nil {
+		plannerLatency.Record(ctx, durationMs, metric.WithAttributes(
+			attribute.Bool("success", success),
+		))
+	}
+}
+
+// RecordProviderLatency records LLM provider response latency.
+func RecordProviderLatency(ctx context.Context, provider, model string, durationMs float64) {
+	if providerLatency != nil {
+		providerLatency.Record(ctx, durationMs, metric.WithAttributes(
+			attribute.String("provider", provider),
+			attribute.String("model", model),
+		))
+	}
+}
+
+// RecordTimeout increments the timeout counter.
+func RecordTimeout(ctx context.Context, scope string) {
+	if timeoutCount != nil {
+		timeoutCount.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("scope", scope),
+		))
+	}
+}
+
+// RecordRetry increments the retry counter.
+func RecordRetry(ctx context.Context, stepName string) {
+	if retryCount != nil {
+		retryCount.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("step", stepName),
+		))
+	}
+}
+
+// RecordWasmFailure increments the Wasm failure counter.
+func RecordWasmFailure(ctx context.Context, skillID, errorType string) {
+	if wasmFailureTotal != nil {
+		wasmFailureTotal.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("skill_id", skillID),
+			attribute.String("error_type", errorType),
 		))
 	}
 }

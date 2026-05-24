@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openbotstack/openbotstack-core/audit"
 	"github.com/openbotstack/openbotstack-runtime/persistence"
 )
 
@@ -27,7 +28,7 @@ func TestLogAndQuery(t *testing.T) {
 
 	logger := NewSQLiteAuditLogger(db.DB)
 
-	events := []Event{
+	events := []audit.AuditEvent{
 		{ID: "e1", TenantID: "t1", Action: "execute", Timestamp: time.Now()},
 		{ID: "e2", TenantID: "t1", Action: "query", Timestamp: time.Now()},
 		{ID: "e3", TenantID: "t2", Action: "execute", Timestamp: time.Now()},
@@ -57,10 +58,10 @@ func TestQueryByTimeRange(t *testing.T) {
 	past := time.Now().Add(-2 * time.Hour)
 	recent := time.Now()
 
-	if err := logger.Log(ctx, Event{ID: "old", TenantID: "t1", Action: "test", Timestamp: past}); err != nil {
+	if err := logger.Log(ctx, audit.AuditEvent{ID: "old", TenantID: "t1", Action: "test", Timestamp: past}); err != nil {
 		t.Fatalf("Log old: %v", err)
 	}
-	if err := logger.Log(ctx, Event{ID: "new", TenantID: "t1", Action: "test", Timestamp: recent}); err != nil {
+	if err := logger.Log(ctx, audit.AuditEvent{ID: "new", TenantID: "t1", Action: "test", Timestamp: recent}); err != nil {
 		t.Fatalf("Log new: %v", err)
 	}
 
@@ -83,10 +84,10 @@ func TestQueryByRequestID(t *testing.T) {
 	ctx := context.Background()
 
 	logger := NewSQLiteAuditLogger(db.DB)
-	if err := logger.Log(ctx, Event{ID: "e1", TenantID: "t1", RequestID: "req-123", Action: "test", Timestamp: time.Now()}); err != nil {
+	if err := logger.Log(ctx, audit.AuditEvent{ID: "e1", TenantID: "t1", RequestID: "req-123", Action: "test", Timestamp: time.Now()}); err != nil {
 		t.Fatalf("Log e1: %v", err)
 	}
-	if err := logger.Log(ctx, Event{ID: "e2", TenantID: "t1", RequestID: "req-456", Action: "test", Timestamp: time.Now()}); err != nil {
+	if err := logger.Log(ctx, audit.AuditEvent{ID: "e2", TenantID: "t1", RequestID: "req-456", Action: "test", Timestamp: time.Now()}); err != nil {
 		t.Fatalf("Log e2: %v", err)
 	}
 
@@ -105,13 +106,13 @@ func TestCount(t *testing.T) {
 	ctx := context.Background()
 
 	logger := NewSQLiteAuditLogger(db.DB)
-	if err := logger.Log(ctx, Event{ID: "e1", TenantID: "t1", Action: "a", Timestamp: time.Now()}); err != nil {
+	if err := logger.Log(ctx, audit.AuditEvent{ID: "e1", TenantID: "t1", Action: "a", Timestamp: time.Now()}); err != nil {
 		t.Fatalf("Log e1: %v", err)
 	}
-	if err := logger.Log(ctx, Event{ID: "e2", TenantID: "t1", Action: "b", Timestamp: time.Now()}); err != nil {
+	if err := logger.Log(ctx, audit.AuditEvent{ID: "e2", TenantID: "t1", Action: "b", Timestamp: time.Now()}); err != nil {
 		t.Fatalf("Log e2: %v", err)
 	}
-	if err := logger.Log(ctx, Event{ID: "e3", TenantID: "t2", Action: "a", Timestamp: time.Now()}); err != nil {
+	if err := logger.Log(ctx, audit.AuditEvent{ID: "e3", TenantID: "t2", Action: "a", Timestamp: time.Now()}); err != nil {
 		t.Fatalf("Log e3: %v", err)
 	}
 

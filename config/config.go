@@ -4,6 +4,7 @@ import (
 	"os"
 	"time"
 
+	mcpcore "github.com/openbotstack/openbotstack-core/mcp"
 	"gopkg.in/yaml.v3"
 )
 
@@ -67,6 +68,7 @@ type Config struct {
 	Vector        VectorConfig        `yaml:"vector"`
 	Agent         AgentConfig         `yaml:"agent"`
 	CORS          CORSConfig          `yaml:"cors"`
+	MCP           MCPConfig           `yaml:"mcp"`
 }
 
 // CORSConfig controls Cross-Origin Resource Sharing settings.
@@ -127,6 +129,33 @@ type LLMProviderConfig struct {
 	Model   string `yaml:"model"`
 }
 
+// MCPConfig configures MCP server connections.
+type MCPConfig struct {
+	Servers []MCPServerConfig `yaml:"servers"`
+}
+
+// MCPServerConfig describes a single MCP server to connect to.
+type MCPServerConfig struct {
+	ID        string              `yaml:"id"`
+	Name      string              `yaml:"name"`
+	Transport string              `yaml:"transport"` // "stdio" | "sse"
+	Command   string              `yaml:"command,omitempty"`
+	Args      []string            `yaml:"args,omitempty"`
+	URL       string              `yaml:"url,omitempty"`
+	Env       map[string]string   `yaml:"env,omitempty"`
+	Auth      *MCPServerAuthConfig `yaml:"auth,omitempty"`
+	Enabled   bool                `yaml:"enabled"`
+}
+
+// MCPServerAuthConfig describes authentication for an MCP server.
+type MCPServerAuthConfig struct {
+	Type    string            `yaml:"type"`               // "bearer" | "api_key" | "custom" | "none"
+	Token   string            `yaml:"token,omitempty"`     // bearer token or API key value
+	Header  string            `yaml:"header,omitempty"`    // custom header name for api_key (default: X-API-Key)
+	Headers map[string]string `yaml:"headers,omitempty"`   // custom headers for HTTP transports
+	EnvAuth map[string]string `yaml:"env_auth,omitempty"`  // env vars for stdio transport
+}
+
 // defaultConfig returns the default configuration with all fields populated.
 func defaultConfig() *Config {
 	return &Config{
@@ -152,17 +181,17 @@ func defaultConfig() *Config {
 			MaxHistoryMessages: 50,
 		},
 		Sandbox: SandboxConfig{
-			HTTPAllowlist:   []string{"*"},
+			HTTPAllowlist:   []string{},
 			ToolRegistryURL: "http://localhost:8080",
 		},
 		Agent: AgentConfig{
-			Mode: "single_pass",
+			Mode: "harness",
 			DualLoop: DualLoopConfig{
 				MaxTurns:          8,
 				MaxToolCalls:      20,
-				MaxTurnRuntime:    30 * time.Second,
+				MaxTurnRuntime:    120 * time.Second,
 				MaxWorkflowSteps:  5,
-				MaxSessionRuntime: 60 * time.Second,
+				MaxSessionRuntime: 300 * time.Second,
 				MaxRetainedTurns:  4,
 			},
 		},
@@ -242,4 +271,39 @@ func Load(path string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// ToCoreServers converts config MCPServerConfigs to core ServerConfigs.
+func (c *MCPConfig) ToCoreServers() []mcpcore.ServerConfig {
+	if len(c.Servers) == 0 {
+		return nil
+	}
+	out := make([]mcpcore.ServerConfig, len(c.Servers))
+	for i, s := range c.Servers {
+		out[i] = s.toCore()
+	}
+	return out
+}
+
+func (s MCPServerConfig) toCore() mcpcore.ServerConfig {
+	cfg := mcpcore.ServerConfig{
+		ID:        s.ID,
+		Name:      s.Name,
+		Transport: s.Transport,
+		Command:   s.Command,
+		Args:      s.Args,
+		URL:       s.URL,
+		Env:       s.Env,
+		Enabled:   s.Enabled,
+	}
+	if s.Auth != nil {
+		cfg.Auth = &mcpcore.ServerAuth{
+			Type:    s.Auth.Type,
+			Token:   s.Auth.Token,
+			Header:  s.Auth.Header,
+			Headers: s.Auth.Headers,
+			EnvAuth: s.Auth.EnvAuth,
+		}
+	}
+	return cfg
 }

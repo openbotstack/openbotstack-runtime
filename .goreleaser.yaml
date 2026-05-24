@@ -1,6 +1,7 @@
 before:
   hooks:
-    - sh -c "cd web && npm ci && npm run build"
+    - sh -c "cd web/user && npm ci && npm run build"
+    - sh -c "cd web/admin && npm ci && npm run build"
 
 builds:
   - env:

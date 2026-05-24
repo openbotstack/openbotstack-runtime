@@ -69,7 +69,7 @@ func (s *MarkdownMemoryStore) AppendMessage(ctx context.Context, msg agent.Sessi
 			"updated_at":    msg.Timestamp,
 			"message_count": "1",
 		}
-		content := FormatFrontmatter(meta) + FormatMessageBlock(msg.Role, msg.Content, msg.Timestamp)
+		content := FormatFrontmatter(meta) + FormatMessageBlock(msg.Role, msg.Content, msg.Timestamp, msg.ExecutionID)
 		return os.WriteFile(path, []byte(content), 0600)
 	}
 	if err != nil {
@@ -103,7 +103,7 @@ func (s *MarkdownMemoryStore) AppendMessage(ctx context.Context, msg agent.Sessi
 	meta["updated_at"] = msg.Timestamp
 	meta["message_count"] = incrementCount(meta["message_count"])
 
-	newContent := FormatFrontmatter(meta) + string(body) + FormatMessageBlock(msg.Role, msg.Content, msg.Timestamp)
+	newContent := FormatFrontmatter(meta) + string(body) + FormatMessageBlock(msg.Role, msg.Content, msg.Timestamp, msg.ExecutionID)
 
 	if err := f.Truncate(0); err != nil {
 		return fmt.Errorf("memory: failed to truncate: %w", err)

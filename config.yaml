@@ -6,8 +6,8 @@ providers:
     default: openai
     openai:
       base_url: "https://api.openai.com/v1"
-      api_key: ""  # Set via OBS_LLM_API_KEY environment variable
-      model: "gpt-4o-mini"
+      api_key: ""
+      model: "gpt-4o"
 
 observability:
   log_level: "info"

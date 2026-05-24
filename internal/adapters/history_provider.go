@@ -24,13 +24,13 @@ func NewHistoryProvider(mdStore *memory.MarkdownMemoryStore, sessionState memory
 }
 
 // GetSessionHistory retrieves messages for a session.
-func (p *HistoryProvider) GetSessionHistory(ctx context.Context, sessionID string) ([]api.Message, error) {
+func (p *HistoryProvider) GetSessionHistory(ctx context.Context, sessionID string) ([]agent.Message, error) {
 	if p.sessionState != nil {
 		si, err := p.sessionState.GetSession(ctx, sessionID)
 		if err == nil && si != nil && p.mdStore != nil {
 			msgs, err := p.mdStore.GetHistory(ctx, si.TenantID, "", sessionID, 0)
 			if err == nil && len(msgs) > 0 {
-				return convertMessages(msgs), nil
+				return msgs, nil
 			}
 		}
 	}
@@ -39,9 +39,9 @@ func (p *HistoryProvider) GetSessionHistory(ctx context.Context, sessionID strin
 		if err != nil {
 			return nil, err
 		}
-		return convertMessages(msgs), nil
+		return msgs, nil
 	}
-	return []api.Message{}, nil
+	return []agent.Message{}, nil
 }
 
 // ListSessions returns all sessions for the current tenant.
@@ -80,14 +80,6 @@ func (p *HistoryProvider) DeleteSession(ctx context.Context, sessionID string) e
 		return p.mdStore.DeleteSessionBySessionID(ctx, sessionID)
 	}
 	return nil
-}
-
-func convertMessages(msgs []agent.Message) []api.Message {
-	result := make([]api.Message, 0, len(msgs))
-	for _, m := range msgs {
-		result = append(result, api.Message{Role: m.Role, Content: m.Content})
-	}
-	return result
 }
 
 func convertSummaries(sessions []memory.SessionInfo) []api.SessionSummary {

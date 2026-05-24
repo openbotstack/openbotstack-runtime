@@ -7,11 +7,12 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	
 
 	"github.com/openbotstack/openbotstack-core/control/agent"
 	"github.com/openbotstack/openbotstack-runtime/api/middleware"
-	dualloop "github.com/openbotstack/openbotstack-runtime/agent"
-	"github.com/openbotstack/openbotstack-runtime/loop"
+	"github.com/openbotstack/openbotstack-runtime/harness"
+	"github.com/openbotstack/openbotstack-runtime/harness/reasoning"
 )
 
 // ChatRequest is the input for chat endpoint.
@@ -24,27 +25,22 @@ type ChatRequest struct {
 
 // ChatResponse is the output from chat endpoint.
 type ChatResponse struct {
-	SessionID string `json:"session_id"`
-	Message   string `json:"message"`
-	SkillUsed string `json:"skill_used,omitempty"`
+	SessionID   string `json:"session_id"`
+	Message     string `json:"message"`
+	SkillUsed   string `json:"skill_used,omitempty"`
+	ExecutionID string `json:"execution_id,omitempty"`
 }
 
 // HistoryResponse contains conversation history.
 type HistoryResponse struct {
-	SessionID string    `json:"session_id"`
-	Messages  []Message `json:"messages"`
-}
-
-// Message represents a single chat message.
-type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	SessionID string          `json:"session_id"`
+	Messages  []agent.Message `json:"messages"`
 }
 
 // HistoryProvider gives access to conversation history.
 type HistoryProvider interface {
 	// GetSessionHistory retrieves messages for a session.
-	GetSessionHistory(ctx context.Context, sessionID string) ([]Message, error)
+	GetSessionHistory(ctx context.Context, sessionID string) ([]agent.Message, error)
 	// ListSessions returns all sessions for the current tenant.
 	ListSessions(ctx context.Context) ([]SessionSummary, error)
 	// DeleteSession removes all entries for a session.
@@ -61,6 +57,23 @@ type SessionSummary struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
+// RouterConfig holds all dependencies for constructing a Router.
+type RouterConfig struct {
+	Agent agent.Agent
+
+	// Optional dependencies
+	AuthMiddleware   func(http.Handler) http.Handler
+	Skills           SkillProvider
+	SkillDisabled    func(id string) bool
+	ExecStore        ExecutionStore
+	History          HistoryProvider
+	HealthCheckers   []HealthChecker
+	BuildInfo        BuildInfo
+	ReasoningStore   reasoning.Store
+	TelemetryHandler *TelemetryHandler
+	LineageBuilder   *LineageBuilder
+}
+
 // Router handles HTTP routing.
 //
 // The Router is responsible ONLY for:
@@ -74,67 +87,69 @@ type SessionSummary struct {
 //   - Execute skills (that's the Executor's job)
 //   - Make any decisions about which skill to use
 type Router struct {
-	mux            *http.ServeMux
-	v1Mux          *http.ServeMux
-	v1Handler      http.Handler
-	agent          agent.Agent
-	skills         SkillProvider
-	skillDisabled  func(id string) bool
-	execStore      ExecutionStore
-	history        HistoryProvider
-	healthCheckers []HealthChecker
-	buildInfo      BuildInfo
+	mux             *http.ServeMux
+	v1Mux           *http.ServeMux
+	v1Handler       http.Handler
+	agent           agent.Agent
+	skills          SkillProvider
+	skillDisabled   func(id string) bool
+	execStore       ExecutionStore
+	history         HistoryProvider
+	healthCheckers  []HealthChecker
+	buildInfo       BuildInfo
+	reasoningStore   reasoning.Store
+	telemetryHandler *TelemetryHandler
+	lineageBuilder   *LineageBuilder
 }
 
-// NewRouter creates a new API router with an Agent.
-func NewRouter(a agent.Agent) *Router {
+// NewRouter creates a new API router from a RouterConfig.
+func NewRouter(cfg RouterConfig) *Router {
 	r := &Router{
-		mux:   http.NewServeMux(),
-		v1Mux: http.NewServeMux(),
-		agent: a,
+		mux:             http.NewServeMux(),
+		v1Mux:           http.NewServeMux(),
+		agent:           cfg.Agent,
+		skills:          cfg.Skills,
+		skillDisabled:   cfg.SkillDisabled,
+		execStore:       cfg.ExecStore,
+		history:         cfg.History,
+		healthCheckers:  cfg.HealthCheckers,
+		buildInfo:       cfg.BuildInfo,
+		reasoningStore:   cfg.ReasoningStore,
+		telemetryHandler: cfg.TelemetryHandler,
+		lineageBuilder:   cfg.LineageBuilder,
 	}
 	r.v1Handler = r.v1Mux
+	if cfg.AuthMiddleware != nil {
+		r.v1Handler = cfg.AuthMiddleware(r.v1Mux)
+	}
 	r.registerRoutes()
 	return r
 }
 
-// SetAuthMiddleware sets an authentication middleware to be used for all /v1/ endpoints.
-// This should be called before requests begin processing.
+// SetAuthMiddleware allows setting auth middleware after construction (for tests).
 func (r *Router) SetAuthMiddleware(mw func(http.Handler) http.Handler) {
 	if mw != nil {
 		r.v1Handler = mw(r.v1Mux)
 	}
 }
 
-// SetSkillProvider sets the skill registry for the /v1/skills endpoint.
-func (r *Router) SetSkillProvider(sp SkillProvider) {
-	r.skills = sp
-}
+// SetReasoningStore allows setting the reasoning store after construction (for tests).
+func (r *Router) SetReasoningStore(s reasoning.Store) { r.reasoningStore = s }
 
-// SetSkillDisabledChecker sets a function that checks if a skill is disabled.
-func (r *Router) SetSkillDisabledChecker(fn func(id string) bool) {
-	r.skillDisabled = fn
-}
+// SetBuildInfo allows setting build info after construction (for tests).
+func (r *Router) SetBuildInfo(info BuildInfo) { r.buildInfo = info }
 
-// SetExecutionStore sets the execution store for the /v1/executions endpoint.
-func (r *Router) SetExecutionStore(es ExecutionStore) {
-	r.execStore = es
-}
+// SetHealthCheckers allows setting health checkers after construction (for tests).
+func (r *Router) SetHealthCheckers(checkers ...HealthChecker) { r.healthCheckers = checkers }
 
-// SetHistoryProvider sets the history provider for the /v1/sessions/{id}/history endpoint.
-func (r *Router) SetHistoryProvider(hp HistoryProvider) {
-	r.history = hp
-}
+// SetExecutionStore allows setting the execution store after construction (for tests).
+func (r *Router) SetExecutionStore(es ExecutionStore) { r.execStore = es }
 
-// SetHealthCheckers sets the health checkers for the /readyz endpoint.
-func (r *Router) SetHealthCheckers(checkers ...HealthChecker) {
-	r.healthCheckers = checkers
-}
+// SetHistoryProvider allows setting the history provider after construction (for tests).
+func (r *Router) SetHistoryProvider(hp HistoryProvider) { r.history = hp }
 
-// SetBuildInfo sets the build info for the /readyz and /version endpoints.
-func (r *Router) SetBuildInfo(info BuildInfo) {
-	r.buildInfo = info
-}
+// SetSkillProvider allows setting the skill provider after construction (for tests).
+func (r *Router) SetSkillProvider(sp SkillProvider) { r.skills = sp }
 
 // ServeHTTP implements http.Handler.
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -154,6 +169,16 @@ func (r *Router) registerRoutes() {
 	r.v1Mux.HandleFunc("/v1/executions", r.handleExecutions)
 	r.v1Mux.HandleFunc("/v1/sessions", r.handleListSessions)
 	r.v1Mux.HandleFunc("/v1/sessions/", r.handleSessions)
+	r.v1Mux.HandleFunc("/v1/execution/", r.handleExecutionAction)
+	r.v1Mux.HandleFunc("/v1/me", HandleMe)
+
+	// Telemetry admin endpoints
+	r.v1Mux.HandleFunc("/v1/admin/telemetry/health", r.handleTelemetryHealth)
+	r.v1Mux.HandleFunc("/v1/admin/telemetry/spans", r.handleTelemetrySpans)
+	r.v1Mux.HandleFunc("/v1/admin/telemetry/events", r.handleTelemetryEvents)
+	r.v1Mux.HandleFunc("/v1/admin/telemetry/metrics", r.handleTelemetryMetrics)
+	r.v1Mux.HandleFunc("/v1/admin/telemetry/failures", r.handleTelemetryFailures)
+	r.v1Mux.HandleFunc("/v1/admin/telemetry/summary", r.handleTelemetrySummary)
 
 	// Route /v1/ traffic to the potentially wrapped v1Handler
 	r.mux.Handle("/v1/", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -176,6 +201,7 @@ func (r *Router) handleChat(w http.ResponseWriter, req *http.Request) {
 	}
 
 	var chatReq ChatRequest
+	req.Body = http.MaxBytesReader(w, req.Body, 1<<20) // 1MB limit
 	if err := json.NewDecoder(req.Body).Decode(&chatReq); err != nil {
 		slog.WarnContext(req.Context(), "request validation error",
 			"method", req.Method,
@@ -238,9 +264,10 @@ func (r *Router) handleChat(w http.ResponseWriter, req *http.Request) {
 	}
 
 	resp := ChatResponse{
-		SessionID: agentResp.SessionID,
-		Message:   agentResp.Message,
-		SkillUsed: agentResp.SkillUsed,
+		SessionID:   agentResp.SessionID,
+		Message:     agentResp.Message,
+		SkillUsed:   agentResp.SkillUsed,
+		ExecutionID: agentResp.ExecutionID,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -260,6 +287,7 @@ func (r *Router) handleChatStream(w http.ResponseWriter, req *http.Request) {
 	}
 
 	var chatReq ChatRequest
+	req.Body = http.MaxBytesReader(w, req.Body, 1<<20) // 1MB limit
 	if err := json.NewDecoder(req.Body).Decode(&chatReq); err != nil {
 		writeAPIError(w, http.StatusBadRequest, ErrInvalidRequest, "invalid request body")
 		return
@@ -289,18 +317,20 @@ func (r *Router) handleChatStream(w http.ResponseWriter, req *http.Request) {
 		agentReq.UserID = user.ID
 	}
 
-	agentResp, err := func() (*agent.MessageResponse, error) {
-		// If the agent supports progress callbacks, wire SSE streaming
-		if dla, ok := r.agent.(*dualloop.DualLoopAgent); ok {
-			sseHandler := NewSSEHandler(w)
-			dla.SetProgressCallback(func(event loop.ProgressEvent) {
-				data, _ := json.Marshal(event)
-				_ = sseHandler.WriteEvent(SSEEvent{Event: "progress", Data: string(data)})
-			})
-			defer dla.SetProgressCallback(nil)
+	// Create a single SSE handler for the entire stream lifecycle.
+	// Headers + `:ok\n\n` are sent immediately to unblock the client.
+	sseHandler := NewSSEHandler(w)
+	var tokensStreamed bool
+
+	agentReq.ProgressCallback = func(eventType, content string, turn int, tool string) {
+		if eventType == "token" {
+			tokensStreamed = true
 		}
-		return r.agent.HandleMessage(req.Context(), agentReq)
-	}()
+		data, _ := json.Marshal(harness.ProgressEvent{Type: eventType, Content: content, Turn: turn, Tool: tool})
+		_ = sseHandler.WriteEvent(SSEEvent{Event: "progress", Data: string(data)})
+	}
+
+	agentResp, err := r.agent.HandleMessage(req.Context(), agentReq)
 	if err != nil {
 		slog.ErrorContext(req.Context(), "streaming handler error",
 			"method", req.Method,
@@ -308,20 +338,40 @@ func (r *Router) handleChatStream(w http.ResponseWriter, req *http.Request) {
 			"status", http.StatusInternalServerError,
 			"error", err,
 		)
-		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "internal error")
+		errData, _ := json.Marshal(map[string]string{"error": "internal error", "code": ErrInternal})
+		_ = sseHandler.WriteEvent(SSEEvent{Event: "error", Data: string(errData)})
 		return
 	}
 
-	// Stream the response as SSE events
-	handler := NewSSEHandler(w)
+	// Mark message as already streamed if tokens were emitted during execution
+	if agentResp != nil && tokensStreamed {
+		agentResp.Message = ""
+	}
+
+	// Reuse the same handler for final events (no second WriteHeader)
+	handler := sseHandler
+
+	// Emit the message as a token event so clients always see content via the token path.
+	// For LLM-based skills, tokens were already streamed during execution.
+	// For Wasm/native skills, this is the single token that carries the full output.
+	if agentResp.Message != "" {
+		tokenData, _ := json.Marshal(harness.ProgressEvent{Type: "token", Content: agentResp.Message})
+		_ = handler.WriteEvent(SSEEvent{Event: "progress", Data: string(tokenData)})
+	}
+
 	sessionJSON, _ := json.Marshal(map[string]string{"session_id": agentResp.SessionID})
 	_ = handler.WriteEvent(SSEEvent{
 		Event: "session",
 		Data:  string(sessionJSON),
 	})
+	donePayload := map[string]string{"execution_id": agentResp.ExecutionID}
+	if agentResp.SkillUsed != "" {
+		donePayload["skill_used"] = agentResp.SkillUsed
+	}
+	doneJSON, _ := json.Marshal(donePayload)
 	_ = handler.WriteEvent(SSEEvent{
 		Event: "done",
-		Data:  agentResp.Message,
+		Data:  string(doneJSON),
 	})
 }
 
@@ -354,7 +404,7 @@ func (r *Router) handleSessions(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	messages := []Message{}
+	messages := []agent.Message{}
 	if r.history != nil {
 		var err error
 		messages, err = r.history.GetSessionHistory(req.Context(), sessionID)
@@ -431,10 +481,7 @@ func (r *Router) deleteSessionByID(w http.ResponseWriter, req *http.Request, ses
 	w.WriteHeader(http.StatusNoContent)
 }
 func (r *Router) handleNotFound(w http.ResponseWriter, req *http.Request) {
-	// Only trigger for truly unmatched paths
-	if req.URL.Path == "/" || req.URL.Path == "/health" || req.URL.Path == "/healthz" ||
-		req.URL.Path == "/readyz" || req.URL.Path == "/version" ||
-		strings.HasPrefix(req.URL.Path, "/v1/") {
+	if req.URL.Path == "/" {
 		return
 	}
 	http.NotFound(w, req)

@@ -54,8 +54,16 @@ func TestParseFrontmatterNoFrontmatter(t *testing.T) {
 }
 
 func TestFormatMessageBlock(t *testing.T) {
-	got := memory.FormatMessageBlock("user", "What is the weather?", "2026-04-14T10:00:00Z")
+	got := memory.FormatMessageBlock("user", "What is the weather?", "2026-04-14T10:00:00Z", "")
 	want := "\n## [2026-04-14T10:00:00Z] user\n\nWhat is the weather?\n"
+	if got != want {
+		t.Errorf("FormatMessageBlock() = %q, want %q", got, want)
+	}
+}
+
+func TestFormatMessageBlockWithExecutionID(t *testing.T) {
+	got := memory.FormatMessageBlock("assistant", "result", "2026-04-14T10:00:00Z", "exec-123")
+	want := "\n## [2026-04-14T10:00:00Z] assistant\n\n<!-- exec:exec-123 -->\n\nresult\n"
 	if got != want {
 		t.Errorf("FormatMessageBlock() = %q, want %q", got, want)
 	}
@@ -98,6 +106,23 @@ func TestParseMessageBlocksEmpty(t *testing.T) {
 	}
 	if len(msgs) != 0 {
 		t.Errorf("expected 0 messages, got %d", len(msgs))
+	}
+}
+
+func TestParseMessageBlocksWithExecutionID(t *testing.T) {
+	body := []byte("\n## [2026-04-14T10:00:00Z] user\n\nHello\n\n## [2026-04-14T10:00:05Z] assistant\n\n<!-- exec:exec-abc-123 -->\n\nHi there\n")
+	msgs := memory.ParseMessageBlocks(body)
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(msgs))
+	}
+	if msgs[0].ExecutionID != "" {
+		t.Errorf("msgs[0].ExecutionID = %q, want empty", msgs[0].ExecutionID)
+	}
+	if msgs[1].ExecutionID != "exec-abc-123" {
+		t.Errorf("msgs[1].ExecutionID = %q, want %q", msgs[1].ExecutionID, "exec-abc-123")
+	}
+	if msgs[1].Content != "Hi there" {
+		t.Errorf("msgs[1].Content = %q, want %q", msgs[1].Content, "Hi there")
 	}
 }
 
