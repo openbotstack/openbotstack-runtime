@@ -37,6 +37,7 @@ type HarnessAgentConfig struct {
 	ReasoningStore     harness.ReasoningStorer
 	HookManager        *harness.HookManager
 	MaxHistoryMessages int // defaults to 50 if zero
+	CapRegistry        capability.CapabilityRegistry
 }
 
 // HarnessAgent implements agent.Agent using the Execution Harness model.
@@ -68,6 +69,7 @@ func NewHarnessAgent(cfg HarnessAgentConfig) *HarnessAgent {
 	return &HarnessAgent{
 		planner:            cfg.Planner,
 		skillRegistry:      cfg.Registry,
+		capRegistry:        cfg.CapRegistry,
 		runtime:            cfg.Runtime,
 		harness:            cfg.Harness,
 		conversationStore:  cfg.ConversationStore,
@@ -78,42 +80,6 @@ func NewHarnessAgent(cfg HarnessAgentConfig) *HarnessAgent {
 		reasoningStore:     cfg.ReasoningStore,
 		maxHistoryMessages: maxHist,
 	}
-}
-
-// SetConversationStore configures the conversation memory backend (post-construction).
-func (a *HarnessAgent) SetConversationStore(store agent.ConversationStore) {
-	a.conversationStore = store
-}
-
-// SetContextAssembler configures the context assembler (post-construction).
-func (a *HarnessAgent) SetContextAssembler(ca corecontext.ContextAssembler) {
-	a.contextAssembler = ca
-}
-
-// SetMemoryManager configures the memory manager (post-construction).
-func (a *HarnessAgent) SetMemoryManager(mm abstraction.MemoryManager) {
-	a.memoryManager = mm
-}
-
-// SetMaxHistoryMessages sets the maximum number of recent messages to load.
-func (a *HarnessAgent) SetMaxHistoryMessages(n int) {
-	a.maxHistoryMessages = n
-}
-
-// SetSkillDisabledChecker sets a function that checks if a skill is disabled.
-func (a *HarnessAgent) SetSkillDisabledChecker(fn func(id string) bool) {
-	a.skillDisabled = fn
-}
-
-// SetCapabilityRegistry configures the capability registry (post-construction).
-// When set, gatherSkillDescriptors uses it instead of the skill registry.
-func (a *HarnessAgent) SetCapabilityRegistry(reg capability.CapabilityRegistry) {
-	a.capRegistry = reg
-}
-
-// SetHookManager delegates to the internal harness.
-func (a *HarnessAgent) SetHookManager(hm *harness.HookManager) {
-	a.harness.SetHookManager(hm)
 }
 
 // HandleMessage implements agent.Agent.
