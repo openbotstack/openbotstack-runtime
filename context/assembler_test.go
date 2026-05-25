@@ -254,6 +254,110 @@ func TestBuildPersonaSystemPrompt_EmptyAll(t *testing.T) {
 	}
 }
 
+// ============================================================================
+// Contract Tests — verify ContextAssembler interface invariants
+// (documented in openbotstack-core/context/assembler.go)
+// ============================================================================
+
+func TestContract_NeverReturnsNilWithoutError(t *testing.T) {
+	assembler := NewRuntimeContextAssembler(nil, nil)
+	result, err := assembler.Assemble(
+		context.Background(),
+		corecontext.AssistantContext{ProfileID: "test"},
+		corecontext.UserRequest{Message: "hello"},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("contract violation: nil result without error")
+	}
+}
+
+func TestContract_SystemPromptNonEmptyWhenBaseSet(t *testing.T) {
+	assembler := NewRuntimeContextAssembler(nil, nil)
+	result, err := assembler.Assemble(
+		context.Background(),
+		corecontext.AssistantContext{
+			ProfileID:        "test",
+			BaseSystemPrompt: "You are a helpful assistant.",
+		},
+		corecontext.UserRequest{Message: "hello"},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.SystemPrompt == "" {
+		t.Fatal("contract violation: SystemPrompt empty when BaseSystemPrompt is set")
+	}
+}
+
+func TestContract_MemoryFailureIsBestEffort(t *testing.T) {
+	assembler := NewRuntimeContextAssembler(nil, &errorMemoryManager{})
+	result, err := assembler.Assemble(
+		context.Background(),
+		corecontext.AssistantContext{ProfileID: "test"},
+		corecontext.UserRequest{Message: "hello"},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("contract violation: Assemble failed on memory error: %v", err)
+	}
+	if len(result.RelevantMemories) != 0 {
+		t.Fatal("contract violation: RelevantMemories should be empty on memory failure")
+	}
+}
+
+func TestContract_MemoryMessagesPrecedeHistory(t *testing.T) {
+	memoryManager := &successMemoryManager{
+		entries: []abstraction.MemoryEntry{{Content: "remembered"}},
+	}
+	assembler := NewRuntimeContextAssembler(nil, memoryManager)
+	history := []skills.Message{
+		{Role: "user", Content: "history msg"},
+	}
+	result, err := assembler.Assemble(
+		context.Background(),
+		corecontext.AssistantContext{ProfileID: "test"},
+		corecontext.UserRequest{Message: "hello"},
+		history,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Messages) < 2 {
+		t.Fatalf("expected >= 2 messages, got %d", len(result.Messages))
+	}
+	if result.Messages[0].Role != "system" {
+		t.Fatalf("contract violation: first message should be system (memory), got %q", result.Messages[0].Role)
+	}
+	if result.Messages[1].Content != "history msg" {
+		t.Fatalf("contract violation: second message should be history, got %q", result.Messages[1].Content)
+	}
+}
+
+func TestContract_MissingSkillsSkipped(t *testing.T) {
+	registry := &mockRegistry{skills: map[string]mockSkill{}}
+	assembler := NewRuntimeContextAssembler(registry, nil)
+	result, err := assembler.Assemble(
+		context.Background(),
+		corecontext.AssistantContext{
+			ProfileID:       "test",
+			EnabledSkillIDs: []string{"nonexistent"},
+		},
+		corecontext.UserRequest{Message: "hello"},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.AvailableTools) != 0 {
+		t.Fatal("contract violation: missing skills should be skipped, not error")
+	}
+}
+
 // Mock implementations
 
 // mockRegistry implements agent.SkillRegistry (List + Get).
