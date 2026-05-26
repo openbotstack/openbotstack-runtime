@@ -77,13 +77,10 @@ See the [Testing Guide](https://github.com/openbotstack/openbotstack-docs/blob/m
 
 | Skill | Type | Description |
 |-------|------|-------------|
-| hello-world | Deterministic | Basic input/output |
-| math-add | Deterministic | Math operations |
-| wordcount | Deterministic | Word counting |
-| tax-calculator | Deterministic | Tax calculation |
-| sentiment | Declarative | Sentiment analysis |
+| hello-world | Wasm (wasip1) | Basic input/output |
 | summarize | Declarative | Text summarization |
-| meeting-summarize | Declarative | Meeting notes |
+| classify | Declarative | Text classification |
+| extract_structured_data | Declarative | Structured data extraction |
 
 System-default skills in `skills/`. Example skills in `openbotstack-apps/examples/`. See the [Skill Development Guide](https://github.com/openbotstack/openbotstack-docs/blob/main/guides/SKILL_DEVELOPMENT_GUIDE.md).
 

@@ -137,13 +137,13 @@ func TestFullSystem(t *testing.T) {
 		} else if strings.Contains(msgLower, "tax") {
 			plan = execution.ExecutionPlan{
 				AssistantID: "default",
-				Steps:       []execution.ExecutionStep{makeStep("tax-calculator", map[string]any{"amount": 50000, "region": "US", "category": "goods"})},
-				Reasoning:   "User asked for tax calc",
+				Steps:       []execution.ExecutionStep{makeStep("classify", map[string]any{"text": "tax related text", "categories": []string{"tax", "finance", "legal"}})},
+				Reasoning:   "User wants classification",
 			}
 		} else {
 			plan = execution.ExecutionPlan{
 				AssistantID: "default",
-				Steps:       []execution.ExecutionStep{makeStep("tax-calculator", map[string]any{"amount": 50000, "region": "US", "category": "goods"})},
+				Steps:       []execution.ExecutionStep{makeStep("summarize", map[string]any{"text": "fallback text", "max_length": 50})},
 				Reasoning:   "Fallback plan",
 			}
 		}
@@ -177,14 +177,37 @@ func TestFullSystem(t *testing.T) {
 	defer cancel()
 
 	absRepoRoot, _ := filepath.Abs(repoRoot)
-	cmd := exec.CommandContext(ctx, absBinaryPath, "--addr=:"+fmt.Sprintf("%d", addr.Port))
+
+	// Write a temp config that only uses the openai provider pointed at the mock.
+	tmpConfig, err := os.CreateTemp("", "obs-test-config-*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp config: %v", err)
+	}
+	defer os.Remove(tmpConfig.Name())
+	configContent := fmt.Sprintf(`
+server:
+  addr: ":%d"
+providers:
+  llm:
+    default: openai
+    openai:
+      base_url: %s
+      api_key: dummy-key
+      model: gpt-4o
+memory:
+  data_dir: "%s/data"
+`, addr.Port, mockLLM.URL, absRepoRoot)
+	if _, err := tmpConfig.WriteString(configContent); err != nil {
+		t.Fatalf("Failed to write temp config: %v", err)
+	}
+	tmpConfig.Close()
+
+	cmd := exec.CommandContext(ctx, absBinaryPath, "--config", tmpConfig.Name(), "--addr=:"+fmt.Sprintf("%d", addr.Port))
 	cmd.Dir = absRepoRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
 	env := os.Environ()
-	env = append(env, "OBS_LLM_API_KEY=dummy-key")
-	env = append(env, "OBS_LLM_URL="+mockLLM.URL)
 	cmd.Env = env
 
 	if err := cmd.Start(); err != nil {
@@ -239,13 +262,13 @@ func runTestCases(t *testing.T) {
 		wantMsgContent string
 	}{
 		{
-			name: "1. Basic Chat (Fallback to Hello)",
+			name: "1. Basic Chat (Fallback)",
 			req: chatRequest{
 				TenantID: "t1", UserID: "u1", SessionID: "s1",
 				Message: "Hello world",
 			},
 			wantStatus: 200,
-			wantSkill:  "tax-calculator",
+			wantSkill:  "summarize",
 		},
 		{
 			name: "2. Summarize Intent",
@@ -257,13 +280,13 @@ func runTestCases(t *testing.T) {
 			wantSkill:  "summarize",
 		},
 		{
-			name: "3. Tax Intent",
+			name: "3. Classify Intent",
 			req: chatRequest{
 				TenantID: "t1", UserID: "u1", SessionID: "s1",
 				Message: "Calculate tax",
 			},
 			wantStatus: 200,
-			wantSkill:  "tax-calculator",
+			wantSkill:  "classify",
 		},
 		{
 			name:       "4. UI Redirect",

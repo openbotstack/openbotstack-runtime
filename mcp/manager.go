@@ -263,7 +263,7 @@ func (m *MCPManager) connectServer(ctx context.Context, cfg mcpcore.ServerConfig
 		toolID := fmt.Sprintf("mcp.%s.%s", cfg.ID, tool.Name)
 		// Unregister first in case of reconnection (idempotent)
 		_ = m.registry.Unregister(ctx, toolID)
-		adapter := &capability.MCPToolAdapter{Tool: tool, ServerID: cfg.ID}
+		adapter := capability.NewFromMCP(cfg.ID, tool)
 		if err := m.registry.Register(ctx, adapter); err != nil {
 			slog.Warn("mcp: failed to register tool", "tool", tool.Name, "server", cfg.ID, "error", err)
 		}

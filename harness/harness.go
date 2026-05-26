@@ -140,204 +140,38 @@ func (h *ExecutionHarness) Run(ctx context.Context, plan *execution.ExecutionPla
 	for i, step := range plan.Steps {
 		h.setState(HarnessHookPre)
 
-		// Session-level bounds
-		if time.Now().After(sessionDeadline) {
-			result.StopCondition = StopCondition{
-				Stopped: true, Reason: StopReasonMaxSessionRuntime,
-				Detail: "session runtime exceeded",
-			}
+		if stop := h.checkBounds(ctx, i, sessionDeadline); stop != nil {
+			result.StopCondition = *stop
 			break
 		}
-		if i >= h.config.MaxSteps {
-			result.StopCondition = StopCondition{
-				Stopped: true, Reason: StopReasonMaxSteps,
-				Detail: fmt.Sprintf("max steps (%d) reached", h.config.MaxSteps),
-			}
-			break
-		}
-		if ctx.Err() != nil {
-			result.StopCondition = StopCondition{Stopped: true, Reason: StopReasonContextCanceled}
+		if stop, hookErr := h.runPreStep(ctx, step, i, plan, ec); hookErr != nil {
+			return nil, hookErr
+		} else if stop != nil {
+			result.StopCondition = *stop
 			break
 		}
 
-		// Pre-step hooks
-		if h.hookManager != nil {
-			hookCtx := &execution.HookContext{
-				Step:      snapshotStepPtr(step),
-				StepIndex: i,
-				Plan:      plan,
-				EC:        ec,
-			}
-			hookResult, err := h.hookManager.PreStepExecute(ctx, hookCtx)
-			if err != nil {
-				return nil, fmt.Errorf("pre-step hook error for step %q: %w", step.Name, err)
-			}
-			if hookResult != nil && hookResult.Deny {
-				result.StopCondition = StopCondition{
-					Stopped: true, Reason: StopReasonHookDenied,
-					Detail: fmt.Sprintf("step %q denied by hook: %s", step.Name, hookResult.Reason),
-				}
-				break
-			}
-		}
-
-		// Approval check for critical-risk steps
-		if step.RiskLevel == "critical" && h.approvalGateway != nil {
-			_, stop := h.waitForApproval(ctx, step, ec)
-			if stop.Stopped {
-				result.StopCondition = stop
-				break
-			}
-		}
-
-		// Permission check
-		if h.permChecker != nil {
-			attrs := map[string]string{}
-			if step.RiskLevel != "" {
-				attrs["risk_level"] = step.RiskLevel
-			}
-			if err := h.permChecker.Check(ctx, step.Name, ec.TenantID, attrs); err != nil {
-				result.StopCondition = StopCondition{
-					Stopped: true, Reason: StopReasonHookDenied,
-					Detail: fmt.Sprintf("step %q denied: %v", step.Name, err),
-				}
-				break
-			}
-		}
-
-		// Execute step
 		h.setState(HarnessStepExec)
 		h.emitProgress(ec, ProgressEvent{Type: "step_start", Content: step.Name})
-		var stepResult *execution.StepResult
-		var execErr error
 
-		// Build prevResults from earlier step outputs
-		prevResults := make(map[string]any)
-		for _, sr := range result.StepResults {
-			if sr.Output != nil {
-				prevResults[sr.StepName] = sr.Output
-			}
-		}
-
+		prevResults := h.buildPrevResults(result.StepResults)
 		stepTimeout := time.Duration(step.Timeout) * time.Millisecond
 
-		switch step.Type {
-		case execution.StepTypeTool:
-			if h.hookManager != nil {
-				hookCtx := &execution.HookContext{Step: snapshotStepPtr(step), StepIndex: i, Plan: plan, EC: ec}
-				hookResult, hookErr := h.hookManager.PreToolUse(ctx, hookCtx)
-				if hookErr != nil {
-					stepResult = &execution.StepResult{StepID: step.StepID, StepName: step.Name, Type: string(step.Type), Error: hookErr}
-					execErr = hookErr
-					break
-				}
-				if hookResult != nil && hookResult.Deny {
-					stepResult = &execution.StepResult{StepID: step.StepID, StepName: step.Name, Type: string(step.Type), Error: fmt.Errorf("tool %q denied by hook: %s", step.Name, hookResult.Reason)}
-					execErr = stepResult.Error
-					break
-				}
-			}
-			stepResult, execErr = h.stepExecutor.ExecuteTool(ctx, &step, ec, prevResults, stepTimeout)
-			if h.hookManager != nil {
-				hookCtx := &execution.HookContext{Step: snapshotStepPtr(step), StepIndex: i, Plan: plan, EC: ec, ToolOutput: stepResult}
-				if err := h.hookManager.PostToolUse(ctx, hookCtx); err != nil {
-					warnLog(ctx, ec, "post-tool hook error", "step", step.Name, "error", err)
-				}
-			}
+		stepResult, execErr := h.dispatchStep(ctx, step, i, plan, ec, prevResults, stepTimeout, result)
+		failedStepResult := stepResult // preserve original result for fail-fast append
 
-		case execution.StepTypeSkill:
-			if h.hookManager != nil {
-				hookCtx := &execution.HookContext{Step: snapshotStepPtr(step), StepIndex: i, Plan: plan, EC: ec}
-				hookResult, hookErr := h.hookManager.PreToolUse(ctx, hookCtx)
-				if hookErr != nil {
-					stepResult = &execution.StepResult{StepID: step.StepID, StepName: step.Name, Type: string(step.Type), Error: hookErr}
-					execErr = hookErr
-					break
-				}
-				if hookResult != nil && hookResult.Deny {
-					stepResult = &execution.StepResult{StepID: step.StepID, StepName: step.Name, Type: string(step.Type), Error: fmt.Errorf("skill %q denied by hook: %s", step.Name, hookResult.Reason)}
-					execErr = stepResult.Error
-					break
-				}
-			}
-			stepResult, execErr = h.stepExecutor.ExecuteSkill(ctx, &step, ec, prevResults, stepTimeout)
-			if h.hookManager != nil {
-				hookCtx := &execution.HookContext{Step: snapshotStepPtr(step), StepIndex: i, Plan: plan, EC: ec, ToolOutput: stepResult}
-				if err := h.hookManager.PostToolUse(ctx, hookCtx); err != nil {
-					warnLog(ctx, ec, "post-tool hook error", "step", step.Name, "error", err)
-				}
-			}
-
-		case execution.StepTypeLLM:
-			if h.reasoningLoop == nil {
-				execErr = fmt.Errorf("step %q is LLM type but no reasoning loop configured", step.Name)
-				stepResult = &execution.StepResult{
-					StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
-					Error: execErr, Duration: 0,
-				}
-			} else {
-				pCtx := &planner.PlannerContext{UserRequest: step.ExpectedOutput}
-				rlResult, rlErr := h.reasoningLoop.Run(ctx, &step, pCtx, ec)
-				if rlErr != nil {
-					execErr = rlErr
-					stepResult = &execution.StepResult{
-						StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
-						Error: execErr,
-					}
-				} else {
-					stepResult = &execution.StepResult{
-						StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
-						Output: rlResult.Output, Duration: rlResult.Duration,
-					}
-					result.Metrics.TotalLLMTurns += rlResult.TurnCount
-				}
-			}
-
-		default:
-			execErr = fmt.Errorf("unknown step type: %s", step.Type)
-			stepResult = &execution.StepResult{
-				StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
-				Error: execErr,
-			}
-		}
-
-		// Handle failure with retry
 		if execErr != nil && h.failureHandler != nil {
 			h.setState(HarnessRetry)
-			fallbackResult, handleErr := h.failureHandler.Handle(ctx, &step, execErr, func() (*execution.StepResult, error) {
-				switch step.Type {
-				case execution.StepTypeTool:
-					return h.stepExecutor.ExecuteTool(ctx, &step, ec, prevResults, stepTimeout)
-				case execution.StepTypeSkill:
-					return h.stepExecutor.ExecuteSkill(ctx, &step, ec, prevResults, stepTimeout)
-				default:
-					return nil, execErr
-				}
-			})
-
+			var handleErr error
+			stepResult, handleErr = h.handleStepFailure(ctx, step, execErr, prevResults, ec, stepTimeout)
 			if handleErr != nil {
-				// Fail-fast or unrecoverable
-				if stepResult != nil {
-					result.StepResults = append(result.StepResults, *stepResult)
+				if failedStepResult != nil {
+					result.StepResults = append(result.StepResults, *failedStepResult)
 				}
 				result.StepsExecuted = len(result.StepResults)
 				result.StopCondition = StopCondition{Stopped: true, Reason: StopReasonFailFast}
 				result.Duration = time.Since(startTime)
 				return result, handleErr
-			}
-
-			if fallbackResult != nil && fallbackResult.Fallback {
-				// Execute fallback tool
-				h.setState(HarnessFallback)
-				fallbackTool := h.failureHandler.FallbackToolFor(step.StepID)
-				if fbResult, fbErr := h.stepExecutor.ExecuteFallback(ctx, fallbackTool, step.Arguments, ec, prevResults); fbErr == nil {
-					fbResult.Fallback = true
-					stepResult = fbResult
-					execErr = nil
-				}
-			} else if fallbackResult != nil {
-				stepResult = fallbackResult
-				execErr = nil
 			}
 		}
 
@@ -346,27 +180,13 @@ func (h *ExecutionHarness) Run(ctx context.Context, plan *execution.ExecutionPla
 			result.Metrics.TotalSteps++
 		}
 
-		// Post-step hooks
 		h.setState(HarnessHookPost)
-		if h.hookManager != nil {
-			hookCtx := &execution.HookContext{
-				Step:      snapshotStepPtr(step),
-				StepIndex:  i,
-				Plan:       plan,
-				EC:         ec,
-				ToolOutput: stepResult,
-			}
-			if err := h.hookManager.PostStepExecute(ctx, hookCtx); err != nil {
-				warnLog(ctx, ec, "post-step hook error", "step", step.Name, "error", err)
-			}
-		}
-
+		h.runPostStep(ctx, step, i, plan, ec, stepResult)
 		h.emitProgress(ec, ProgressEvent{Type: "step_complete", Content: step.Name})
 	}
 
 	h.setState(HarnessDone)
 
-	// OnStop hooks
 	if h.hookManager != nil {
 		h.hookManager.OnStop(ctx, &execution.HookContext{
 			Plan: plan,
@@ -382,6 +202,256 @@ func (h *ExecutionHarness) Run(ctx context.Context, plan *execution.ExecutionPla
 	}
 
 	return result, nil
+}
+
+// checkBounds verifies session-level limits. Returns nil if execution should continue.
+func (h *ExecutionHarness) checkBounds(ctx context.Context, stepIndex int, sessionDeadline time.Time) *StopCondition {
+	if time.Now().After(sessionDeadline) {
+		return &StopCondition{
+			Stopped: true, Reason: StopReasonMaxSessionRuntime,
+			Detail: "session runtime exceeded",
+		}
+	}
+	if stepIndex >= h.config.MaxSteps {
+		return &StopCondition{
+			Stopped: true, Reason: StopReasonMaxSteps,
+			Detail: fmt.Sprintf("max steps (%d) reached", h.config.MaxSteps),
+		}
+	}
+	if ctx.Err() != nil {
+		return &StopCondition{Stopped: true, Reason: StopReasonContextCanceled}
+	}
+	return nil
+}
+
+// runPreStep runs pre-step hooks, approval checks, and permission checks.
+// Returns (nil, nil) if the step should proceed.
+// Returns (stop, nil) if execution should stop with a condition.
+// Returns (nil, err) if execution should return an error immediately.
+func (h *ExecutionHarness) runPreStep(ctx context.Context, step execution.ExecutionStep, stepIndex int, plan *execution.ExecutionPlan, ec *execution.ExecutionContext) (*StopCondition, error) {
+	if h.hookManager != nil {
+		hookCtx := &execution.HookContext{
+			Step:      snapshotStepPtr(step),
+			StepIndex: stepIndex,
+			Plan:      plan,
+			EC:        ec,
+		}
+		hookResult, err := h.hookManager.PreStepExecute(ctx, hookCtx)
+		if err != nil {
+			return nil, fmt.Errorf("pre-step hook error for step %q: %w", step.Name, err)
+		}
+		if hookResult != nil && hookResult.Deny {
+			return &StopCondition{
+				Stopped: true, Reason: StopReasonHookDenied,
+				Detail: fmt.Sprintf("step %q denied by hook: %s", step.Name, hookResult.Reason),
+			}, nil
+		}
+	}
+
+	if step.RiskLevel == "critical" && h.approvalGateway != nil {
+		_, stop := h.waitForApproval(ctx, step, ec)
+		if stop.Stopped {
+			return &stop, nil
+		}
+	}
+
+	if h.permChecker != nil {
+		attrs := map[string]string{}
+		if step.RiskLevel != "" {
+			attrs["risk_level"] = step.RiskLevel
+		}
+		if err := h.permChecker.Check(ctx, step.Name, ec.TenantID, attrs); err != nil {
+			return &StopCondition{
+				Stopped: true, Reason: StopReasonHookDenied,
+				Detail: fmt.Sprintf("step %q denied: %v", step.Name, err),
+			}, nil
+		}
+	}
+
+	return nil, nil
+}
+
+// dispatchStep routes to the correct step executor based on step type.
+func (h *ExecutionHarness) dispatchStep(
+	ctx context.Context,
+	step execution.ExecutionStep,
+	stepIndex int,
+	plan *execution.ExecutionPlan,
+	ec *execution.ExecutionContext,
+	prevResults map[string]any,
+	stepTimeout time.Duration,
+	result *HarnessResult,
+) (*execution.StepResult, error) {
+	switch step.Type {
+	case execution.StepTypeTool:
+		return h.executeToolStep(ctx, step, stepIndex, plan, ec, prevResults, stepTimeout)
+	case execution.StepTypeSkill:
+		return h.executeSkillStep(ctx, step, stepIndex, plan, ec, prevResults, stepTimeout)
+	case execution.StepTypeLLM:
+		return h.executeLLMStep(ctx, step, ec, result)
+	default:
+		err := fmt.Errorf("unknown step type: %s", step.Type)
+		return &execution.StepResult{
+			StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
+			Error: err,
+		}, err
+	}
+}
+
+// executeToolStep handles tool-type steps with pre/post tool hooks.
+func (h *ExecutionHarness) executeToolStep(
+	ctx context.Context,
+	step execution.ExecutionStep,
+	stepIndex int,
+	plan *execution.ExecutionPlan,
+	ec *execution.ExecutionContext,
+	prevResults map[string]any,
+	stepTimeout time.Duration,
+) (*execution.StepResult, error) {
+	if h.hookManager != nil {
+		hookCtx := &execution.HookContext{Step: snapshotStepPtr(step), StepIndex: stepIndex, Plan: plan, EC: ec}
+		hookResult, hookErr := h.hookManager.PreToolUse(ctx, hookCtx)
+		if hookErr != nil {
+			return &execution.StepResult{StepID: step.StepID, StepName: step.Name, Type: string(step.Type), Error: hookErr}, hookErr
+		}
+		if hookResult != nil && hookResult.Deny {
+			err := fmt.Errorf("tool %q denied by hook: %s", step.Name, hookResult.Reason)
+			return &execution.StepResult{StepID: step.StepID, StepName: step.Name, Type: string(step.Type), Error: err}, err
+		}
+	}
+	stepResult, execErr := h.stepExecutor.ExecuteTool(ctx, &step, ec, prevResults, stepTimeout)
+	if h.hookManager != nil {
+		hookCtx := &execution.HookContext{Step: snapshotStepPtr(step), StepIndex: stepIndex, Plan: plan, EC: ec, ToolOutput: stepResult}
+		if err := h.hookManager.PostToolUse(ctx, hookCtx); err != nil {
+			warnLog(ctx, ec, "post-tool hook error", "step", step.Name, "error", err)
+		}
+	}
+	return stepResult, execErr
+}
+
+// executeSkillStep handles skill-type steps with pre/post tool hooks.
+func (h *ExecutionHarness) executeSkillStep(
+	ctx context.Context,
+	step execution.ExecutionStep,
+	stepIndex int,
+	plan *execution.ExecutionPlan,
+	ec *execution.ExecutionContext,
+	prevResults map[string]any,
+	stepTimeout time.Duration,
+) (*execution.StepResult, error) {
+	if h.hookManager != nil {
+		hookCtx := &execution.HookContext{Step: snapshotStepPtr(step), StepIndex: stepIndex, Plan: plan, EC: ec}
+		hookResult, hookErr := h.hookManager.PreToolUse(ctx, hookCtx)
+		if hookErr != nil {
+			return &execution.StepResult{StepID: step.StepID, StepName: step.Name, Type: string(step.Type), Error: hookErr}, hookErr
+		}
+		if hookResult != nil && hookResult.Deny {
+			err := fmt.Errorf("skill %q denied by hook: %s", step.Name, hookResult.Reason)
+			return &execution.StepResult{StepID: step.StepID, StepName: step.Name, Type: string(step.Type), Error: err}, err
+		}
+	}
+	stepResult, execErr := h.stepExecutor.ExecuteSkill(ctx, &step, ec, prevResults, stepTimeout)
+	if h.hookManager != nil {
+		hookCtx := &execution.HookContext{Step: snapshotStepPtr(step), StepIndex: stepIndex, Plan: plan, EC: ec, ToolOutput: stepResult}
+		if err := h.hookManager.PostToolUse(ctx, hookCtx); err != nil {
+			warnLog(ctx, ec, "post-tool hook error", "step", step.Name, "error", err)
+		}
+	}
+	return stepResult, execErr
+}
+
+// executeLLMStep handles LLM-type steps via the reasoning loop.
+func (h *ExecutionHarness) executeLLMStep(ctx context.Context, step execution.ExecutionStep, ec *execution.ExecutionContext, result *HarnessResult) (*execution.StepResult, error) {
+	if h.reasoningLoop == nil {
+		err := fmt.Errorf("step %q is LLM type but no reasoning loop configured", step.Name)
+		return &execution.StepResult{
+			StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
+			Error: err, Duration: 0,
+		}, err
+	}
+	pCtx := &planner.PlannerContext{UserRequest: step.ExpectedOutput}
+	rlResult, rlErr := h.reasoningLoop.Run(ctx, &step, pCtx, ec)
+	if rlErr != nil {
+		return &execution.StepResult{
+			StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
+			Error: rlErr,
+		}, rlErr
+	}
+	result.Metrics.TotalLLMTurns += rlResult.TurnCount
+	return &execution.StepResult{
+		StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
+		Output: rlResult.Output, Duration: rlResult.Duration,
+	}, nil
+}
+
+// handleStepFailure delegates to the failure handler for retry/fallback.
+func (h *ExecutionHarness) handleStepFailure(
+	ctx context.Context,
+	step execution.ExecutionStep,
+	execErr error,
+	prevResults map[string]any,
+	ec *execution.ExecutionContext,
+	stepTimeout time.Duration,
+) (*execution.StepResult, error) {
+	fallbackResult, handleErr := h.failureHandler.Handle(ctx, &step, execErr, func() (*execution.StepResult, error) {
+		switch step.Type {
+		case execution.StepTypeTool:
+			return h.stepExecutor.ExecuteTool(ctx, &step, ec, prevResults, stepTimeout)
+		case execution.StepTypeSkill:
+			return h.stepExecutor.ExecuteSkill(ctx, &step, ec, prevResults, stepTimeout)
+		default:
+			return nil, execErr
+		}
+	})
+
+	if handleErr != nil {
+		return nil, handleErr
+	}
+
+	if fallbackResult != nil && fallbackResult.Fallback {
+		h.setState(HarnessFallback)
+		fallbackTool := h.failureHandler.FallbackToolFor(step.StepID)
+		if fbResult, fbErr := h.stepExecutor.ExecuteFallback(ctx, fallbackTool, step.Arguments, ec, prevResults); fbErr == nil {
+			fbResult.Fallback = true
+			return fbResult, nil
+		}
+	}
+
+	return fallbackResult, nil
+}
+
+// runPostStep runs post-step hooks and emits progress.
+func (h *ExecutionHarness) runPostStep(
+	ctx context.Context,
+	step execution.ExecutionStep,
+	stepIndex int,
+	plan *execution.ExecutionPlan,
+	ec *execution.ExecutionContext,
+	stepResult *execution.StepResult,
+) {
+	if h.hookManager != nil {
+		hookCtx := &execution.HookContext{
+			Step:      snapshotStepPtr(step),
+			StepIndex: stepIndex,
+			Plan:      plan,
+			EC:        ec,
+			ToolOutput: stepResult,
+		}
+		if err := h.hookManager.PostStepExecute(ctx, hookCtx); err != nil {
+			warnLog(ctx, ec, "post-step hook error", "step", step.Name, "error", err)
+		}
+	}
+}
+
+// buildPrevResults creates a map of previous step outputs for template interpolation.
+func (h *ExecutionHarness) buildPrevResults(stepResults []execution.StepResult) map[string]any {
+	prevResults := make(map[string]any)
+	for _, sr := range stepResults {
+		if sr.Output != nil {
+			prevResults[sr.StepName] = sr.Output
+		}
+	}
+	return prevResults
 }
 
 // PlanAndRun creates a plan via the given planner and executes it on this harness.

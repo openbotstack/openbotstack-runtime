@@ -27,7 +27,6 @@ import (
 	"github.com/openbotstack/openbotstack-core/capability"
 	"github.com/openbotstack/openbotstack-core/control/agent"
 	coreExecution "github.com/openbotstack/openbotstack-core/execution"
-	agentpkg "github.com/openbotstack/openbotstack-runtime/agent"
 	"github.com/openbotstack/openbotstack-runtime/api"
 	"github.com/openbotstack/openbotstack-runtime/api/middleware"
 	"github.com/openbotstack/openbotstack-runtime/config"
@@ -63,17 +62,18 @@ func main() {
 	builder := NewServerBuilder()
 	builder.
 		InitInfrastructure().
+		InitMemory().
 		InitAI().
 		InitExecution().
 		InitCapabilities().
-		InitAgent().
-		InitMemory().
 		InitTelemetry().
-		InitAudit()
+		InitAudit().
+		InitAgent()
 	defer builder.Cleanup()
 
 	deps := builder.Build()
-	server := NewServer(deps, builder.Config())
+	skillAdmin := builder.SkillAdmin()
+	server := NewServer(deps, skillAdmin, builder.Config())
 	server.ListenAndServe()
 }
 
@@ -94,7 +94,6 @@ type ServerDeps struct {
 	ReasoningStore      *reasoningpkg.InMemoryStore
 	Telemetry           *api.TelemetryHandler
 	MCPAdmin            api.MCPAdmin
-	SkillWatcher        *SkillWatcher
 	CapRegistry         capability.CapabilityRegistry
 }
 
@@ -105,20 +104,12 @@ type Server struct {
 }
 
 // NewServer wires all HTTP routes, middleware, and API handlers.
-func NewServer(deps ServerDeps, cfg *config.Config) *Server {
+func NewServer(deps ServerDeps, skillAdmin *adapters.SkillAdminAdapter, cfg *config.Config) *Server {
 	mux := http.NewServeMux()
-	skillAdmin := adapters.NewSkillAdminAdapter(deps.Exec)
-	if deps.SkillWatcher != nil {
-		skillAdmin.SetReloader(deps.SkillWatcher)
-	}
 
 	var capLister api.CapabilityLister
 	if deps.CapRegistry != nil {
 		capLister = adapters.NewCapabilityLister(deps.CapRegistry)
-	}
-
-	if ha, ok := deps.Agent.(*agentpkg.HarnessAgent); ok {
-		ha.SetSkillDisabledChecker(skillAdmin.IsDisabled)
 	}
 
 	// Composite auth: API Key first, then JWT fallback
@@ -195,9 +186,9 @@ func NewServer(deps ServerDeps, cfg *config.Config) *Server {
 	})
 	mux.Handle("/v1/admin/", authMW(adminRouter.Handler()))
 
-	// UI routes (embedded dual SPA)
-	mux.Handle("/ui/", http.StripPrefix("/ui", webui.UserHandler()))
-	mux.Handle("/admin/", http.StripPrefix("/admin", webui.AdminHandler()))
+	// UI routes (embedded dual SPA) — both require auth
+	mux.Handle("/ui/", authMW(http.StripPrefix("/ui", webui.UserHandler())))
+	mux.Handle("/admin/", authMW(middleware.RequireAdmin(http.StripPrefix("/admin", webui.AdminHandler()))))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
 			http.Redirect(w, r, "/ui/", http.StatusFound)

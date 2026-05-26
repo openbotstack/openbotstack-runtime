@@ -172,14 +172,6 @@ func (r *Router) registerRoutes() {
 	r.v1Mux.HandleFunc("/v1/execution/", r.handleExecutionAction)
 	r.v1Mux.HandleFunc("/v1/me", HandleMe)
 
-	// Telemetry admin endpoints
-	r.v1Mux.HandleFunc("/v1/admin/telemetry/health", r.handleTelemetryHealth)
-	r.v1Mux.HandleFunc("/v1/admin/telemetry/spans", r.handleTelemetrySpans)
-	r.v1Mux.HandleFunc("/v1/admin/telemetry/events", r.handleTelemetryEvents)
-	r.v1Mux.HandleFunc("/v1/admin/telemetry/metrics", r.handleTelemetryMetrics)
-	r.v1Mux.HandleFunc("/v1/admin/telemetry/failures", r.handleTelemetryFailures)
-	r.v1Mux.HandleFunc("/v1/admin/telemetry/summary", r.handleTelemetrySummary)
-
 	// Route /v1/ traffic to the potentially wrapped v1Handler
 	r.mux.Handle("/v1/", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		r.v1Handler.ServeHTTP(w, req)
