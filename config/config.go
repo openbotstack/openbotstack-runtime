@@ -79,26 +79,27 @@ type CORSConfig struct {
 	AllowedOrigins []string `yaml:"allowed_origins"`
 }
 
-// AgentConfig controls agent execution mode and parameters.
+// AgentConfig controls agent execution parameters.
 type AgentConfig struct {
 	// Mode selects the agent execution strategy.
-	// "single_pass" = DefaultAgent (Plan → Execute, one shot)
-	// "dual_loop"  = DualLoopAgent (Outer + Inner bounded loops)
+	// Currently only "harness" is supported (default).
 	// Env override: OBS_AGENT_MODE
 	Mode string `yaml:"mode"`
 
-	// DualLoop holds configuration for the dual bounded loop kernel.
+	// DualLoop holds bounds for the execution harness and reasoning loop.
 	DualLoop DualLoopConfig `yaml:"dual_loop"`
 }
 
-// DualLoopConfig holds bounds for the dual bounded loop kernel.
+// DualLoopConfig holds bounds for the execution harness and reasoning loop.
 type DualLoopConfig struct {
-	MaxTurns          int           `yaml:"max_turns"`            // Inner loop: max reasoning turns (default: 8)
-	MaxToolCalls      int           `yaml:"max_tool_calls"`       // Inner loop: max tool calls per task (default: 20)
-	MaxTurnRuntime    time.Duration `yaml:"max_turn_runtime"`     // Inner loop: max time per turn (default: 30s)
-	MaxWorkflowSteps  int           `yaml:"max_workflow_steps"`   // Outer loop: max tasks (default: 5)
-	MaxSessionRuntime time.Duration `yaml:"max_session_runtime"`  // Outer loop: max total time (default: 60s)
-	MaxRetainedTurns  int           `yaml:"max_retained_turns"`   // Context compaction: turns to keep (default: 4)
+	MaxTurns           int           `yaml:"max_turns"`             // Max reasoning turns per step (default: 5)
+	MaxToolCalls       int           `yaml:"max_tool_calls"`        // Max tool calls per task (default: 10)
+	MaxTurnRuntime     time.Duration `yaml:"max_turn_runtime"`      // Max time per reasoning turn (default: 180s)
+	MaxSteps           int           `yaml:"max_steps"`             // Max steps per plan (default: 10)
+	MaxWorkflowSteps   int           `yaml:"max_workflow_steps"`    // Deprecated: use max_steps
+	MaxSessionRuntime  time.Duration `yaml:"max_session_runtime"`   // Max total session runtime (default: 600s)
+	MaxRetainedTurns   int           `yaml:"max_retained_turns"`    // Context compaction: turns to keep (default: 4)
+	DefaultStepTimeout time.Duration `yaml:"default_step_timeout"`  // Default per-step timeout when LLM omits timeout_ms (default: 120s, env: OBS_STEP_TIMEOUT)
 }
 
 type ObservabilityConfig struct {
@@ -187,12 +188,13 @@ func defaultConfig() *Config {
 		Agent: AgentConfig{
 			Mode: "harness",
 			DualLoop: DualLoopConfig{
-				MaxTurns:          8,
-				MaxToolCalls:      20,
-				MaxTurnRuntime:    120 * time.Second,
-				MaxWorkflowSteps:  5,
-				MaxSessionRuntime: 300 * time.Second,
-				MaxRetainedTurns:  4,
+				MaxTurns:           5,
+				MaxToolCalls:       10,
+				MaxTurnRuntime:     180 * time.Second,
+				MaxSteps:           10,
+				MaxSessionRuntime:  600 * time.Second,
+				MaxRetainedTurns:   4,
+				DefaultStepTimeout: 120 * time.Second,
 			},
 		},
 		CORS: CORSConfig{
@@ -268,6 +270,16 @@ func Load(path string) (*Config, error) {
 	// Agent overrides
 	if val := os.Getenv("OBS_AGENT_MODE"); val != "" {
 		cfg.Agent.Mode = val
+	}
+	if val := os.Getenv("OBS_STEP_TIMEOUT"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			cfg.Agent.DualLoop.DefaultStepTimeout = d
+		}
+	}
+
+	// Backward compat: if max_workflow_steps is set in YAML, use it for MaxSteps.
+	if cfg.Agent.DualLoop.MaxWorkflowSteps > 0 {
+		cfg.Agent.DualLoop.MaxSteps = cfg.Agent.DualLoop.MaxWorkflowSteps
 	}
 
 	return cfg, nil

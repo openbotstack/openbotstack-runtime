@@ -162,7 +162,6 @@ func NewServer(deps ServerDeps, skillAdmin *adapters.SkillAdminAdapter, cfg *con
 	})
 	rateLimitMW := middleware.RateLimitMiddleware(deps.RateLimiter)
 	mux.Handle("/v1/", rateLimitMW(apiRouter))
-	mux.Handle("/v1/me", authMW(http.HandlerFunc(api.HandleMe)))
 
 	// OpenAPI spec (optional — served from file if present)
 	if specData, err := os.ReadFile("openapi.json"); err == nil {
@@ -228,8 +227,8 @@ func (s *Server) ListenAndServe() {
 	srv := &http.Server{
 		Addr:         s.cfg.Server.Addr,
 		Handler:      handler,
-		ReadTimeout:  300 * time.Second,
-		WriteTimeout: 300 * time.Second,
+		ReadTimeout:  600 * time.Second,
+		WriteTimeout: 600 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
 

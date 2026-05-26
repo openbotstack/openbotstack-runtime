@@ -55,14 +55,16 @@ type HarnessConfig struct {
 	MaxSteps          int
 	MaxSessionRuntime time.Duration
 	MaxParallelSubs   int
+	DefaultStepTimeout time.Duration
 }
 
 // DefaultHarnessConfig returns standard configuration.
 func DefaultHarnessConfig() HarnessConfig {
 	return HarnessConfig{
-		MaxSteps:          10,
-		MaxSessionRuntime: 300 * time.Second,
-		MaxParallelSubs:   3,
+		MaxSteps:           10,
+		MaxSessionRuntime:  600 * time.Second,
+		MaxParallelSubs:    3,
+		DefaultStepTimeout: 120 * time.Second,
 	}
 }
 
@@ -79,7 +81,7 @@ func DefaultReasoningLoopConfig() ReasoningLoopConfig {
 	return ReasoningLoopConfig{
 		MaxTurns:       5,
 		MaxToolCalls:   10,
-		MaxTurnRuntime: 120 * time.Second,
+		MaxTurnRuntime: 180 * time.Second,
 		RepeatPlanStop: true,
 	}
 }

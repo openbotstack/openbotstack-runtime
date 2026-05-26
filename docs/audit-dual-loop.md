@@ -1,9 +1,11 @@
 # Dual Bounded Harness Loop — Architecture Audit Report
 
+> **HISTORICAL DOCUMENT** — This audit was written against the `runtime/loop/` implementation (outer_loop.go, inner_loop.go, etc.). That implementation has been replaced by `runtime/harness/` (ExecutionHarness + ReasoningLoop + StepExecutor). The architectural principles and bounding guarantees described here remain valid, but file paths, function names, and module structure have changed. Refer to the current `runtime/harness/` package for the actual implementation.
+
 **Date:** 2026-04-18
 **Auditor:** Claude Code
 **Scope:** openbotstack-core + openbotstack-runtime + openbotstack-apps
-**Reference:** ADR-012 (Dual Bounded Loop Kernel)
+**Reference:** ADR-012 (Dual Bounded Loop Kernel) — superseded by harness architecture
 
 ---
 

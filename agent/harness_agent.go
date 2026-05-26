@@ -35,13 +35,12 @@ type HarnessAgentConfig struct {
 	WorkflowResolver   WorkflowResolver
 	SkillDisabled      func(id string) bool
 	ReasoningStore     harness.ReasoningStorer
-	HookManager        *harness.HookManager
 	MaxHistoryMessages int // defaults to 50 if zero
 	CapRegistry        capability.CapabilityRegistry
 }
 
 // HarnessAgent implements agent.Agent using the Execution Harness model.
-// It replaces DualLoopAgent with deterministic plan execution + bounded reasoning.
+// It uses deterministic plan execution via ExecutionHarness + bounded reasoning via ReasoningLoop.
 type HarnessAgent struct {
 	planner            planner.ExecutionPlanner
 	skillRegistry      agent.SkillRegistry
@@ -62,9 +61,6 @@ func NewHarnessAgent(cfg HarnessAgentConfig) *HarnessAgent {
 	maxHist := cfg.MaxHistoryMessages
 	if maxHist <= 0 {
 		maxHist = 50
-	}
-	if cfg.HookManager != nil {
-		cfg.Harness.SetHookManager(cfg.HookManager)
 	}
 	return &HarnessAgent{
 		planner:            cfg.Planner,

@@ -156,6 +156,12 @@ func (h *ExecutionHarness) Run(ctx context.Context, plan *execution.ExecutionPla
 
 		prevResults := h.buildPrevResults(result.StepResults)
 		stepTimeout := time.Duration(step.Timeout) * time.Millisecond
+		if stepTimeout == 0 {
+			stepTimeout = h.config.DefaultStepTimeout
+		}
+		if stepTimeout == 0 {
+			stepTimeout = 120 * time.Second
+		}
 
 		stepResult, execErr := h.dispatchStep(ctx, step, i, plan, ec, prevResults, stepTimeout, result)
 		failedStepResult := stepResult // preserve original result for fail-fast append

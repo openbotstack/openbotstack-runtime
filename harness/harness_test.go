@@ -15,8 +15,8 @@ func TestDefaultHarnessConfig(t *testing.T) {
 	if cfg.MaxSteps != 10 {
 		t.Errorf("MaxSteps = %d, want 10", cfg.MaxSteps)
 	}
-	if cfg.MaxSessionRuntime != 300*time.Second {
-		t.Errorf("MaxSessionRuntime = %v, want 300s", cfg.MaxSessionRuntime)
+	if cfg.MaxSessionRuntime != 600*time.Second {
+		t.Errorf("MaxSessionRuntime = %v, want 600s", cfg.MaxSessionRuntime)
 	}
 	if cfg.MaxParallelSubs != 3 {
 		t.Errorf("MaxParallelSubs = %d, want 3", cfg.MaxParallelSubs)
@@ -31,8 +31,8 @@ func TestDefaultReasoningLoopConfig(t *testing.T) {
 	if cfg.MaxToolCalls != 10 {
 		t.Errorf("MaxToolCalls = %d, want 10", cfg.MaxToolCalls)
 	}
-	if cfg.MaxTurnRuntime != 120*time.Second {
-		t.Errorf("MaxTurnRuntime = %v, want 120s", cfg.MaxTurnRuntime)
+	if cfg.MaxTurnRuntime != 180*time.Second {
+		t.Errorf("MaxTurnRuntime = %v, want 180s", cfg.MaxTurnRuntime)
 	}
 }
 

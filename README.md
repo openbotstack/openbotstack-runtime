@@ -23,7 +23,7 @@ On first run, OpenBotStack seeds a default admin API key (printed to stdout once
 |---------|-------------|
 | Chat API | REST + SSE streaming (`/v1/chat`, `/v1/chat/stream`) |
 | Wasm Skills | Go wasip1 command mode via wazero (no TinyGo needed) |
-| Harness Agent | Bounded execution with reasoning loop (enable with `OBS_AGENT_MODE=dual_loop`) |
+| Harness Agent | Bounded execution with reasoning loop (default, always active) |
 | Multi-Tenant | Tenant isolation with API key and JWT auth |
 | Admin API | Full CRUD for tenants, users, API keys, providers, skills |
 | Admin Console | Built-in web UI at `/admin/` for provider management |
@@ -128,7 +128,7 @@ Full API reference: [openbotstack-docs/api/README.md](https://github.com/openbot
 | API Reference | [api/README.md](https://github.com/openbotstack/openbotstack-docs/blob/main/api/README.md) |
 | Operations Manual | [OPERATIONS.md](https://github.com/openbotstack/openbotstack-docs/blob/main/guides/OPERATIONS.md) |
 | Configuration | [config/README.md](https://github.com/openbotstack/openbotstack-docs/blob/main/config/README.md) |
-| Harness Audit | [audit-dual-loop.md](docs/audit-dual-loop.md) |
+| Harness Audit | [audit-dual-loop.md](docs/audit-dual-loop.md) (historical) |
 
 ## Contract
 
