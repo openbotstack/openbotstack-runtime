@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/openbotstack/openbotstack-core/assistant"
+	csSkills "github.com/openbotstack/openbotstack-core/control/skills"
 	"github.com/openbotstack/openbotstack-core/execution"
 	"github.com/openbotstack/openbotstack-core/planner"
 )
@@ -13,7 +14,7 @@ func TestDecomposeToTasks_EmptySteps(t *testing.T) {
 	wf := &stubWorkflow{steps: nil}
 	baseCtx := &planner.PlannerContext{
 		AssistantID: "asst1",
-		Skills:      []planner.SkillDescriptor{{ID: "s1", Name: "S1"}},
+		Skills:      []csSkills.SkillDescriptor{{ID: "s1", Name: "S1"}},
 	}
 
 	_, err := DecomposeToTasks(wf, map[string]any{"msg": "hi"}, baseCtx)
@@ -31,7 +32,7 @@ func TestDecomposeToTasks_SingleStep(t *testing.T) {
 	baseCtx := &planner.PlannerContext{
 		AssistantID:   "asst1",
 		MemoryContext: []assistant.SearchResult{{Content: []byte("mem1"), Score: 0.9}},
-		Skills:        []planner.SkillDescriptor{{ID: "s1"}},
+		Skills:        []csSkills.SkillDescriptor{{ID: "s1"}},
 		UserRequest:   "original request",
 	}
 
@@ -108,7 +109,7 @@ func TestDecomposeToTasks_SkillsPreserved(t *testing.T) {
 		},
 	}
 	baseCtx := &planner.PlannerContext{
-		Skills: []planner.SkillDescriptor{
+		Skills: []csSkills.SkillDescriptor{
 			{ID: "skill-1", Name: "Skill 1"},
 			{ID: "skill-2", Name: "Skill 2"},
 		},

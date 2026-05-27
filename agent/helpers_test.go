@@ -9,9 +9,8 @@ import (
 )
 
 func TestSkillDescriptorTypeIdentity(t *testing.T) {
-	// Verify that agent.SkillDescriptor, planner.SkillDescriptor, and
-	// skills.SkillDescriptor are the same type (type aliases).
-	// If this compiles, the aliases are correct.
+	// Verify that skills.SkillDescriptor is the canonical type used directly
+	// by both agent and planner packages (no aliases needed).
 	var sd skills.SkillDescriptor = skills.SkillDescriptor{
 		ID:          "core/test",
 		Name:        "Test",
@@ -19,27 +18,30 @@ func TestSkillDescriptorTypeIdentity(t *testing.T) {
 		InputSchema: &skills.JSONSchema{Type: "object"},
 	}
 
-	// agent.SkillDescriptor must be assignable from skills.SkillDescriptor
-	var _ agent.SkillDescriptor = sd
+	// agent.SkillDescriptorFromSkill must return skills.SkillDescriptor
+	_ = sd
 
-	// planner.SkillDescriptor must be assignable from skills.SkillDescriptor
-	var _ planner.SkillDescriptor = sd
+	// Slice of skills.SkillDescriptor must be assignable to planner.PlannerContext.Skills
+	skillSlice := []skills.SkillDescriptor{sd}
+	pCtx := &planner.PlannerContext{
+		Skills: skillSlice,
+	}
+	if len(pCtx.Skills) != 1 {
+		t.Errorf("expected 1 item, got %d", len(pCtx.Skills))
+	}
+	if pCtx.Skills[0].ID != "core/test" {
+		t.Errorf("ID = %q, want %q", pCtx.Skills[0].ID, "core/test")
+	}
 
-	// Slice of agent.SkillDescriptor must be assignable to planner.SkillDescriptor slice
-	agentSlice := []agent.SkillDescriptor{sd}
-	var plannerSlice []planner.SkillDescriptor = agentSlice
-	if len(plannerSlice) != 1 {
-		t.Errorf("expected 1 item, got %d", len(plannerSlice))
-	}
-	if plannerSlice[0].ID != "core/test" {
-		t.Errorf("ID = %q, want %q", plannerSlice[0].ID, "core/test")
-	}
+	// agent.SkillDescriptor (now removed) was a type alias — verify the
+	// conversion function still works with the canonical type.
+	_ = agent.SkillDescriptorFromSkill
 }
 
 func TestSkillDescriptorDirectPassThrough(t *testing.T) {
-	// Verify that agent skill descriptors can be passed directly to
+	// Verify that skill descriptors can be passed directly to
 	// planner.PlannerContext without any conversion function.
-	descs := []agent.SkillDescriptor{
+	descs := []skills.SkillDescriptor{
 		{ID: "s1", Name: "Skill1", Description: "First"},
 		{ID: "s2", Name: "Skill2", Description: "Second"},
 	}

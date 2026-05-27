@@ -13,6 +13,7 @@ import (
 	"github.com/openbotstack/openbotstack-core/assistant"
 	"github.com/openbotstack/openbotstack-core/audit"
 	"github.com/openbotstack/openbotstack-core/capability"
+	csSkills "github.com/openbotstack/openbotstack-core/control/skills"
 	corecontext "github.com/openbotstack/openbotstack-core/context"
 	"github.com/openbotstack/openbotstack-core/execution"
 	"github.com/openbotstack/openbotstack-core/memory/abstraction"
@@ -23,37 +24,49 @@ import (
 
 // HarnessAgentConfig holds all dependencies for constructing a HarnessAgent.
 type HarnessAgentConfig struct {
-	Planner  planner.ExecutionPlanner
-	Registry agent.SkillRegistry
-	Runtime  *assistant.AssistantRuntime
-	Harness  *harness.ExecutionHarness
+	// Execution pipeline
+	Planner planner.ExecutionPlanner
+	Harness *harness.ExecutionHarness
 
-	// Optional dependencies (nil = feature disabled)
+	// Skill resolution
+	Registry     agent.SkillRegistry
+	CapRegistry  capability.CapabilityRegistry
+	SkillDisabled func(id string) bool
+
+	// Session state (optional — nil = feature disabled)
 	ConversationStore  agent.ConversationStore
 	ContextAssembler   corecontext.ContextAssembler
 	MemoryManager      abstraction.MemoryManager
-	WorkflowResolver   WorkflowResolver
-	SkillDisabled      func(id string) bool
 	ReasoningStore     harness.ReasoningStorer
 	MaxHistoryMessages int // defaults to 50 if zero
-	CapRegistry        capability.CapabilityRegistry
+
+	// Assistant identity
+	Runtime          *assistant.AssistantRuntime
+	WorkflowResolver WorkflowResolver
 }
 
 // HarnessAgent implements agent.Agent using the Execution Harness model.
 // It uses deterministic plan execution via ExecutionHarness + bounded reasoning via ReasoningLoop.
 type HarnessAgent struct {
-	planner            planner.ExecutionPlanner
-	skillRegistry      agent.SkillRegistry
-	capRegistry        capability.CapabilityRegistry
-	runtime            *assistant.AssistantRuntime
-	harness            *harness.ExecutionHarness
+	// Execution pipeline: planning and execution
+	planner planner.ExecutionPlanner
+	harness *harness.ExecutionHarness
+
+	// Skill resolution: what capabilities are available
+	skillRegistry agent.SkillRegistry
+	capRegistry   capability.CapabilityRegistry
+	skillDisabled func(id string) bool
+
+	// Session state: conversation history, context enrichment, memory
 	conversationStore  agent.ConversationStore
 	contextAssembler   corecontext.ContextAssembler
 	memoryManager      abstraction.MemoryManager
-	maxHistoryMessages int
-	workflowResolver   WorkflowResolver
-	skillDisabled      func(id string) bool
 	reasoningStore     harness.ReasoningStorer
+	maxHistoryMessages int
+
+	// Assistant identity and workflow
+	runtime          *assistant.AssistantRuntime
+	workflowResolver WorkflowResolver
 }
 
 // NewHarnessAgent creates a new HarnessAgent from a HarnessAgentConfig.
@@ -350,16 +363,16 @@ func stepResultsToAuditTrail(results []execution.StepResult, traceID string) []a
 // gatherSkillDescriptors builds skill descriptors from the registry.
 // When capRegistry is available, it also returns CapabilityDescriptors
 // preserving Kind information for the planner pipeline.
-func (a *HarnessAgent) gatherSkillDescriptors() ([]agent.SkillDescriptor, []capability.CapabilityDescriptor, error) {
+func (a *HarnessAgent) gatherSkillDescriptors() ([]csSkills.SkillDescriptor, []capability.CapabilityDescriptor, error) {
 	if a.capRegistry != nil {
 		caps := a.capRegistry.List()
-		descs := make([]agent.SkillDescriptor, 0, len(caps))
+		descs := make([]csSkills.SkillDescriptor, 0, len(caps))
 		capDescs := make([]capability.CapabilityDescriptor, 0, len(caps))
 		for _, c := range caps {
 			if a.skillDisabled != nil && a.skillDisabled(c.ID) {
 				continue
 			}
-			descs = append(descs, agent.SkillDescriptor{
+			descs = append(descs, csSkills.SkillDescriptor{
 				ID:          c.ID,
 				Name:        c.Name,
 				Description: c.Description,
@@ -371,7 +384,7 @@ func (a *HarnessAgent) gatherSkillDescriptors() ([]agent.SkillDescriptor, []capa
 	}
 	// Fallback: original skill registry path
 	ids := a.skillRegistry.List()
-	descs := make([]agent.SkillDescriptor, 0, len(ids))
+	descs := make([]csSkills.SkillDescriptor, 0, len(ids))
 	for _, id := range ids {
 		if a.skillDisabled != nil && a.skillDisabled(id) {
 			continue
