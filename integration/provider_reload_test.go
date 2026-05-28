@@ -41,8 +41,8 @@ func TestProviderHotReload_PreservesURL(t *testing.T) {
 		"k1", "default", "admin", adminKey[:12], hex.EncodeToString(hash[:]), "test", now)
 
 	customURL := "https://custom-llm.example.com/v1"
-	db.Exec(`INSERT INTO provider_config (provider_name, base_url, api_key, model, is_default, updated_at)
-		VALUES (?, ?, ?, ?, 1, ?)`, "openai", customURL, "sk-test-key", "test-model", now)
+	db.Exec(`INSERT INTO provider_config (id, provider, name, base_url, api_key, model, is_default, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, 1, ?)`, "prov-test1", "openai", "test", customURL, "sk-test-key", "test-model", now)
 
 	modelRouter := router.NewDefaultRouter()
 	factory := providers.NewProviderFactory()
@@ -53,8 +53,8 @@ func TestProviderHotReload_PreservesURL(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.Handle("/", apiKeyMW(adminRouter.Handler()))
 
-	// PUT without base_url — should preserve custom URL
 	body, _ := json.Marshal(map[string]string{
+		"id":         "prov-test1",
 		"provider":   "openai",
 		"api_key":    "",
 		"model":      "updated-model",
@@ -71,13 +71,13 @@ func TestProviderHotReload_PreservesURL(t *testing.T) {
 	}
 
 	var dbURL string
-	db.QueryRow("SELECT base_url FROM provider_config WHERE provider_name = ?", "openai").Scan(&dbURL)
+	db.QueryRow("SELECT base_url FROM provider_config WHERE id = ?", "prov-test1").Scan(&dbURL)
 	if dbURL != customURL {
 		t.Errorf("base_url = %q, want %q (preserved)", dbURL, customURL)
 	}
 
 	var dbModel string
-	db.QueryRow("SELECT model FROM provider_config WHERE provider_name = ?", "openai").Scan(&dbModel)
+	db.QueryRow("SELECT model FROM provider_config WHERE id = ?", "prov-test1").Scan(&dbModel)
 	if dbModel != "updated-model" {
 		t.Errorf("model = %q, want updated-model", dbModel)
 	}
@@ -104,8 +104,8 @@ func TestProviderHotReload_ExplicitURLOverrides(t *testing.T) {
 	db.Exec("INSERT INTO api_keys (id, tenant_id, user_id, key_prefix, key_hash, name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
 		"k1", "default", "admin", adminKey[:12], hex.EncodeToString(hash[:]), "test", now)
 
-	db.Exec(`INSERT INTO provider_config (provider_name, base_url, api_key, model, is_default, updated_at)
-		VALUES (?, ?, ?, ?, 1, ?)`, "openai", "https://old.example.com/v1", "sk-old", "old-model", now)
+	db.Exec(`INSERT INTO provider_config (id, provider, name, base_url, api_key, model, is_default, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, 1, ?)`, "prov-test2", "openai", "test", "https://old.example.com/v1", "sk-old", "old-model", now)
 
 	modelRouter := router.NewDefaultRouter()
 	factory := providers.NewProviderFactory()
@@ -117,6 +117,7 @@ func TestProviderHotReload_ExplicitURLOverrides(t *testing.T) {
 	mux.Handle("/", apiKeyMW(adminRouter.Handler()))
 
 	body, _ := json.Marshal(map[string]string{
+		"id":         "prov-test2",
 		"provider":   "openai",
 		"base_url":   "https://new-endpoint.example.com/v1",
 		"api_key":    "sk-new-key",
@@ -134,7 +135,7 @@ func TestProviderHotReload_ExplicitURLOverrides(t *testing.T) {
 	}
 
 	var dbURL string
-	db.QueryRow("SELECT base_url FROM provider_config WHERE provider_name = ?", "openai").Scan(&dbURL)
+	db.QueryRow("SELECT base_url FROM provider_config WHERE id = ?", "prov-test2").Scan(&dbURL)
 	if dbURL != "https://new-endpoint.example.com/v1" {
 		t.Errorf("base_url = %q, want new URL (overridden)", dbURL)
 	}

@@ -133,6 +133,8 @@ func (h *ExecutionHarness) Run(ctx context.Context, plan *execution.ExecutionPla
 	result := &HarnessResult{
 		PlanID:      fmt.Sprintf("plan-%d", startTime.UnixMilli()),
 		StepResults: make([]execution.StepResult, 0),
+		TurnData:    make(map[string][]TurnResult),
+		StepInputs:  make(map[string]map[string]any),
 	}
 
 	sessionDeadline := ec.StartedAt.Add(h.config.MaxSessionRuntime)
@@ -166,6 +168,11 @@ func (h *ExecutionHarness) Run(ctx context.Context, plan *execution.ExecutionPla
 		stepResult, execErr := h.dispatchStep(ctx, step, i, plan, ec, prevResults, stepTimeout, result)
 		failedStepResult := stepResult // preserve original result for fail-fast append
 
+		// Save step input arguments for trace visualization.
+		if step.Arguments != nil {
+			result.StepInputs[step.StepID] = step.Arguments
+		}
+
 		if execErr != nil && h.failureHandler != nil {
 			h.setState(HarnessRetry)
 			var handleErr error
@@ -184,6 +191,9 @@ func (h *ExecutionHarness) Run(ctx context.Context, plan *execution.ExecutionPla
 		if stepResult != nil {
 			result.StepResults = append(result.StepResults, *stepResult)
 			result.Metrics.TotalSteps++
+			if stepResult.Type == string(execution.StepTypeTool) || stepResult.Type == string(execution.StepTypeSkill) {
+				result.Metrics.TotalToolCalls++
+			}
 		}
 
 		h.setState(HarnessHookPost)
@@ -375,7 +385,14 @@ func (h *ExecutionHarness) executeLLMStep(ctx context.Context, step execution.Ex
 			Error: err, Duration: 0,
 		}, err
 	}
-	pCtx := &planner.PlannerContext{UserRequest: step.ExpectedOutput}
+	// Derive user request: prefer ExpectedOutput, fall back to arguments.prompt.
+	userRequest := step.ExpectedOutput
+	if userRequest == "" {
+		if prompt, ok := step.Arguments["prompt"].(string); ok && prompt != "" {
+			userRequest = prompt
+		}
+	}
+	pCtx := &planner.PlannerContext{UserRequest: userRequest}
 	rlResult, rlErr := h.reasoningLoop.Run(ctx, &step, pCtx, ec)
 	if rlErr != nil {
 		return &execution.StepResult{
@@ -384,6 +401,12 @@ func (h *ExecutionHarness) executeLLMStep(ctx context.Context, step execution.Ex
 		}, rlErr
 	}
 	result.Metrics.TotalLLMTurns += rlResult.TurnCount
+
+	// Save turn data for trace visualization.
+	if len(rlResult.TurnResults) > 0 {
+		result.TurnData[step.StepID] = rlResult.TurnResults
+	}
+
 	return &execution.StepResult{
 		StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
 		Output: rlResult.Output, Duration: rlResult.Duration,

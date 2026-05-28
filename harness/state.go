@@ -100,15 +100,28 @@ type HarnessResult struct {
 	StopCondition StopCondition
 	Metrics       HarnessMetrics
 	Duration      time.Duration
+	TurnData      map[string][]TurnResult
+	StepInputs    map[string]map[string]any
+}
+
+// TurnAction captures a single action (tool/skill call) within a reasoning turn.
+type TurnAction struct {
+	StepName   string         `json:"step_name"`
+	StepType   string         `json:"step_type"`
+	Input      map[string]any `json:"input,omitempty"`
+	Output     any            `json:"output,omitempty"`
+	Error      string         `json:"error,omitempty"`
+	DurationMs int            `json:"duration_ms,omitempty"`
 }
 
 // ReasoningResult captures the outcome of a reasoning loop.
 type ReasoningResult struct {
-	Output     any
-	TurnCount  int
-	ToolCalls  int
-	StopReason StopReason
-	Duration   time.Duration
+	Output      any
+	TurnCount   int
+	ToolCalls   int
+	StopReason  StopReason
+	Duration    time.Duration
+	TurnResults []TurnResult
 }
 
 // HarnessMetrics tracks aggregate execution counters.
@@ -123,6 +136,7 @@ type HarnessMetrics struct {
 type TurnResult struct {
 	TurnNumber      int
 	PlanText        string
+	Actions         []TurnAction
 	ActionsExecuted []string
 	Observations    []string
 	StopReason      StopReason
@@ -146,7 +160,54 @@ type ContextCompactor interface {
 	Compact(ctx context.Context, turnResults []TurnResult) ([]TurnResult, error)
 }
 
-// ReasoningStorer stores reasoning audit trails keyed by execution ID.
+// ReasoningStorer stores reasoning audit trails and execution traces keyed by execution ID.
 type ReasoningStorer interface {
 	StoreTrail(executionID string, entries []audit.AuditEvent)
+	StoreTrace(executionID string, trace any)
+}
+
+// ExecutionTraceData is the harness-level trace data passed to the store.
+// Defined here to avoid circular imports with the reasoning sub-package.
+type ExecutionTraceData struct {
+	ExecutionID string
+	PlanID      string
+	TenantID    string
+	Steps       []StepTraceData
+	Metrics     TraceMetricsData
+	StopReason  string
+	StopDetail  string
+	DurationMs  int
+}
+
+// StepTraceData captures a single step's trace within an execution.
+type StepTraceData struct {
+	StepID     string
+	StepName   string
+	StepType   string
+	Status     string
+	DurationMs int
+	Input      map[string]any
+	Output     any
+	Error      string
+	Retries    int
+	Fallback   bool
+	Turns      []TurnTraceData
+}
+
+// TurnTraceData captures a single turn within an LLM step.
+type TurnTraceData struct {
+	TurnNumber  int
+	PlanText    string
+	Actions     []TurnAction
+	Observations []string
+	StopReason  string
+	DurationMs  int
+}
+
+// TraceMetricsData holds aggregate execution metrics.
+type TraceMetricsData struct {
+	TotalSteps     int
+	TotalToolCalls int
+	TotalLLMTurns  int
+	TotalRuntimeMs int
 }

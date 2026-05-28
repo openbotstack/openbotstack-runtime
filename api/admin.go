@@ -33,6 +33,8 @@ type ProviderReloader interface {
 // ProviderConfigEntry describes a provider's configuration for the admin API.
 // API keys are never exposed — only whether one is set.
 type ProviderConfigEntry struct {
+	ID        string `json:"id"`
+	Provider  string `json:"provider"`
 	Name      string `json:"name"`
 	BaseURL   string `json:"base_url"`
 	APIKeySet bool   `json:"api_key_set"`

@@ -1,6 +1,8 @@
 package api
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -29,7 +31,7 @@ func (ar *AdminRouter) handleProviders(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, providers)
 }
 
-// validProviders lists provider names accepted by the admin API.
+// validProviders lists provider driver names accepted by the admin API.
 var validProviders = map[string]bool{
 	"openai":      true,
 	"modelscope":  true,
@@ -37,22 +39,30 @@ var validProviders = map[string]bool{
 	"claude":      true,
 }
 
-// handleProviderConfig handles GET (read) and PUT (update) for provider configuration.
+var defaultBaseURLs = map[string]string{
+	"openai":      "https://api.openai.com/v1",
+	"modelscope":  "https://api-inference.modelscope.cn/v1",
+	"siliconflow": "https://api.siliconflow.cn/v1",
+	"claude":      "https://api.anthropic.com/v1",
+}
+
+// handleProviderConfig handles GET (list), PUT (create/update), and DELETE.
 func (ar *AdminRouter) handleProviderConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		ar.getProviderConfig(w, r)
 	case http.MethodPut:
 		ar.updateProviderConfig(w, r)
+	case http.MethodDelete:
+		ar.deleteProviderConfig(w, r)
 	default:
 		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
 	}
 }
 
 func (ar *AdminRouter) getProviderConfig(w http.ResponseWriter, r *http.Request) {
-	// Read all provider configs from SQLite
 	encKey := crypto.EncryptionKey()
-	rows, err := ar.db.Query("SELECT provider_name, base_url, api_key, model, is_default FROM provider_config")
+	rows, err := ar.db.Query("SELECT id, provider, name, base_url, api_key, model, is_default FROM provider_config ORDER BY provider, name")
 	if err != nil {
 		slog.ErrorContext(r.Context(), "admin handler error",
 			"method", r.Method, "path", r.URL.Path, "status", http.StatusInternalServerError, "error", err)
@@ -61,13 +71,12 @@ func (ar *AdminRouter) getProviderConfig(w http.ResponseWriter, r *http.Request)
 	}
 	defer func() { _ = rows.Close() }()
 
-	providers := make(map[string]interface{})
-	defaultProvider := ""
+	configs := make([]ProviderConfigEntry, 0)
 
 	for rows.Next() {
-		var name, baseURL, apiKey, model string
+		var id, provider, name, baseURL, apiKey, model string
 		var isDefault int
-		if err := rows.Scan(&name, &baseURL, &apiKey, &model, &isDefault); err != nil {
+		if err := rows.Scan(&id, &provider, &name, &baseURL, &apiKey, &model, &isDefault); err != nil {
 			continue
 		}
 		apiKeySet := apiKey != ""
@@ -75,32 +84,32 @@ func (ar *AdminRouter) getProviderConfig(w http.ResponseWriter, r *http.Request)
 			dec, err := crypto.Decrypt(encKey, apiKey)
 			if err != nil {
 				slog.WarnContext(r.Context(), "failed to decrypt stored provider key",
-					"provider", name, "error", err)
+					"id", id, "error", err)
 			} else {
 				apiKeySet = dec != ""
 			}
 		}
-		providers[name] = ProviderConfigEntry{
+		configs = append(configs, ProviderConfigEntry{
+			ID:        id,
+			Provider:  provider,
 			Name:      name,
 			BaseURL:   baseURL,
 			APIKeySet: apiKeySet,
 			Model:     model,
 			IsDefault: isDefault == 1,
-		}
-		if isDefault == 1 {
-			defaultProvider = name
-		}
+		})
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"default":   defaultProvider,
-		"providers": providers,
+		"providers": configs,
 	})
 }
 
 func (ar *AdminRouter) updateProviderConfig(w http.ResponseWriter, r *http.Request) {
 	var req struct {
+		ID        string `json:"id"`
 		Provider  string `json:"provider"`
+		Name      string `json:"name"`
 		BaseURL   string `json:"base_url"`
 		APIKey    string `json:"api_key"`
 		Model     string `json:"model"`
@@ -111,9 +120,8 @@ func (ar *AdminRouter) updateProviderConfig(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Validation
 	if req.Provider == "" {
-		writeAPIError(w, http.StatusBadRequest, ErrInvalidRequest, "provider is required")
+		writeAPIError(w, http.StatusBadRequest, ErrInvalidRequest, "provider driver is required")
 		return
 	}
 	if !validProviders[req.Provider] {
@@ -125,32 +133,10 @@ func (ar *AdminRouter) updateProviderConfig(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Preserve existing base_url if not provided in the update request
-	if req.BaseURL == "" {
-		var existingURL string
-		err := ar.db.QueryRow("SELECT base_url FROM provider_config WHERE provider_name = ?", req.Provider).Scan(&existingURL)
-		if err == nil && existingURL != "" {
-			req.BaseURL = existingURL
-		} else {
-			switch req.Provider {
-			case "openai":
-				req.BaseURL = "https://api.openai.com/v1"
-			case "modelscope":
-				req.BaseURL = "https://api-inference.modelscope.cn/v1"
-			case "siliconflow":
-				req.BaseURL = "https://api.siliconflow.cn/v1"
-			case "claude":
-				req.BaseURL = "https://api.anthropic.com/v1"
-			}
-		}
-	}
 
-	// Parse is_default
 	isDefault := req.IsDefault == "true"
-
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 
-	// Use transaction to atomically clear defaults + upsert
 	tx, err := ar.db.Begin()
 	if err != nil {
 		slog.ErrorContext(r.Context(), "admin handler error",
@@ -170,53 +156,83 @@ func (ar *AdminRouter) updateProviderConfig(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	// Upsert provider config
-	// If api_key is empty, preserve the existing one (decrypt if needed)
 	encKey := crypto.EncryptionKey()
-	var existingKey string
-	_ = tx.QueryRow("SELECT api_key FROM provider_config WHERE provider_name = ?", req.Provider).Scan(&existingKey)
 
-	apiKey := req.APIKey
-	if apiKey == "" && existingKey != "" {
-		// Preserve existing key (decrypt if encrypted)
-		if encKey != nil && crypto.IsEncrypted(existingKey) {
-			dec, err := crypto.Decrypt(encKey, existingKey)
+	if req.ID != "" {
+		// Update existing config by ID — preserve values if empty
+		if req.BaseURL == "" || req.APIKey == "" {
+			var existingURL, existingKey string
+			_ = tx.QueryRow("SELECT base_url, api_key FROM provider_config WHERE id = ?", req.ID).Scan(&existingURL, &existingKey)
+			if req.BaseURL == "" && existingURL != "" {
+				req.BaseURL = existingURL
+			}
+			if req.APIKey == "" && existingKey != "" {
+				if encKey != nil && crypto.IsEncrypted(existingKey) {
+					dec, err := crypto.Decrypt(encKey, existingKey)
+					if err == nil {
+						req.APIKey = dec
+					}
+				} else {
+					req.APIKey = existingKey
+				}
+			}
+		}
+		storedKey := req.APIKey
+		if encKey != nil && req.APIKey != "" {
+			enc, err := crypto.Encrypt(encKey, req.APIKey)
 			if err != nil {
-				writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to decrypt existing key")
+				writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to encrypt api key")
 				return
 			}
-			apiKey = dec
-		} else {
-			apiKey = existingKey
+			storedKey = enc
 		}
-	}
 
-	// Encrypt the key for storage
-	storedKey := apiKey
-	if encKey != nil && apiKey != "" {
-		enc, err := crypto.Encrypt(encKey, apiKey)
+		isDefaultInt := 0
+		if isDefault {
+			isDefaultInt = 1
+		}
+
+		_, err = tx.Exec(`UPDATE provider_config SET provider=?, name=?, base_url=?, api_key=?, model=?, is_default=?, updated_at=? WHERE id=?`,
+			req.Provider, req.Name, req.BaseURL, storedKey, req.Model, isDefaultInt, now, req.ID)
 		if err != nil {
-			writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to encrypt api key")
+			slog.ErrorContext(r.Context(), "admin handler error",
+				"method", r.Method, "path", r.URL.Path, "status", http.StatusInternalServerError, "error", err)
+			writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to update provider config")
 			return
 		}
-		storedKey = enc
-	}
+	} else {
+		// Create new config
+		newID := generateProviderID()
 
-	isDefaultInt := 0
-	if isDefault {
-		isDefaultInt = 1
-	}
+		storedKey := req.APIKey
+		if encKey != nil && req.APIKey != "" {
+			enc, err := crypto.Encrypt(encKey, req.APIKey)
+			if err != nil {
+				writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to encrypt api key")
+				return
+			}
+			storedKey = enc
+		}
 
-	_, err = tx.Exec(`INSERT INTO provider_config (provider_name, base_url, api_key, model, is_default, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(provider_name) DO UPDATE SET base_url = ?, api_key = ?, model = ?, is_default = ?, updated_at = ?`,
-		req.Provider, req.BaseURL, storedKey, req.Model, isDefaultInt, now,
-		req.BaseURL, storedKey, req.Model, isDefaultInt, now)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "admin handler error",
-			"method", r.Method, "path", r.URL.Path, "status", http.StatusInternalServerError, "error", err)
-		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to save provider config")
-		return
+		isDefaultInt := 0
+		if isDefault {
+			isDefaultInt = 1
+		}
+
+		if req.Name == "" {
+			req.Name = req.Provider
+		}
+
+		_, err = tx.Exec(`INSERT INTO provider_config (id, provider, name, base_url, api_key, model, is_default, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			newID, req.Provider, req.Name, req.BaseURL, storedKey, req.Model, isDefaultInt, now)
+		if err != nil {
+			slog.ErrorContext(r.Context(), "admin handler error",
+				"method", r.Method, "path", r.URL.Path, "status", http.StatusInternalServerError, "error", err)
+			writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to create provider config")
+			return
+		}
+		req.ID = newID
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -226,19 +242,52 @@ func (ar *AdminRouter) updateProviderConfig(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Hot-reload provider if reloader is available and we have an API key
-	if ar.providerReloader != nil && apiKey != "" {
-		if err := ar.providerReloader.ReloadProvider(req.Provider, req.BaseURL, apiKey, req.Model); err != nil {
+	// Hot-reload provider if reloader is available
+	if ar.providerReloader != nil {
+		if err := ar.providerReloader.ReloadProvider(req.Provider, req.BaseURL, req.APIKey, req.Model); err != nil {
 			slog.ErrorContext(r.Context(), "provider hot-reload failed",
-				"provider", req.Provider, "error", err)
-			// Still return success for the config save, but log the reload failure
+				"id", req.ID, "provider", req.Provider, "error", err)
 		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"id":       req.ID,
 		"provider": req.Provider,
 		"saved":    true,
 	})
+}
+
+func (ar *AdminRouter) deleteProviderConfig(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, ErrInvalidRequest, "invalid request")
+		return
+	}
+	if req.ID == "" {
+		writeAPIError(w, http.StatusBadRequest, ErrInvalidRequest, "id is required")
+		return
+	}
+
+	_, err := ar.db.Exec("DELETE FROM provider_config WHERE id = ?", req.ID)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "admin handler error",
+			"method", r.Method, "path", r.URL.Path, "status", http.StatusInternalServerError, "error", err)
+		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to delete provider config")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"id":      req.ID,
+		"deleted": true,
+	})
+}
+
+func generateProviderID() string {
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	return "prov-" + hex.EncodeToString(b)
 }
 
 // handleProviderTest tests connectivity to a provider endpoint.
@@ -264,27 +313,10 @@ func (ar *AdminRouter) handleProviderTest(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Use stored base_url if not provided
 	if req.BaseURL == "" {
-		_ = ar.db.QueryRow("SELECT base_url FROM provider_config WHERE provider_name = ?", req.Provider).Scan(&req.BaseURL)
-		if req.BaseURL == "" {
-			switch req.Provider {
-			case "openai":
-				req.BaseURL = "https://api.openai.com/v1"
-			case "modelscope":
-				req.BaseURL = "https://api-inference.modelscope.cn/v1"
-			case "siliconflow":
-				req.BaseURL = "https://api.siliconflow.cn/v1"
-			case "claude":
-				req.BaseURL = "https://api.anthropic.com/v1"
-			default:
-				writeAPIError(w, http.StatusBadRequest, ErrInvalidRequest, "unknown provider")
-				return
-			}
-		}
+		req.BaseURL = defaultBaseURLs[req.Provider]
 	}
 
-	// Test by making a minimal models list request
 	endpoint := strings.TrimRight(req.BaseURL, "/") + "/models"
 	start := time.Now()
 
@@ -327,5 +359,3 @@ func (ar *AdminRouter) handleProviderTest(w http.ResponseWriter, r *http.Request
 		})
 	}
 }
-
-// handleAdminSkills returns all loaded skills with their enabled status.

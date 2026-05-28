@@ -117,13 +117,17 @@ signature   TEXT NOT NULL DEFAULT ''
 		`CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash)`,
 		`CREATE INDEX IF NOT EXISTS idx_api_keys_tenant ON api_keys(tenant_id)`,
 		`CREATE TABLE IF NOT EXISTS provider_config (
-			provider_name TEXT PRIMARY KEY,
-			base_url      TEXT NOT NULL DEFAULT '',
-			api_key       TEXT NOT NULL DEFAULT '',
-			model         TEXT NOT NULL DEFAULT '',
-			is_default    INTEGER NOT NULL DEFAULT 0,
-			updated_at    TEXT NOT NULL DEFAULT ''
+			id         TEXT NOT NULL,
+			provider   TEXT NOT NULL,
+			name       TEXT NOT NULL DEFAULT '',
+			base_url   TEXT NOT NULL DEFAULT '',
+			api_key    TEXT NOT NULL DEFAULT '',
+			model      TEXT NOT NULL DEFAULT '',
+			is_default INTEGER NOT NULL DEFAULT 0,
+			updated_at TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (id)
 		)`,
+		`CREATE INDEX IF NOT EXISTS idx_provider_config_provider ON provider_config(provider)`,
 		`CREATE TABLE IF NOT EXISTS sessions (
 			session_id           TEXT NOT NULL,
 			tenant_id            TEXT NOT NULL DEFAULT '',

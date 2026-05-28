@@ -1,8 +1,8 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useAuth } from './AuthProvider'
-import { listSessions, deleteSession, getSessionHistory, authHeaders, checkAuthStatus, getReasoning, type ServerSession, type ReasoningResponse } from '../lib/api'
+import { useExecutionViewer } from './ExecutionViewerContext'
+import { listSessions, deleteSession, getSessionHistory, authHeaders, checkAuthStatus, type ServerSession } from '../lib/api'
 import { MessageContent } from './MessageContent'
-import { ReasoningView } from './ReasoningView'
 
 interface Message {
   id: string
@@ -444,7 +444,7 @@ export function ChatPage() {
                 <div className="skill-tag">Skill: {msg.skillUsed}</div>
               )}
               {msg.executionId && !msg.streaming && (
-                <ReasoningPanel executionId={msg.executionId} />
+                <ExecutionViewButton executionId={msg.executionId} />
               )}
             </div>
           ))}
@@ -468,33 +468,11 @@ export function ChatPage() {
   )
 }
 
-function ReasoningPanel({ executionId }: { executionId: string }) {
-  const [data, setData] = useState<ReasoningResponse | null>(null)
-  const [visible, setVisible] = useState(false)
-  const [debug, _setDebug] = useState(false)
-
-  const loadReasoning = useCallback(async () => {
-    if (data) {
-      setVisible(!visible)
-      return
-    }
-    try {
-      const resp = await getReasoning(executionId, debug)
-      setData(resp)
-      setVisible(true)
-    } catch {
-      // Reasoning not available for this execution
-    }
-  }, [executionId, debug, data, visible])
-
+function ExecutionViewButton({ executionId }: { executionId: string }) {
+  const { openViewer } = useExecutionViewer()
   return (
-    <div>
-      <button className="btn-reasoning" onClick={loadReasoning}>
-        {visible ? 'Hide Reasoning' : 'View Reasoning'}
-      </button>
-      {visible && data && (
-        <ReasoningView data={data} debug={debug} />
-      )}
-    </div>
+    <button className="btn-reasoning" onClick={() => openViewer(executionId)}>
+      View Execution
+    </button>
   )
 }

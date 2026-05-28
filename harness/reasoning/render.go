@@ -7,14 +7,6 @@ import (
 
 // RenderReasoningText produces a human-readable, step-by-step text
 // representation of the reasoning tree.
-//
-// Format:
-//
-//	Step 1: Call data query record
-//	  → Result from data query record
-//	Step 2: Call analytics risk score
-//	  → Result from analytics risk score
-//	Decision: execution completed
 func RenderReasoningText(tree *ReasoningEvent) string {
 	if tree == nil {
 		return ""
@@ -25,6 +17,27 @@ func RenderReasoningText(tree *ReasoningEvent) string {
 
 	for _, child := range tree.Children {
 		switch child.Type {
+		case EventThought:
+			if child.TurnNumber > 0 {
+				// Individual turn
+				sb.WriteString(fmt.Sprintf("Turn %d", child.TurnNumber))
+				if child.StopReason != "" {
+					sb.WriteString(fmt.Sprintf(" [%s]", child.StopReason))
+				}
+				sb.WriteString("\n")
+				for _, action := range child.Children {
+					if action.Type == EventToolCall {
+						sb.WriteString(fmt.Sprintf("  Step: %s (%dms)\n", action.Summary, action.DurationMs))
+					}
+				}
+			} else {
+				// LLM phase wrapper
+				sb.WriteString(child.Summary)
+				sb.WriteString("\n")
+				for _, turn := range child.Children {
+					sb.WriteString(fmt.Sprintf("  %s\n", turn.Summary))
+				}
+			}
 		case EventToolCall:
 			stepNum++
 			sb.WriteString(fmt.Sprintf("Step %d: %s", stepNum, child.Summary))

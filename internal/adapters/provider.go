@@ -41,6 +41,8 @@ type ProviderReloader struct {
 
 func (p *ProviderReloader) ReloadProvider(providerName, baseURL, apiKey, model string) error {
 	newProvider := p.Factory.Create(providerName, baseURL, apiKey, model)
+	// Remove any existing provider of the same driver so only this one routes.
+	p.Router.Unregister(providerName)
 	p.Router.Replace(newProvider)
 	slog.Info("provider hot-reloaded", "provider", providerName, "model", model, "base_url", baseURL)
 	return nil

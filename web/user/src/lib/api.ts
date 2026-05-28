@@ -117,28 +117,49 @@ export async function getSessionHistory(sessionId: string): Promise<{ role: stri
 export interface ReasoningEvent {
   step_id?: string
   type: 'plan' | 'thought' | 'tool_call' | 'observation' | 'decision'
+  step_type?: 'tool' | 'skill' | 'llm'
   summary: string
   input?: unknown
   output?: unknown
   duration_ms?: number
+  status?: 'completed' | 'failed'
+  error?: string
+  turn_number?: number
+  plan_text?: string
+  stop_reason?: string
+  observations?: string[]
   children?: ReasoningEvent[]
+}
+
+export interface AuditEntry {
+  trace_id: string
+  step_id: string
+  step_name: string
+  step_type: string
+  timestamp: string
+  status: string
+  error?: string
+  duration_ms: number
 }
 
 export interface ReasoningResponse {
   execution_id: string
+  plan_id?: string
   tree: ReasoningEvent
   text: string
+  metrics?: {
+    total_steps: number
+    total_tool_calls: number
+    total_llm_turns: number
+    total_runtime_ms: number
+  }
+  stop_condition?: {
+    stopped: boolean
+    reason: string
+    detail: string
+  }
   debug?: {
-    audit_trail: {
-      trace_id: string
-      step_id: string
-      step_name: string
-      step_type: string
-      timestamp: string
-      status: string
-      error?: string
-      duration_ms: number
-    }[]
+    audit_trail: AuditEntry[]
   }
 }
 

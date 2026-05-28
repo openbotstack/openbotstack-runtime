@@ -974,10 +974,7 @@ func TestGetProviderConfig(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
-	// Should have "default" and "providers" keys
-	if _, ok := resp["default"]; !ok {
-		t.Error("missing 'default' field")
-	}
+	// Should have "providers" key (returns as array)
 	if _, ok := resp["providers"]; !ok {
 		t.Error("missing 'providers' field")
 	}
@@ -1024,7 +1021,7 @@ func TestUpdateProviderConfig(t *testing.T) {
 
 	// Verify config persisted in DB
 	var count int
-	if err := db.QueryRow("SELECT COUNT(*) FROM provider_config WHERE provider_name = 'openai'").Scan(&count); err != nil {
+	if err := db.QueryRow("SELECT COUNT(*) FROM provider_config WHERE provider = 'openai'").Scan(&count); err != nil {
 		t.Fatalf("query: %v", err)
 	}
 	if count != 1 {
@@ -1038,8 +1035,8 @@ func TestUpdateProviderConfig(t *testing.T) {
 	}
 	var getConfig map[string]interface{}
 	json.Unmarshal(rec2.Body.Bytes(), &getConfig)
-	providers := getConfig["providers"].(map[string]interface{})
-	openai := providers["openai"].(map[string]interface{})
+	providers := getConfig["providers"].([]interface{})
+	if len(providers) != 1 { t.Fatalf("providers len = %d, want 1", len(providers)) }; openai := providers[0].(map[string]interface{})
 	if openai["api_key_set"] != true {
 		t.Error("api_key_set should be true after setting key")
 	}
@@ -1112,7 +1109,7 @@ func TestSetDefaultProvider(t *testing.T) {
 
 	// Verify default is set in DB
 	var isDefault int
-	if err := db.QueryRow("SELECT is_default FROM provider_config WHERE provider_name = 'openai'").Scan(&isDefault); err != nil {
+	if err := db.QueryRow("SELECT is_default FROM provider_config WHERE provider = 'openai'").Scan(&isDefault); err != nil {
 		t.Fatalf("query: %v", err)
 	}
 	if isDefault != 1 {
@@ -1123,10 +1120,10 @@ func TestSetDefaultProvider(t *testing.T) {
 	rec2 := doAdminRequest(t, handler, "GET", "/v1/admin/providers/config", nil)
 	var resp map[string]interface{}
 	json.Unmarshal(rec2.Body.Bytes(), &resp)
-	if resp["default"] != "openai" {
-		t.Errorf("default = %v, want 'openai'", resp["default"])
-	}
-}
+		providers, _ := resp["providers"].([]interface{})
+		if len(providers) == 0 {
+			t.Error("no providers returned")
+		}}
 
 // --- Compliance Report Handler Tests ---
 

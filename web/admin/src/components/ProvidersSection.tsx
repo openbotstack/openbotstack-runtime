@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { apiCall } from '../lib/api'
 
 interface ProviderConfigEntry {
+  id: string
+  provider: string
   name: string
   base_url: string
   api_key_set: boolean
@@ -10,8 +12,7 @@ interface ProviderConfigEntry {
 }
 
 interface ProviderConfigResponse {
-  default: string
-  providers: Record<string, ProviderConfigEntry>
+  providers: ProviderConfigEntry[]
 }
 
 interface TestResult {
@@ -28,27 +29,27 @@ const PROVIDER_OPTIONS = [
 ]
 
 export function ProvidersSection() {
-  const [config, setConfig] = useState<ProviderConfigResponse>({ default: '', providers: {} })
+  const [configs, setConfigs] = useState<ProviderConfigEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  // Edit form state
-  const [editing, setEditing] = useState<string | null>(null)
+  const [editing, setEditing] = useState<string | null>(null) // null | 'new' | config.id
   const [formProvider, setFormProvider] = useState('openai')
+  const [formName, setFormName] = useState('')
   const [formBaseURL, setFormBaseURL] = useState('')
   const [formAPIKey, setFormAPIKey] = useState('')
   const [formModel, setFormModel] = useState('')
   const [formDefault, setFormDefault] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState<string | null>(null)
 
-  // Test connection state
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<TestResult | null>(null)
 
   const fetchConfig = useCallback(async () => {
     try {
       const data = await apiCall<ProviderConfigResponse>('/v1/admin/providers/config')
-      setConfig(data)
+      setConfigs(data.providers || [])
       setError('')
     } catch (e) {
       setError((e as Error).message)
@@ -59,58 +60,45 @@ export function ProvidersSection() {
 
   useEffect(() => { fetchConfig() }, [fetchConfig])
 
-  const startEdit = (providerName?: string) => {
-    const entry = providerName ? config.providers[providerName] : null
-    setFormProvider(providerName || 'openai')
-    setFormBaseURL(entry?.base_url || '')
-    setFormAPIKey('')
-    setFormModel(entry?.model || '')
-    setFormDefault(entry?.is_default || !providerName)
+  const startEdit = (cfg?: ProviderConfigEntry) => {
+    if (cfg) {
+      setEditing(cfg.id)
+      setFormProvider(cfg.provider)
+      setFormName(cfg.name || '')
+      setFormBaseURL(cfg.base_url || '')
+      setFormAPIKey('')
+      setFormModel(cfg.model || '')
+      setFormDefault(cfg.is_default || false)
+    } else {
+      const first = PROVIDER_OPTIONS[0]
+      setEditing('new')
+      setFormProvider(first.id)
+      setFormName('')
+      setFormBaseURL(first.defaultURL)
+      setFormAPIKey('')
+      setFormModel(first.defaultModel)
+      setFormDefault(true)
+    }
     setTestResult(null)
-    setEditing(providerName || 'new')
+    setError('')
   }
 
   const handleProviderChange = (id: string) => {
     const opt = PROVIDER_OPTIONS.find(o => o.id === id)
-    const prevOpt = PROVIDER_OPTIONS.find(o => o.id === formProvider)
     setFormProvider(id)
     if (opt) {
-      // Update URL if it's empty or still set to a provider default
-      const isDefaultURL = !formBaseURL || (prevOpt && formBaseURL === prevOpt.defaultURL)
-      if (isDefaultURL) setFormBaseURL(opt.defaultURL)
-      // Update model if it's empty or still set to a provider default
-      const isDefaultModel = !formModel || (prevOpt && formModel === prevOpt.defaultModel)
-      if (isDefaultModel) setFormModel(opt.defaultModel)
-    }
-  }
-
-  const handleSave = async () => {
-    if (!formModel.trim()) return
-    setSaving(true)
-    setError('')
-    try {
-      await apiCall('/v1/admin/providers/config', {
-        method: 'PUT',
-        body: JSON.stringify({
-          provider: formProvider,
-          base_url: formBaseURL.trim(),
-          api_key: formAPIKey.trim(),
-          model: formModel.trim(),
-          is_default: formDefault ? 'true' : 'false',
-        }),
-      })
-      setEditing(null)
-      setFormAPIKey('')
-      await fetchConfig()
-    } catch (e) {
-      setError((e as Error).message)
-    } finally {
-      setSaving(false)
+      setFormBaseURL(opt.defaultURL)
+      setFormModel(opt.defaultModel)
     }
   }
 
   const handleTest = async () => {
-    if (!formAPIKey.trim() && !config.providers[formProvider]?.api_key_set) return
+    if (!formAPIKey.trim() && editing && editing !== 'new') {
+      const existing = configs.find(c => c.id === editing)
+      if (!existing?.api_key_set) return
+    } else if (!formAPIKey.trim()) {
+      return
+    }
     setTesting(true)
     setTestResult(null)
     try {
@@ -131,15 +119,65 @@ export function ProvidersSection() {
     }
   }
 
+  const canTest = !testing && !!formModel.trim() && (
+    !!formAPIKey.trim() ||
+    (!!editing && editing !== 'new' && !!configs.find(c => c.id === editing)?.api_key_set)
+  )
+
+  const handleSave = async () => {
+    if (!formModel.trim()) return
+    setSaving(true)
+    setError('')
+    try {
+      const body: Record<string, string> = {
+        provider: formProvider,
+        name: formName.trim() || formProvider,
+        base_url: formBaseURL.trim(),
+        api_key: formAPIKey.trim(),
+        model: formModel.trim(),
+        is_default: formDefault ? 'true' : 'false',
+      }
+      if (editing && editing !== 'new') {
+        body.id = editing
+      }
+      await apiCall('/v1/admin/providers/config', {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      })
+      setEditing(null)
+      setFormAPIKey('')
+      await fetchConfig()
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDelete = async (cfg: ProviderConfigEntry) => {
+    if (!confirm(`Remove "${cfg.name || cfg.id}"?`)) return
+    setDeleting(cfg.id)
+    try {
+      await apiCall('/v1/admin/providers/config', {
+        method: 'DELETE',
+        body: JSON.stringify({ id: cfg.id }),
+      })
+      await fetchConfig()
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setDeleting(null)
+    }
+  }
+
   if (loading) return <div className="loading">Loading providers...</div>
 
-  const configuredProviders = Object.values(config.providers)
-  const defaultProvider = config.default
+  const providerLabel = (p: string) => PROVIDER_OPTIONS.find(o => o.id === p)?.label || p
 
   return (
     <div className="admin-section">
       <div className="section-header">
-        <h2>Model Providers ({configuredProviders.length})</h2>
+        <h2>Model Providers ({configs.length})</h2>
         <div>
           <button className="btn-primary" onClick={() => startEdit()}>+ Configure Provider</button>
           <button className="btn-secondary" style={{ marginLeft: 8 }} onClick={fetchConfig}>Refresh</button>
@@ -148,8 +186,7 @@ export function ProvidersSection() {
 
       {error && <div className="error">{error}</div>}
 
-      {/* Current Configuration */}
-      {configuredProviders.length === 0 ? (
+      {configs.length === 0 ? (
         <div className="empty">
           No providers configured. Click "+ Configure Provider" to set up your first LLM provider.
         </div>
@@ -157,7 +194,8 @@ export function ProvidersSection() {
         <table className="data-table">
           <thead>
             <tr>
-              <th>Provider</th>
+              <th>Name</th>
+              <th>Driver</th>
               <th>Base URL</th>
               <th>Model</th>
               <th>API Key</th>
@@ -166,26 +204,32 @@ export function ProvidersSection() {
             </tr>
           </thead>
           <tbody>
-            {configuredProviders.map(p => (
-              <tr key={p.name}>
-                <td className="mono">
-                  <span className={`type-badge type-${p.name === 'openai' ? 'declarative' : p.name === 'modelscope' ? 'deterministic' : 'llm'}`}>
-                    {PROVIDER_OPTIONS.find(o => o.id === p.name)?.label || p.name}
+            {configs.map(cfg => (
+              <tr key={cfg.id}>
+                <td className="mono" style={{ fontWeight: 600 }}>{cfg.name || cfg.id}</td>
+                <td>
+                  <span className="type-badge type-declarative">{providerLabel(cfg.provider)}</span>
+                </td>
+                <td className="mono" style={{ fontSize: '0.85em' }}>{cfg.base_url || '-'}</td>
+                <td className="mono">{cfg.model || '-'}</td>
+                <td>
+                  <span className={`type-badge ${cfg.api_key_set ? 'status-active' : 'status-revoked'}`}>
+                    {cfg.api_key_set ? 'Set' : 'Not Set'}
                   </span>
                 </td>
-                <td className="mono" style={{ fontSize: '0.85em' }}>{p.base_url || '-'}</td>
-                <td className="mono">{p.model || '-'}</td>
                 <td>
-                  <span className={`type-badge ${p.api_key_set ? 'status-active' : 'status-revoked'}`}>
-                    {p.api_key_set ? 'Set' : 'Not Set'}
-                  </span>
-                </td>
-                <td>
-                  {p.is_default && <span className="type-badge status-active">Default</span>}
-                  {!p.is_default && p.name === defaultProvider && <span className="type-badge status-active">Active</span>}
+                  {cfg.is_default && <span className="type-badge status-active">Default</span>}
                 </td>
                 <td className="actions">
-                  <button className="btn-sm" onClick={() => startEdit(p.name)}>Edit</button>
+                  <button className="btn-sm" onClick={() => startEdit(cfg)}>Edit</button>
+                  <button
+                    className="btn-sm btn-danger"
+                    onClick={() => handleDelete(cfg)}
+                    disabled={deleting === cfg.id}
+                    style={{ marginLeft: 4 }}
+                  >
+                    {deleting === cfg.id ? '...' : 'Delete'}
+                  </button>
                 </td>
               </tr>
             ))}
@@ -193,22 +237,31 @@ export function ProvidersSection() {
         </table>
       )}
 
-      {/* Configuration Form */}
       {editing && (
-        <div className="dialog-overlay" onClick={() => setEditing(null)}>
-          <div className="dialog" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
+        <div className="dialog-overlay">
+          <div className="dialog" style={{ maxWidth: 520 }}>
             <div className="dialog-header">
-              <h3>{editing === 'new' ? 'Configure Provider' : `Edit: ${editing}`}</h3>
+              <h3>{editing === 'new' ? 'Configure Provider' : 'Edit Provider'}</h3>
               <button className="dialog-close" onClick={() => setEditing(null)}>x</button>
             </div>
             <div className="dialog-body">
               <label>
-                Provider
-                <select value={formProvider} onChange={e => handleProviderChange(e.target.value)} disabled={editing !== 'new'}>
+                Driver
+                <select value={formProvider} onChange={e => handleProviderChange(e.target.value)}>
                   {PROVIDER_OPTIONS.map(o => (
                     <option key={o.id} value={o.id}>{o.label}</option>
                   ))}
                 </select>
+              </label>
+
+              <label>
+                Name
+                <input
+                  value={formName}
+                  onChange={e => setFormName(e.target.value)}
+                  placeholder="e.g. Production OpenAI, Local LLM"
+                />
+                <span className="hint">A display name for this configuration. Leave empty to use driver name.</span>
               </label>
 
               <label>
@@ -226,7 +279,7 @@ export function ProvidersSection() {
                   type="password"
                   value={formAPIKey}
                   onChange={e => setFormAPIKey(e.target.value)}
-                  placeholder={editing !== 'new' && config.providers[editing]?.api_key_set ? 'Leave empty to keep current key' : 'Enter API key'}
+                  placeholder={editing !== 'new' && configs.find(c => c.id === editing)?.api_key_set ? 'Leave empty to keep current key' : 'Enter API key'}
                 />
               </label>
 
@@ -256,18 +309,10 @@ export function ProvidersSection() {
               )}
 
               <div className="dialog-actions">
-                <button
-                  className="btn-secondary"
-                  onClick={handleTest}
-                  disabled={testing || (!formAPIKey.trim() && !(editing !== 'new' && config.providers[editing]?.api_key_set)) || !formModel.trim()}
-                >
+                <button className="btn-secondary" onClick={handleTest} disabled={!canTest}>
                   {testing ? 'Testing...' : 'Test Connection'}
                 </button>
-                <button
-                  className="btn-primary"
-                  onClick={handleSave}
-                  disabled={saving || !formModel.trim()}
-                >
+                <button className="btn-primary" onClick={handleSave} disabled={saving || !formModel.trim()}>
                   {saving ? 'Saving...' : 'Save'}
                 </button>
                 <button onClick={() => setEditing(null)}>Cancel</button>

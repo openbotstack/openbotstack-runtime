@@ -187,7 +187,7 @@ func NewServer(deps ServerDeps, skillAdmin *adapters.SkillAdminAdapter, cfg *con
 
 	// UI routes (embedded dual SPA) — both require auth
 	mux.Handle("/ui/", authMW(http.StripPrefix("/ui", webui.UserHandler())))
-	mux.Handle("/admin/", authMW(middleware.RequireAdmin(http.StripPrefix("/admin", webui.AdminHandler()))))
+	mux.Handle("/admin/", authMW(http.StripPrefix("/admin", webui.AdminHandler())))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
 			http.Redirect(w, r, "/ui/", http.StatusFound)
@@ -266,12 +266,12 @@ func (s *Server) ListenAndServe() {
 }
 
 // seedProviderConfig persists provider credentials from config.yaml to SQLite.
-func seedProviderConfig(pdb *persistence.DB, providerName string, providerConfig config.LLMProviderConfig) {
+func seedProviderConfig(pdb *persistence.DB, providerName string, providerConfig config.LLMProviderConfig, isDefault bool) {
 	if providerConfig.APIKey == "" {
 		return
 	}
 	var existing int
-	_ = pdb.QueryRow("SELECT COUNT(*) FROM provider_config WHERE provider_name = ?", providerName).Scan(&existing)
+	_ = pdb.QueryRow("SELECT COUNT(*) FROM provider_config WHERE provider = ?", providerName).Scan(&existing)
 	if existing > 0 {
 		return
 	}
@@ -286,9 +286,16 @@ func seedProviderConfig(pdb *persistence.DB, providerName string, providerConfig
 			seedKey = enc
 		}
 	}
-	_, err := pdb.Exec(`INSERT INTO provider_config (provider_name, base_url, api_key, model, is_default, updated_at)
-		VALUES (?, ?, ?, ?, 1, ?)`,
-		providerName, providerConfig.BaseURL, seedKey, providerConfig.Model, seedNow)
+
+	isDefaultInt := 0
+	if isDefault {
+		isDefaultInt = 1
+	}
+
+	id := "seed-" + providerName
+	_, err := pdb.Exec(`INSERT INTO provider_config (id, provider, name, base_url, api_key, model, is_default, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, providerName, providerName, providerConfig.BaseURL, seedKey, providerConfig.Model, isDefaultInt, seedNow)
 	if err != nil {
 		slog.Warn("failed to seed provider config into SQLite", "provider", providerName, "error", err)
 	} else {

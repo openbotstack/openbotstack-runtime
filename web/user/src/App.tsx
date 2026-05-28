@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { AuthProvider, useAuth } from './components/AuthProvider'
+import { ExecutionViewerProvider } from './components/ExecutionViewerContext'
+import { ExecutionDrawer } from './components/ExecutionDrawer'
 import { ChatPage } from './components/ChatPage'
 import { apiCall } from './lib/api'
 import { Wrench } from 'lucide-react'
@@ -159,20 +161,23 @@ function AppContent() {
   }
 
   return (
-    <div className="app">
-      <header className="header">
-        <div className="header-left">
-          <h1>OpenBotStack</h1>
-          <SkillsPanel />
-        </div>
-        <div className="header-right">
-          <span className="user-name">{user?.name || 'User'}</span>
-          {role && <span className={`role-badge role-${role}`}>{role}</span>}
-          <button className="btn-logout" onClick={logout}>Logout</button>
-        </div>
-      </header>
-      <ChatPage />
-    </div>
+    <ExecutionViewerProvider>
+      <div className="app">
+        <header className="header">
+          <div className="header-left">
+            <h1>OpenBotStack</h1>
+            <SkillsPanel />
+          </div>
+          <div className="header-right">
+            <span className="user-name">{user?.name || 'User'}</span>
+            {role && <span className={`role-badge role-${role}`}>{role}</span>}
+            <button className="btn-logout" onClick={logout}>Logout</button>
+          </div>
+        </header>
+        <ChatPage />
+      </div>
+      <ExecutionDrawer />
+    </ExecutionViewerProvider>
   )
 }
 

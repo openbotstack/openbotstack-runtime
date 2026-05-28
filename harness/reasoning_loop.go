@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -111,6 +112,14 @@ func (rl *DefaultReasoningLoop) Run(ctx context.Context, step *execution.Executi
 					Duration: time.Since(startTime),
 				}, ctx.Err()
 			}
+			// No skills available means the loop cannot make progress — stop immediately.
+			if errors.Is(err, planner.ErrNoSkillsAvailable) {
+				turnResult.StopReason = StopReasonPlannerStopped
+				turnResult.Observations = append(turnResult.Observations, "no skills available for reasoning")
+				turnResult.Duration = time.Since(turnStart)
+				turnResults = append(turnResults, turnResult)
+				break
+			}
 			turnResult.StopReason = StopReasonError
 			turnResult.Observations = append(turnResult.Observations, fmt.Sprintf("planning error: %v", err))
 			turnResult.Duration = time.Since(turnStart)
@@ -176,26 +185,51 @@ func (rl *DefaultReasoningLoop) Run(ctx context.Context, step *execution.Executi
 			case execution.StepTypeTool:
 				if toolCallsUsed >= rl.config.MaxToolCalls {
 					warnLog(ctx, ec, "reasoning loop: tool call budget exhausted", "used", toolCallsUsed, "max", rl.config.MaxToolCalls)
+					turnResult.Actions = append(turnResult.Actions, TurnAction{
+						StepName: planStep.Name,
+						StepType: string(planStep.Type),
+						Input:    planStep.Arguments,
+						Error:    "skipped: tool call budget exhausted",
+					})
+					turnResult.ActionsExecuted = append(turnResult.ActionsExecuted, planStep.Name)
 					break
 				}
 				toolCallsUsed++
 				emitLoopProgress(ec, "tool_call", formatStepDesc(&planStep))
 				res, execErr = rl.stepExecutor.ExecuteTool(ctx, &planStep, ec, stepResults, stepTimeout)
-				turnResult.ActionsExecuted = append(turnResult.ActionsExecuted, planStep.Name)
 
 			case execution.StepTypeSkill:
 				emitLoopProgress(ec, "tool_call", formatStepDesc(&planStep))
 				res, execErr = rl.stepExecutor.ExecuteSkill(ctx, &planStep, ec, stepResults, stepTimeout)
-				turnResult.ActionsExecuted = append(turnResult.ActionsExecuted, planStep.Name)
 
 			case execution.StepTypeLLM:
 				// Nested LLM steps are not allowed
 				warnLog(ctx, ec, "reasoning loop: nested LLM step not allowed", "step", planStep.Name)
+				turnResult.Observations = append(turnResult.Observations,
+					fmt.Sprintf("step %q skipped: nested LLM steps not allowed in reasoning loop", planStep.Name))
 				continue
 
 			default:
 				warnLog(ctx, ec, "reasoning loop: unknown step type", "type", planStep.Type)
 				continue
+			}
+
+			// Record structured action data for visualization.
+			if planStep.Type != execution.StepTypeLLM {
+				action := TurnAction{
+					StepName: planStep.Name,
+					StepType: string(planStep.Type),
+					Input:    planStep.Arguments,
+				}
+				if res != nil {
+					action.Output = res.Output
+					action.DurationMs = int(res.Duration.Milliseconds())
+				}
+				if execErr != nil {
+					action.Error = execErr.Error()
+				}
+				turnResult.Actions = append(turnResult.Actions, action)
+				turnResult.ActionsExecuted = append(turnResult.ActionsExecuted, planStep.Name)
 			}
 
 			if execErr != nil {
@@ -218,6 +252,11 @@ func (rl *DefaultReasoningLoop) Run(ctx context.Context, step *execution.Executi
 
 		turnResult.ToolCallsUsed = toolCallsUsed
 		turnResult.Duration = time.Since(turnStart)
+
+		// No productive work: all steps were skipped or produced no output — stop.
+		if len(turnResult.Actions) == 0 && turnResult.StopReason == "" {
+			turnResult.StopReason = StopReasonPlannerStopped
+		}
 
 		// Check stop conditions
 		if turnResult.StopReason == "" {
@@ -266,10 +305,11 @@ func (rl *DefaultReasoningLoop) Run(ctx context.Context, step *execution.Executi
 	}
 
 	return &ReasoningResult{
-		Output:     lastOutput,
-		TurnCount:  len(turnResults),
-		ToolCalls:  toolCallsUsed,
-		StopReason: stopReason,
-		Duration:   time.Since(startTime),
+		Output:      lastOutput,
+		TurnCount:   len(turnResults),
+		ToolCalls:   toolCallsUsed,
+		StopReason:  stopReason,
+		Duration:    time.Since(startTime),
+		TurnResults: turnResults,
 	}, nil
 }

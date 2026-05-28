@@ -241,6 +241,7 @@ func (a *HarnessAgent) HandleMessage(ctx context.Context, req agent.MessageReque
 				Message:     errMsg,
 				ExecutionID: execID,
 			}
+				a.storeErrorTrace(execID, req.TenantID, err)
 			a.storeMessages(ctx, req, resp)
 			return resp, nil
 		}
@@ -266,7 +267,10 @@ func (a *HarnessAgent) HandleMessage(ctx context.Context, req agent.MessageReque
 
 	// Store reasoning trail for visualization
 	if a.reasoningStore != nil && lastResult != nil {
-		a.reasoningStore.StoreTrail(execID, stepResultsToAuditTrail(lastResult.StepResults, execID))
+		auditTrail := stepResultsToAuditTrail(lastResult.StepResults, execID)
+		a.reasoningStore.StoreTrail(execID, auditTrail)
+		trace := harness.BuildExecutionTrace(lastResult, execID, req.TenantID)
+		a.reasoningStore.StoreTrace(execID, trace)
 	}
 
 	if message == "" {
@@ -335,6 +339,28 @@ func (a *HarnessAgent) extractSkills(result *harness.HarnessResult) string {
 		skillUsed += s
 	}
 	return skillUsed
+}
+
+// storeErrorTrace creates a minimal trace for failed executions so the
+// execution viewer can show the error rather than "not found".
+func (a *HarnessAgent) storeErrorTrace(execID, tenantID string, execErr error) {
+	if a.reasoningStore == nil {
+		return
+	}
+	trace := &harness.ExecutionTraceData{
+		ExecutionID: execID,
+		TenantID:    tenantID,
+		StopReason:  "error",
+		StopDetail:  execErr.Error(),
+		Steps: []harness.StepTraceData{{
+			StepID:   execID,
+			StepName: "execution",
+			StepType: "llm",
+			Status:   "failed",
+			Error:    execErr.Error(),
+		}},
+	}
+	a.reasoningStore.StoreTrace(execID, trace)
 }
 
 // stepResultsToAuditTrail converts HarnessResult step results to AuditEvent slice.
