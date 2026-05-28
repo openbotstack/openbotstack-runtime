@@ -40,6 +40,10 @@ type HarnessAgentConfig struct {
 	ReasoningStore     harness.ReasoningStorer
 	MaxHistoryMessages int // defaults to 50 if zero
 
+	// Permission grants for builtin tools (read_file, write_file, web_fetch).
+	// Populated from config and OBS_FILE_ALLOWED_DIRS.
+	GrantedPermissions []string
+
 	// Assistant identity
 	Runtime          *assistant.AssistantRuntime
 	WorkflowResolver WorkflowResolver
@@ -64,6 +68,9 @@ type HarnessAgent struct {
 	reasoningStore     harness.ReasoningStorer
 	maxHistoryMessages int
 
+	// Permission grants for builtin tool execution (defense-in-depth).
+	grantedPermissions []string
+
 	// Assistant identity and workflow
 	runtime          *assistant.AssistantRuntime
 	workflowResolver WorkflowResolver
@@ -87,7 +94,27 @@ func NewHarnessAgent(cfg HarnessAgentConfig) *HarnessAgent {
 		workflowResolver:    cfg.WorkflowResolver,
 		skillDisabled:      cfg.SkillDisabled,
 		reasoningStore:     cfg.ReasoningStore,
+		grantedPermissions: cfg.GrantedPermissions,
 		maxHistoryMessages: maxHist,
+	}
+}
+
+// SetConversationStore sets the conversation store for history persistence.
+func (a *HarnessAgent) SetConversationStore(cs agent.ConversationStore) { a.conversationStore = cs }
+
+// SetMaxHistoryMessages sets the maximum number of history messages to load.
+func (a *HarnessAgent) SetMaxHistoryMessages(n int) { a.maxHistoryMessages = n }
+
+// SetContextAssembler sets the context assembler for history enrichment.
+func (a *HarnessAgent) SetContextAssembler(ca corecontext.ContextAssembler) { a.contextAssembler = ca }
+
+// SetMemoryManager sets the memory manager for retrieval.
+func (a *HarnessAgent) SetMemoryManager(mm abstraction.MemoryManager) { a.memoryManager = mm }
+
+// SetHookManager delegates hook manager installation to the underlying harness.
+func (a *HarnessAgent) SetHookManager(hm interface{}) {
+	if hookMgr, ok := hm.(*harness.HookManager); ok {
+		a.harness.SetHookManager(hookMgr)
 	}
 }
 
@@ -206,6 +233,7 @@ func (a *HarnessAgent) HandleMessage(ctx context.Context, req agent.MessageReque
 	execID := uuid.NewString()
 	ec := execution.NewExecutionContext(ctx, execID, a.runtime.AssistantID, req.SessionID, req.TenantID, req.UserID)
 	ec.LoopMode = "harness"
+	ec.GrantedPermissions = a.grantedPermissions
 
 	if req.ProgressCallback != nil {
 		ec.ProgressFn = req.ProgressCallback

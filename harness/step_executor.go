@@ -79,6 +79,10 @@ func (se *StepExecutor) ExecuteTool(
 	prevResults map[string]any,
 	stepTimeout time.Duration,
 ) (*execution.StepResult, error) {
+	// Clone arguments before mutation to preserve the frozen plan's original values.
+	// CoerceStringNumbers and ResolveArguments are template-resolution operations that
+	// must not mutate the plan's canonical Arguments map.
+	step = step.Clone()
 	if n := step.CoerceStringNumbers(); n > 0 {
 		slog.DebugContext(ctx, "step_executor: coerced argument types", "step", step.Name, "count", n)
 	}
@@ -88,13 +92,17 @@ func (se *StepExecutor) ExecuteTool(
 
 	switch se.route(step.Name) {
 	case runnerBuiltin:
-		// Permission model: The harness performs permission checks at the plan/policy level
-		// before steps reach the executor. Run() passes nil permissions to RunWithPermissions,
-		// which grants access to tools with no required permissions (now, json_parse, etc.).
-		// Tools requiring specific permissions (read_file, write_file, web_fetch) must have
-		// their permissions validated by the harness or policy enforcer upstream.
-		// TODO: Wire ExecutionContext permissions through once ExecutionContext gains a Permissions field.
-		result, err := se.builtinRunner.Run(ctx, step.Name, step.Arguments)
+		// Permissions are gated by the ExecutionContext. When GrantedPermissions is set
+		// (populated by the control plane from config/OBS_FILE_ALLOWED_DIRS), tools with
+		// required permissions (read_file, write_file, web_fetch) are validated at the
+		// runner level as defense-in-depth below the plan-level PermissionChecker.
+		var result map[string]any
+		var err error
+		if ec != nil && len(ec.GrantedPermissions) > 0 {
+			result, err = se.builtinRunner.RunWithPermissions(ctx, step.Name, step.Arguments, ec.GrantedPermissions)
+		} else {
+			result, err = se.builtinRunner.Run(ctx, step.Name, step.Arguments)
+		}
 		duration := time.Since(start)
 		if err != nil {
 			return &execution.StepResult{
@@ -202,6 +210,8 @@ func (se *StepExecutor) ExecuteSkill(
 	default:
 	}
 
+	// Clone arguments before mutation (same rationale as ExecuteTool).
+	step = step.Clone()
 	if n := step.CoerceStringNumbers(); n > 0 {
 		slog.DebugContext(ctx, "step_executor: coerced argument types", "step", step.Name, "count", n)
 	}

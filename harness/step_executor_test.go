@@ -208,11 +208,9 @@ func TestStepExecutor_ResultInterpolation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// CoerceStringNumbers runs first, then ResolveArguments
-	// "{{step-a}}" is not a pure number, so CoerceStringNumbers skips it
-	// ResolveArguments replaces {{step-a}} with "previous-output"
-	if step.Arguments["input"] != "previous-output" {
-		t.Errorf("input = %v, want 'previous-output'", step.Arguments["input"])
+	// Arguments are cloned before mutation — the tool runner receives resolved values.
+	if tr.LastArgs["input"] != "previous-output" {
+		t.Errorf("input = %v, want 'previous-output'", tr.LastArgs["input"])
 	}
 }
 
@@ -232,17 +230,15 @@ func TestStepExecutor_CoerceStringNumbers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// "42" should be coerced to int64(42)
-	if step.Arguments["a"] != int64(42) {
-		t.Errorf("a = %v (%T), want int64(42)", step.Arguments["a"], step.Arguments["a"])
+	// Arguments are cloned — tool runner receives coerced values.
+	if tr.LastArgs["a"] != int64(42) {
+		t.Errorf("a = %v (%T), want int64(42)", tr.LastArgs["a"], tr.LastArgs["a"])
 	}
-	// "3.14" should be coerced to float64(3.14)
-	if step.Arguments["b"] != 3.14 {
-		t.Errorf("b = %v (%T), want float64(3.14)", step.Arguments["b"], step.Arguments["b"])
+	if tr.LastArgs["b"] != 3.14 {
+		t.Errorf("b = %v (%T), want float64(3.14)", tr.LastArgs["b"], tr.LastArgs["b"])
 	}
-	// "text" should stay as string
-	if step.Arguments["c"] != "text" {
-		t.Errorf("c = %v, want 'text'", step.Arguments["c"])
+	if tr.LastArgs["c"] != "text" {
+		t.Errorf("c = %v, want 'text'", tr.LastArgs["c"])
 	}
 }
 

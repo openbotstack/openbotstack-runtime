@@ -52,10 +52,11 @@ func (mp *mockPlanner) callCount() int {
 
 // mockToolRunner records tool executions.
 type mockToolRunner struct {
-	mu     sync.Mutex
-	calls  []string
-	result map[string]any // tool name → output
-	err    map[string]error
+	mu       sync.Mutex
+	calls    []string
+	result   map[string]any // tool name → output
+	err      map[string]error
+	LastArgs map[string]any // arguments from most recent Execute call
 }
 
 func newMockToolRunner() *mockToolRunner {
@@ -69,6 +70,7 @@ func (m *mockToolRunner) Execute(ctx context.Context, toolName string, args map[
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, toolName)
+	m.LastArgs = args
 	if err, ok := m.err[toolName]; ok {
 		return nil, err
 	}

@@ -212,6 +212,7 @@ func (h *ExecutionHarness) Run(ctx context.Context, plan *execution.ExecutionPla
 
 	result.StepsExecuted = len(result.StepResults)
 	result.Duration = time.Since(startTime)
+	result.Metrics.TotalRuntime = result.Duration
 
 	if !result.StopCondition.Stopped {
 		result.StopCondition = StopCondition{Stopped: true, Reason: StopReasonGoalAchieved}
@@ -337,7 +338,13 @@ func (h *ExecutionHarness) executeToolStep(
 	}
 	stepResult, execErr := h.stepExecutor.ExecuteTool(ctx, &step, ec, prevResults, stepTimeout)
 	if h.hookManager != nil {
-		hookCtx := &execution.HookContext{Step: snapshotStepPtr(step), StepIndex: stepIndex, Plan: plan, EC: ec, ToolOutput: stepResult}
+		// Pass a shallow copy so hooks cannot corrupt the canonical step result.
+		var outputCopy any
+		if stepResult != nil {
+			cp := *stepResult
+			outputCopy = &cp
+		}
+		hookCtx := &execution.HookContext{Step: snapshotStepPtr(step), StepIndex: stepIndex, Plan: plan, EC: ec, ToolOutput: outputCopy}
 		if err := h.hookManager.PostToolUse(ctx, hookCtx); err != nil {
 			warnLog(ctx, ec, "post-tool hook error", "step", step.Name, "error", err)
 		}
@@ -368,7 +375,12 @@ func (h *ExecutionHarness) executeSkillStep(
 	}
 	stepResult, execErr := h.stepExecutor.ExecuteSkill(ctx, &step, ec, prevResults, stepTimeout)
 	if h.hookManager != nil {
-		hookCtx := &execution.HookContext{Step: snapshotStepPtr(step), StepIndex: stepIndex, Plan: plan, EC: ec, ToolOutput: stepResult}
+		var outputCopy any
+		if stepResult != nil {
+			cp := *stepResult
+			outputCopy = &cp
+		}
+		hookCtx := &execution.HookContext{Step: snapshotStepPtr(step), StepIndex: stepIndex, Plan: plan, EC: ec, ToolOutput: outputCopy}
 		if err := h.hookManager.PostToolUse(ctx, hookCtx); err != nil {
 			warnLog(ctx, ec, "post-tool hook error", "step", step.Name, "error", err)
 		}

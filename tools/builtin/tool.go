@@ -81,6 +81,23 @@ func (r *BuiltinToolRunner) Tools() []BuiltinTool {
 	return result
 }
 
+// AllPermissions returns the deduplicated set of permissions required by all registered tools.
+func (r *BuiltinToolRunner) AllPermissions() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	seen := make(map[string]bool)
+	var perms []string
+	for _, t := range r.tools {
+		for _, p := range t.Permissions() {
+			if !seen[p] {
+				seen[p] = true
+				perms = append(perms, p)
+			}
+		}
+	}
+	return perms
+}
+
 func stripPrefix(id string) string {
 	return strings.TrimPrefix(id, "builtin.")
 }

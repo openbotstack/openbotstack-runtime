@@ -62,13 +62,13 @@ func main() {
 	builder := NewServerBuilder()
 	builder.
 		InitInfrastructure().
-		InitMemory().
 		InitAI().
 		InitExecution().
 		InitCapabilities().
+		InitAgent().
+		InitMemory().
 		InitTelemetry().
-		InitAudit().
-		InitAgent()
+		InitAudit()
 	defer builder.Cleanup()
 
 	deps := builder.Build()
@@ -95,6 +95,7 @@ type ServerDeps struct {
 	Telemetry           *api.TelemetryHandler
 	MCPAdmin            api.MCPAdmin
 	CapRegistry         capability.CapabilityRegistry
+	SkillWatcher        *SkillWatcher
 }
 
 // Server bundles the HTTP mux with serving configuration.

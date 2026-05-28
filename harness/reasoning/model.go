@@ -19,10 +19,10 @@ type ReasoningEvent struct {
 	Summary     string           `json:"summary"`
 	Input       any              `json:"input,omitempty"`
 	Output      any              `json:"output,omitempty"`
-	DurationMs  int              `json:"duration_ms,omitempty"`
+	DurationMs  int              `json:"duration_ms"`
 	Status      string           `json:"status,omitempty"`
 	Error       string           `json:"error,omitempty"`
-	TurnNumber  int              `json:"turn_number,omitempty"`
+	TurnNumber  int              `json:"turn_number"`
 	PlanText    string           `json:"plan_text,omitempty"`
 	StopReason  string           `json:"stop_reason,omitempty"`
 	Observations []string        `json:"observations,omitempty"`

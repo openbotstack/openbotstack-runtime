@@ -111,7 +111,7 @@ type TurnAction struct {
 	Input      map[string]any `json:"input,omitempty"`
 	Output     any            `json:"output,omitempty"`
 	Error      string         `json:"error,omitempty"`
-	DurationMs int            `json:"duration_ms,omitempty"`
+	DurationMs int            `json:"duration_ms"`
 }
 
 // ReasoningResult captures the outcome of a reasoning loop.
