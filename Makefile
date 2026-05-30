@@ -214,8 +214,8 @@ docker-run: ## Run Docker container on :8080
 # Development
 # ============================================================================
 
-run: binary ## Build and run locally on :8080
-	$(BUILD_DIR)/$(BINARY_NAME) --addr=:8080
+run: binary ## Build and run locally on :8080 (skills loaded from source for hot-reload)
+	OBS_SKILLS_PATH=./skills $(BUILD_DIR)/$(BINARY_NAME) --addr=:8080
 
 dev: ## Run with live reload (requires air)
 	air
