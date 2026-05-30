@@ -36,6 +36,8 @@ build: ## Compile all packages
 
 binary: web-build ## Build production binary with version info
 	mkdir -p $(BUILD_DIR)
+	mkdir -p data/skills
+	cp -rn skills/ data/skills/ 2>/dev/null || true
 	$(GO) build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/openbotstack
 	@echo "Built: $(BUILD_DIR)/$(BINARY_NAME) (version=$(VERSION) commit=$(COMMIT))"
 

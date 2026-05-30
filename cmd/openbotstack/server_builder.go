@@ -249,7 +249,7 @@ func (b *ServerBuilder) InitExecution() *ServerBuilder {
 
 	skillsPath := os.Getenv("OBS_SKILLS_PATH")
 	if skillsPath == "" {
-		skillsPath = "./skills"
+		skillsPath = "data/skills"
 	}
 	if err := loadSkills(context.Background(), exec, skillsPath); err != nil {
 		slog.Error("failed to load skills", "error", err)
