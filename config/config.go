@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strings"
 	"time"
 
 	mcpcore "github.com/openbotstack/openbotstack-core/mcp"
@@ -92,14 +93,13 @@ type AgentConfig struct {
 
 // DualLoopConfig holds bounds for the execution harness and reasoning loop.
 type DualLoopConfig struct {
-	MaxTurns           int           `yaml:"max_turns"`             // Max reasoning turns per step (default: 5)
-	MaxToolCalls       int           `yaml:"max_tool_calls"`        // Max tool calls per task (default: 10)
-	MaxTurnRuntime     time.Duration `yaml:"max_turn_runtime"`      // Max time per reasoning turn (default: 180s)
-	MaxSteps           int           `yaml:"max_steps"`             // Max steps per plan (default: 10)
-	MaxWorkflowSteps   int           `yaml:"max_workflow_steps"`    // Deprecated: use max_steps
-	MaxSessionRuntime  time.Duration `yaml:"max_session_runtime"`   // Max total session runtime (default: 600s)
-	MaxRetainedTurns   int           `yaml:"max_retained_turns"`    // Context compaction: turns to keep (default: 4)
-	DefaultStepTimeout time.Duration `yaml:"default_step_timeout"`  // Default per-step timeout when LLM omits timeout_ms (default: 120s, env: OBS_STEP_TIMEOUT)
+	MaxTurns           int           `yaml:"max_turns"`
+	MaxToolCalls       int           `yaml:"max_tool_calls"`
+	MaxTurnRuntime     time.Duration `yaml:"max_turn_runtime"`
+	MaxSteps           int           `yaml:"max_steps"`
+	MaxSessionRuntime  time.Duration `yaml:"max_session_runtime"`
+	MaxRetainedTurns   int           `yaml:"max_retained_turns"`
+	DefaultStepTimeout time.Duration `yaml:"default_step_timeout"`
 }
 
 type ObservabilityConfig struct {
@@ -247,10 +247,21 @@ func Load(path string) (*Config, error) {
 	if val := os.Getenv("OBS_LOG_LEVEL"); val != "" {
 		cfg.Observability.LogLevel = val
 	}
+	if val := os.Getenv("OBS_OTEL_ENABLED"); val == "true" {
+		cfg.Observability.OtelEnabled = true
+	}
+	if val := os.Getenv("OBS_OTEL_ENDPOINT"); val != "" {
+		cfg.Observability.OtelEndpoint = val
+	}
 
 	// Memory overrides
 	if val := os.Getenv("OBS_DATA_DIR"); val != "" {
 		cfg.Memory.DataDir = val
+	}
+
+	// CORS overrides
+	if val := os.Getenv("OBS_CORS_ORIGINS"); val != "" {
+		cfg.CORS.AllowedOrigins = strings.Split(val, ",")
 	}
 
 	// Vector overrides
@@ -275,11 +286,6 @@ func Load(path string) (*Config, error) {
 		if d, err := time.ParseDuration(val); err == nil {
 			cfg.Agent.DualLoop.DefaultStepTimeout = d
 		}
-	}
-
-	// Backward compat: if max_workflow_steps is set in YAML, use it for MaxSteps.
-	if cfg.Agent.DualLoop.MaxWorkflowSteps > 0 {
-		cfg.Agent.DualLoop.MaxSteps = cfg.Agent.DualLoop.MaxWorkflowSteps
 	}
 
 	return cfg, nil

@@ -6,7 +6,7 @@
 //
 // Flags:
 //
-//	--config    Path to config file (default: ./config.yaml)
+//	--config    Path to optional config file (default: ./config.yaml, not required)
 //	--addr      Listen address (default: :8080)
 //	--mode      Run mode: all, api, worker (default: all)
 package main
@@ -45,7 +45,7 @@ import (
 )
 
 var (
-	configPath = flag.String("config", "./config.yaml", "Path to config file")
+	configPath = flag.String("config", "./config.yaml", "Path to optional config file (env vars take precedence)")
 	listenAddr = flag.String("addr", ":8080", "Listen address")
 	runMode    = flag.String("mode", "all", "Run mode: all, api, worker")
 
@@ -266,7 +266,7 @@ func (s *Server) ListenAndServe() {
 	fmt.Println("openbotstack stopped")
 }
 
-// seedProviderConfig persists provider credentials from config.yaml to SQLite.
+// seedProviderConfig persists provider credentials from config/env to SQLite.
 func seedProviderConfig(pdb *persistence.DB, providerName string, providerConfig config.LLMProviderConfig, isDefault bool) {
 	if providerConfig.APIKey == "" {
 		return

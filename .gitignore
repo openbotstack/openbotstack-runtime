@@ -33,7 +33,7 @@ go.work.sum
 
 # Build artifacts
 build/
-openbotstack
+/openbotstack
 
 # Database files
 *.db
@@ -61,4 +61,3 @@ planner_test/
 openbotstack.db
 openbotstack.db-*
 data/
-openbotstack
