@@ -129,7 +129,7 @@ func (b *ServerBuilder) InitInfrastructure() *ServerBuilder {
 
 	dbPath := os.Getenv("OBS_DATABASE_PATH")
 	if dbPath == "" {
-		dbPath = "openbotstack.db"
+		dbPath = "data/openbotstack.db"
 	}
 	pdb, err := persistence.Open(dbPath)
 	if err != nil {
