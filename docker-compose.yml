@@ -40,7 +40,7 @@ services:
       # Memory (markdown files stored in /app/data/memory/)
       - OBS_DATA_DIR=/app/data
       # Skills
-      - OBS_SKILLS_PATH=/app/skills
+      - OBS_SKILLS_PATH=/app/data/skills
       # Auth (see DEPLOYMENT.md for details)
       - OBS_AUTH_STRICT=false
       # Set JWT_SECRET to enable JWT authentication alongside API keys
