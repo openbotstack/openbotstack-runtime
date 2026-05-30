@@ -60,16 +60,14 @@ FROM alpine:3.21
 RUN apk --no-cache add ca-certificates tzdata
 
 COPY --from=backend /openbotstack /usr/local/bin/openbotstack
-COPY openbotstack-runtime/config.yaml /etc/openbotstack/config.yaml
 
 RUN mkdir -p /app/data /app/skills
 COPY --from=backend /build/openbotstack-runtime/skills/ /app/skills/
 
 EXPOSE 8080
-VOLUME ["/app/data", "/app/openbotstack.db"]
+VOLUME ["/app/data"]
 
 HEALTHCHECK --interval=10s --timeout=5s --start-period=5s --retries=3 \
     CMD wget -qO- http://localhost:8080/health || exit 1
 
 ENTRYPOINT ["openbotstack"]
-CMD ["--config", "/etc/openbotstack/config.yaml"]
