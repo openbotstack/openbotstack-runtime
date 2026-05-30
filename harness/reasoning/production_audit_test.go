@@ -301,8 +301,7 @@ func TestMedicalSafety_LLMFailureFallback(t *testing.T) {
 	tr.err["llm.diagnose"] = fmt.Errorf("LLM service unavailable")
 
 	fh := harness.NewFailureHandler(execution.DefaultRetryPolicy())
-	h := harness.NewExecutionHarness(harness.DefaultHarnessConfig(), tr, nil, harness.HarnessDeps{})
-	h.SetFailureHandler(fh)
+	h := harness.NewExecutionHarness(harness.DefaultHarnessConfig(), tr, nil, harness.HarnessDeps{FailureHandler: fh})
 
 	result, err := h.Run(context.Background(), plan, auditEC())
 	if err == nil {

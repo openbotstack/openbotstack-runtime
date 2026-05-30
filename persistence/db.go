@@ -56,7 +56,15 @@ func (db *DB) Migrate() error {
 			metadata    TEXT NOT NULL DEFAULT '{}',
 			timestamp   TEXT NOT NULL DEFAULT '',
 source      TEXT NOT NULL DEFAULT '',
-signature   TEXT NOT NULL DEFAULT ''
+signature   TEXT NOT NULL DEFAULT '',
+step_id     TEXT NOT NULL DEFAULT '',
+step_name   TEXT NOT NULL DEFAULT '',
+step_type   TEXT NOT NULL DEFAULT '',
+status      TEXT NOT NULL DEFAULT '',
+tool_input  TEXT NOT NULL DEFAULT '',
+tool_output TEXT NOT NULL DEFAULT '',
+error       TEXT NOT NULL DEFAULT '',
+trace_id    TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_tenant_time ON audit_logs(tenant_id, timestamp)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_request ON audit_logs(request_id)`,
@@ -108,6 +116,7 @@ signature   TEXT NOT NULL DEFAULT ''
 			key_prefix TEXT NOT NULL,
 			key_hash   TEXT NOT NULL UNIQUE,
 			name       TEXT NOT NULL DEFAULT '',
+			role       TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL DEFAULT '',
 			expires_at TEXT NOT NULL DEFAULT '',
 			revoked    INTEGER NOT NULL DEFAULT 0,
@@ -194,6 +203,36 @@ func (db *DB) MigrateTenantColumn() error {
 	// Add index if column was just added
 	if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_session_entries_tenant ON session_entries(tenant_id)"); err != nil {
 		return fmt.Errorf("create tenant index after migration: %w", err)
+	}
+	return nil
+}
+
+// MigrateStepContextColumns adds step context columns to audit_logs for replay.
+func (db *DB) MigrateStepContextColumns() error {
+	columns := []string{
+		"step_id", "step_name", "step_type", "status",
+		"tool_input", "tool_output", "error", "trace_id",
+	}
+	for _, col := range columns {
+		_, err := db.Exec(fmt.Sprintf("ALTER TABLE audit_logs ADD COLUMN %s TEXT NOT NULL DEFAULT ''", col))
+		if err != nil {
+			if strings.Contains(err.Error(), "duplicate column name") {
+				continue
+			}
+			return fmt.Errorf("add %s column: %w", col, err)
+		}
+	}
+	return nil
+}
+
+// MigrateAPIKeyRoleColumn adds the role column to api_keys for per-key role override.
+func (db *DB) MigrateAPIKeyRoleColumn() error {
+	_, err := db.Exec("ALTER TABLE api_keys ADD COLUMN role TEXT NOT NULL DEFAULT ''")
+	if err != nil {
+		if strings.Contains(err.Error(), "duplicate column name") {
+			return nil
+		}
+		return fmt.Errorf("add api_keys.role column: %w", err)
 	}
 	return nil
 }

@@ -14,9 +14,9 @@ func (ar *AdminRouter) handleAdminSessions(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	query := `SELECT session_id, tenant_id, COUNT(*) as entry_count,
-		MIN(created_at) as created_at, MAX(created_at) as updated_at
-		FROM session_entries GROUP BY session_id, tenant_id ORDER BY updated_at DESC`
+	query := `SELECT session_id, tenant_id, message_count as entry_count,
+		created_at, updated_at, last_message_preview
+		FROM sessions ORDER BY updated_at DESC`
 
 	limit := 200
 	if q := r.URL.Query().Get("limit"); q != "" {

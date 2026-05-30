@@ -191,15 +191,15 @@ func (c *captureAgent) HandleMessage(ctx context.Context, req agent.MessageReque
 
 func TestChatEndpointUsesAuthenticatedIdentity(t *testing.T) {
 	ca := &captureAgent{}
-	router := api.NewRouter(api.RouterConfig{Agent: ca})
-
-	// Set auth middleware that injects a user into context
-	router.SetAuthMiddleware(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			user := &auth.User{ID: "auth-user", TenantID: "auth-tenant"}
-			ctx := middleware.WithUser(r.Context(), user)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
+	router := api.NewRouter(api.RouterConfig{
+		Agent: ca,
+		AuthMiddleware: func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				user := &auth.User{ID: "auth-user", TenantID: "auth-tenant"}
+				ctx := middleware.WithUser(r.Context(), user)
+				next.ServeHTTP(w, r.WithContext(ctx))
+			})
+		},
 	})
 
 	// Request body has different tenant/user than the authenticated one
@@ -252,11 +252,13 @@ func (m *mockHistoryProvider) DeleteSession(ctx context.Context, sessionID strin
 }
 
 func TestListSessionsEndpoint(t *testing.T) {
-	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}})
-	handler.SetHistoryProvider(&mockHistoryProvider{
-		sessions: []api.SessionSummary{
-			{SessionID: "s1", TenantID: "t1", LastEntry: "hello", EntryCount: 3, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-02T00:00:00Z"},
-			{SessionID: "s2", TenantID: "t1", LastEntry: "world", EntryCount: 1, CreatedAt: "2025-01-03T00:00:00Z", UpdatedAt: "2025-01-03T00:00:00Z"},
+	handler := api.NewRouter(api.RouterConfig{
+		Agent: &mockAgent{},
+		History: &mockHistoryProvider{
+			sessions: []api.SessionSummary{
+				{SessionID: "s1", TenantID: "t1", LastEntry: "hello", EntryCount: 3, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-02T00:00:00Z"},
+				{SessionID: "s2", TenantID: "t1", LastEntry: "world", EntryCount: 1, CreatedAt: "2025-01-03T00:00:00Z", UpdatedAt: "2025-01-03T00:00:00Z"},
+			},
 		},
 	})
 
@@ -301,9 +303,11 @@ func TestListSessionsEmpty(t *testing.T) {
 }
 
 func TestDeleteSessionEndpoint(t *testing.T) {
-	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}})
 	mockHistory := &mockHistoryProvider{}
-	handler.SetHistoryProvider(mockHistory)
+	handler := api.NewRouter(api.RouterConfig{
+		Agent:   &mockAgent{},
+		History: mockHistory,
+	})
 
 	req := httptest.NewRequest("DELETE", "/v1/sessions/session-123", nil)
 	rr := httptest.NewRecorder()
@@ -318,8 +322,10 @@ func TestDeleteSessionEndpoint(t *testing.T) {
 }
 
 func TestDeleteSessionMissingID(t *testing.T) {
-	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}})
-	handler.SetHistoryProvider(&mockHistoryProvider{})
+	handler := api.NewRouter(api.RouterConfig{
+		Agent:   &mockAgent{},
+		History: &mockHistoryProvider{},
+	})
 
 	req := httptest.NewRequest("DELETE", "/v1/sessions/", nil)
 	rr := httptest.NewRecorder()
@@ -344,11 +350,13 @@ func TestDeleteSessionNoProvider(t *testing.T) {
 }
 
 func TestSessionHistoryEndpointWithProvider(t *testing.T) {
-	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}})
-	handler.SetHistoryProvider(&mockHistoryProvider{
-		history: []agent.Message{
-			{Role: "user", Content: "Hello"},
-			{Role: "assistant", Content: "Hi there!"},
+	handler := api.NewRouter(api.RouterConfig{
+		Agent: &mockAgent{},
+		History: &mockHistoryProvider{
+			history: []agent.Message{
+				{Role: "user", Content: "Hello"},
+				{Role: "assistant", Content: "Hi there!"},
+			},
 		},
 	})
 

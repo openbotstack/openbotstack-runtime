@@ -24,15 +24,13 @@ func TestHook_PreToolUseCalled(t *testing.T) {
 	cfg := DefaultHarnessConfig()
 	tr := newMockToolRunner()
 	tr.result["my-tool"] = "ok"
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-
 	hm := NewHookManager()
 	var preToolCalled bool
 	hm.RegisterPreToolUse(func(ctx context.Context, hctx *execution.HookContext) (*execution.HookResult, error) {
 		preToolCalled = true
 		return &execution.HookResult{}, nil
 	})
-	h.SetHookManager(hm)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{HookManager: hm})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "my-tool", Type: execution.StepTypeTool, Arguments: map[string]any{}},
@@ -51,15 +49,13 @@ func TestHook_PostToolUseCalledOnError(t *testing.T) {
 	cfg := DefaultHarnessConfig()
 	tr := newMockToolRunner()
 	tr.err["bad-tool"] = fmt.Errorf("tool error")
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-
 	hm := NewHookManager()
 	var postToolCalled bool
 	hm.RegisterPostToolUse(func(ctx context.Context, hctx *execution.HookContext) error {
 		postToolCalled = true
 		return nil
 	})
-	h.SetHookManager(hm)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{HookManager: hm})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "bad-tool", Type: execution.StepTypeTool, Arguments: map[string]any{}},
@@ -78,8 +74,6 @@ func TestHook_OrderIsCorrect(t *testing.T) {
 	cfg := DefaultHarnessConfig()
 	tr := newMockToolRunner()
 	tr.result["tool-a"] = "ok"
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-
 	hm := NewHookManager()
 	var order []string
 	hm.RegisterPreStepExecute(func(ctx context.Context, hctx *execution.HookContext) (*execution.HookResult, error) {
@@ -98,7 +92,7 @@ func TestHook_OrderIsCorrect(t *testing.T) {
 		order = append(order, "post-step")
 		return nil
 	})
-	h.SetHookManager(hm)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{HookManager: hm})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "tool-a", Type: execution.StepTypeTool, Arguments: map[string]any{}},
@@ -124,13 +118,11 @@ func TestHook_PreToolUseDenyBlocks(t *testing.T) {
 	cfg := DefaultHarnessConfig()
 	tr := newMockToolRunner()
 	tr.result["tool-a"] = "ok"
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-
 	hm := NewHookManager()
 	hm.RegisterPreToolUse(func(ctx context.Context, hctx *execution.HookContext) (*execution.HookResult, error) {
 		return &execution.HookResult{Deny: true, Reason: "security policy"}, nil
 	})
-	h.SetHookManager(hm)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{HookManager: hm})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "tool-a", Type: execution.StepTypeTool, Arguments: map[string]any{}},
@@ -152,15 +144,13 @@ func TestHook_PreToolUseDenyBlocks(t *testing.T) {
 func TestHook_PreToolUseForSkillStep(t *testing.T) {
 	cfg := DefaultHarnessConfig()
 	skillExec := &mockSkillExecutor{resp: []byte(`{"ok":true}`)}
-	h := NewExecutionHarness(cfg, nil, skillExec, HarnessDeps{})
-
 	hm := NewHookManager()
 	var preToolCalled bool
 	hm.RegisterPreToolUse(func(ctx context.Context, hctx *execution.HookContext) (*execution.HookResult, error) {
 		preToolCalled = true
 		return &execution.HookResult{}, nil
 	})
-	h.SetHookManager(hm)
+	h := NewExecutionHarness(cfg, nil, skillExec, HarnessDeps{HookManager: hm})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "my-skill", Type: execution.StepTypeSkill, Arguments: map[string]any{}},
@@ -301,13 +291,11 @@ func TestPolicy_EnforcerDeny(t *testing.T) {
 	cfg := DefaultHarnessConfig()
 	tr := newMockToolRunner()
 	tr.result["sensitive-tool"] = "secret"
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-
 	pc := NewPermissionChecker(
 		&execution.PermissionConfig{DeniedTools: map[string]bool{"sensitive-tool": true}},
 		nil,
 	)
-	h.SetPermissionChecker(pc)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{PermChecker: pc})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "sensitive-tool", Type: execution.StepTypeTool, Arguments: map[string]any{}},
@@ -329,13 +317,11 @@ func TestPolicy_AllowListOnly(t *testing.T) {
 	cfg := DefaultHarnessConfig()
 	tr := newMockToolRunner()
 	tr.result["allowed-tool"] = "ok"
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-
 	pc := NewPermissionChecker(
 		&execution.PermissionConfig{AllowedTools: map[string]bool{"allowed-tool": true}},
 		nil,
 	)
-	h.SetPermissionChecker(pc)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{PermChecker: pc})
 
 	// Allowed tool should pass
 	plan1 := makeFrozenPlan(
@@ -360,13 +346,11 @@ func TestPolicy_AllowListOnly(t *testing.T) {
 func TestPolicy_DenyAllMode(t *testing.T) {
 	cfg := DefaultHarnessConfig()
 	tr := newMockToolRunner()
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-
 	pc := NewPermissionChecker(
 		&execution.PermissionConfig{ApprovalMode: execution.ApprovalModeDeny},
 		nil,
 	)
-	h.SetPermissionChecker(pc)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{PermChecker: pc})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "any-tool", Type: execution.StepTypeTool, Arguments: map[string]any{}},
@@ -382,13 +366,11 @@ func TestPolicy_AutoModeAllowsAll(t *testing.T) {
 	cfg := DefaultHarnessConfig()
 	tr := newMockToolRunner()
 	tr.result["tool-a"] = "ok"
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-
 	pc := NewPermissionChecker(
 		&execution.PermissionConfig{ApprovalMode: execution.ApprovalModeAuto},
 		nil,
 	)
-	h.SetPermissionChecker(pc)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{PermChecker: pc})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "tool-a", Type: execution.StepTypeTool, Arguments: map[string]any{}},
@@ -486,9 +468,8 @@ func TestRace_HookRegistrationDuringRun(t *testing.T) {
 	tr.result["tool-a"] = "ok"
 
 	for i := 0; i < 20; i++ {
-		h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
 		hm := NewHookManager()
-		h.SetHookManager(hm)
+		h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{HookManager: hm})
 		plan := makeFrozenPlan(
 			execution.ExecutionStep{Name: "tool-a", Type: execution.StepTypeTool, Arguments: map[string]any{}},
 		)
@@ -507,10 +488,8 @@ func TestChaos_MidPlanFailure_FailFast(t *testing.T) {
 	tr := newMockToolRunner()
 	tr.result["step-1"] = "ok"
 	tr.err["step-2"] = fmt.Errorf("cascading failure")
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-
 	fh := NewFailureHandler(execution.RetryPolicy{MaxRetries: 0, FailFast: true})
-	h.SetFailureHandler(fh)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{FailureHandler: fh})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "step-1", Type: execution.StepTypeTool, Arguments: map[string]any{}},

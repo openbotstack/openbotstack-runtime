@@ -60,28 +60,14 @@ func TestE2EBlackbox_ICUShiftHandover(t *testing.T) {
 		resp: []byte(`{"sbar":"Situation: ICU patient P001 (Zhang Wei) with Sepsis. Background: Elevated vitals (HR 110, SBP 85, SpO2 92, Temp 38.9C). 3 abnormal lab values including elevated lactate (4.2 mmol/L). Assessment: Critical risk score 85/100. Recommendation: Continue antibiotic therapy, monitor hemodynamics, consider vasopressor support."}`),
 	}
 
-	h := NewExecutionHarness(cfg, tr, skillExec, HarnessDeps{})
-
-	plan := makeFrozenPlan(
-		execution.ExecutionStep{Name: "ehr.query_patient", Type: execution.StepTypeTool, Arguments: map[string]any{"unit": "ICU"}},
-		execution.ExecutionStep{Name: "ehr.query_vitals", Type: execution.StepTypeTool, Arguments: map[string]any{"patient_id": "P001"}},
-		execution.ExecutionStep{Name: "ehr.query_labs", Type: execution.StepTypeTool, Arguments: map[string]any{"patient_id": "P001"}},
-		execution.ExecutionStep{Name: "analytics.risk_score", Type: execution.StepTypeTool, Arguments: map[string]any{
-			"patient_id": "P001",
-			"heart_rate": "{{ehr.query_vitals.heart_rate}}",
-			"systolic_bp": "{{ehr.query_vitals.systolic_bp}}",
-		}},
-		execution.ExecutionStep{Name: "nursing/generate_sbar", Type: execution.StepTypeSkill, Arguments: map[string]any{"patient_id": "P001"}},
-	)
-
 	// Wire audit layer
 	al := NewAuditLayer()
 
 	// Wire progress callback
 	var progressEvents []ProgressEvent
-	h.SetProgressCallback(func(event ProgressEvent) {
+	progressCB := func(event ProgressEvent) {
 		progressEvents = append(progressEvents, event)
-	})
+	}
 
 	// Record each step in audit layer
 	hm := NewHookManager()
@@ -96,7 +82,23 @@ func TestE2EBlackbox_ICUShiftHandover(t *testing.T) {
 		}
 		return nil
 	})
-	h.SetHookManager(hm)
+
+	h := NewExecutionHarness(cfg, tr, skillExec, HarnessDeps{
+		HookManager: hm,
+		ProgressCB:  progressCB,
+	})
+
+	plan := makeFrozenPlan(
+		execution.ExecutionStep{Name: "ehr.query_patient", Type: execution.StepTypeTool, Arguments: map[string]any{"unit": "ICU"}},
+		execution.ExecutionStep{Name: "ehr.query_vitals", Type: execution.StepTypeTool, Arguments: map[string]any{"patient_id": "P001"}},
+		execution.ExecutionStep{Name: "ehr.query_labs", Type: execution.StepTypeTool, Arguments: map[string]any{"patient_id": "P001"}},
+		execution.ExecutionStep{Name: "analytics.risk_score", Type: execution.StepTypeTool, Arguments: map[string]any{
+			"patient_id": "P001",
+			"heart_rate": "{{ehr.query_vitals.heart_rate}}",
+			"systolic_bp": "{{ehr.query_vitals.systolic_bp}}",
+		}},
+		execution.ExecutionStep{Name: "nursing/generate_sbar", Type: execution.StepTypeSkill, Arguments: map[string]any{"patient_id": "P001"}},
+	)
 
 	result, err := h.Run(context.Background(), plan, testEC())
 	if err != nil {
@@ -351,10 +353,11 @@ func TestE2EBlackbox_ToolFailure_FailFast(t *testing.T) {
 	tr.result["ehr.query_patient"] = map[string]any{"id": "P001"}
 	tr.err["ehr.query_vitals"] = fmt.Errorf("critical: EHR system down")
 
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-	h.SetFailureHandler(NewFailureHandler(execution.RetryPolicy{
-		MaxRetries: 0, FailFast: true,
-	}))
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{
+		FailureHandler: NewFailureHandler(execution.RetryPolicy{
+			MaxRetries: 0, FailFast: true,
+		}),
+	})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "ehr.query_patient", Type: execution.StepTypeTool, Arguments: map[string]any{}},
@@ -385,13 +388,14 @@ func TestE2EBlackbox_ToolFailure_RetrySuccess(t *testing.T) {
 		result:    "recovered",
 	}
 
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-	h.SetFailureHandler(NewFailureHandler(execution.RetryPolicy{
-		MaxRetries:     2,
-		InitialBackoff: 1 * time.Millisecond,
-		MaxBackoff:     5 * time.Millisecond,
-		FailFast:       false,
-	}))
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{
+		FailureHandler: NewFailureHandler(execution.RetryPolicy{
+			MaxRetries:     2,
+			InitialBackoff: 1 * time.Millisecond,
+			MaxBackoff:     5 * time.Millisecond,
+			FailFast:       false,
+		}),
+	})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "flaky-tool", Type: execution.StepTypeTool, Arguments: map[string]any{}},
@@ -441,7 +445,6 @@ func TestE2EBlackbox_ToolFailure_FallbackTool(t *testing.T) {
 	tr.err["primary-tool"] = fmt.Errorf("primary unavailable")
 	tr.result["fallback-tool"] = "fallback-result"
 
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
 	fh := NewFailureHandler(execution.RetryPolicy{
 		MaxRetries:   1,
 		FallbackTool: "fallback-tool",
@@ -449,7 +452,7 @@ func TestE2EBlackbox_ToolFailure_FallbackTool(t *testing.T) {
 		InitialBackoff: 1 * time.Millisecond,
 		MaxBackoff:     5 * time.Millisecond,
 	})
-	h.SetFailureHandler(fh)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{FailureHandler: fh})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "primary-tool", Type: execution.StepTypeTool, Arguments: map[string]any{}},
@@ -754,7 +757,6 @@ func TestE2EBlackbox_AuditTrail_SuccessfulExecution(t *testing.T) {
 	tr.result["tool-a"] = "ok"
 	tr.result["tool-b"] = "done"
 
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
 	al := NewAuditLayer()
 
 	hm := NewHookManager()
@@ -773,7 +775,8 @@ func TestE2EBlackbox_AuditTrail_SuccessfulExecution(t *testing.T) {
 		})
 		return nil
 	})
-	h.SetHookManager(hm)
+
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{HookManager: hm})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "tool-a", Type: execution.StepTypeTool, Arguments: map[string]any{}},
@@ -829,7 +832,6 @@ func TestE2EBlackbox_AuditTrail_CapturesFailures(t *testing.T) {
 	tr.result["ok-tool"] = "ok"
 	tr.err["fail-tool"] = fmt.Errorf("tool crashed")
 
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
 	al := NewAuditLayer()
 
 	hm := NewHookManager()
@@ -849,7 +851,8 @@ func TestE2EBlackbox_AuditTrail_CapturesFailures(t *testing.T) {
 		})
 		return nil
 	})
-	h.SetHookManager(hm)
+
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{HookManager: hm})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "ok-tool", Type: execution.StepTypeTool, Arguments: map[string]any{}},
@@ -1186,11 +1189,12 @@ func TestE2EBlackbox_Progress_EventsForSteps(t *testing.T) {
 	tr.result["step-1"] = "ok"
 	tr.result["step-2"] = "ok"
 	tr.result["step-3"] = "ok"
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
 
 	var events []ProgressEvent
-	h.SetProgressCallback(func(event ProgressEvent) {
-		events = append(events, event)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{
+		ProgressCB: func(event ProgressEvent) {
+			events = append(events, event)
+		},
 	})
 
 	plan := makeFrozenPlan(
@@ -1225,7 +1229,6 @@ func TestE2EBlackbox_HookOrder_Deterministic(t *testing.T) {
 	cfg := DefaultHarnessConfig()
 	tr := newMockToolRunner()
 	tr.result["tool-a"] = "ok"
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
 
 	hm := NewHookManager()
 	var order []string
@@ -1255,7 +1258,7 @@ func TestE2EBlackbox_HookOrder_Deterministic(t *testing.T) {
 		mu.Unlock()
 		return nil
 	})
-	h.SetHookManager(hm)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{HookManager: hm})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "tool-a", Type: execution.StepTypeTool, Arguments: map[string]any{}},
@@ -1282,12 +1285,11 @@ func TestE2EBlackbox_StateTransitions_Correct(t *testing.T) {
 	cfg := DefaultHarnessConfig()
 	tr := newMockToolRunner()
 	tr.result["tool-a"] = "ok"
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-
 	var stateTransitions []HarnessState
 	var mu sync.Mutex
 
 	hm := NewHookManager()
+	var h *ExecutionHarness
 	hm.RegisterPreStepExecute(func(ctx context.Context, hctx *execution.HookContext) (*execution.HookResult, error) {
 		mu.Lock()
 		stateTransitions = append(stateTransitions, h.State())
@@ -1300,7 +1302,7 @@ func TestE2EBlackbox_StateTransitions_Correct(t *testing.T) {
 		mu.Unlock()
 		return nil
 	})
-	h.SetHookManager(hm)
+	h = NewExecutionHarness(cfg, tr, nil, HarnessDeps{HookManager: hm})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "tool-a", Type: execution.StepTypeTool, Arguments: map[string]any{}},

@@ -52,12 +52,13 @@ func TestHealthzEndpoint(t *testing.T) {
 }
 
 func TestReadyzAllHealthy(t *testing.T) {
-	router := NewRouter(RouterConfig{})
-	router.SetBuildInfo(BuildInfo{Version: "1.0", Commit: "abc", Branch: "main", BuildTime: "2026-01-01"})
-	router.SetHealthCheckers(
-		&mockHealthChecker{name: "storage", status: "healthy"},
-		&mockHealthChecker{name: "llm", status: "healthy"},
-	)
+	router := NewRouter(RouterConfig{
+		BuildInfo: BuildInfo{Version: "1.0", Commit: "abc", Branch: "main", BuildTime: "2026-01-01"},
+		HealthCheckers: []HealthChecker{
+			&mockHealthChecker{name: "storage", status: "healthy"},
+			&mockHealthChecker{name: "llm", status: "healthy"},
+		},
+	})
 
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	w := httptest.NewRecorder()
@@ -79,12 +80,13 @@ func TestReadyzAllHealthy(t *testing.T) {
 }
 
 func TestReadyzUnhealthyComponent(t *testing.T) {
-	router := NewRouter(RouterConfig{})
-	router.SetBuildInfo(BuildInfo{Version: "1.0"})
-	router.SetHealthCheckers(
-		&mockHealthChecker{name: "storage", status: "healthy"},
-		&mockHealthChecker{name: "llm", status: "unhealthy", err: "connection refused"},
-	)
+	router := NewRouter(RouterConfig{
+		BuildInfo: BuildInfo{Version: "1.0"},
+		HealthCheckers: []HealthChecker{
+			&mockHealthChecker{name: "storage", status: "healthy"},
+			&mockHealthChecker{name: "llm", status: "unhealthy", err: "connection refused"},
+		},
+	})
 
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	w := httptest.NewRecorder()
@@ -103,8 +105,9 @@ func TestReadyzUnhealthyComponent(t *testing.T) {
 }
 
 func TestReadyzNoCheckers(t *testing.T) {
-	router := NewRouter(RouterConfig{})
-	router.SetBuildInfo(BuildInfo{Version: "dev"})
+	router := NewRouter(RouterConfig{
+		BuildInfo: BuildInfo{Version: "dev"},
+	})
 
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	w := httptest.NewRecorder()
@@ -116,12 +119,13 @@ func TestReadyzNoCheckers(t *testing.T) {
 }
 
 func TestVersionEndpoint(t *testing.T) {
-	router := NewRouter(RouterConfig{})
-	router.SetBuildInfo(BuildInfo{
-		Version:   "1.0.0",
-		Commit:    "abc123",
-		Branch:    "main",
-		BuildTime: "2026-04-11T12:00:00Z",
+	router := NewRouter(RouterConfig{
+		BuildInfo: BuildInfo{
+			Version:   "1.0.0",
+			Commit:    "abc123",
+			Branch:    "main",
+			BuildTime: "2026-04-11T12:00:00Z",
+		},
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/version", nil)
@@ -144,8 +148,9 @@ func TestVersionEndpoint(t *testing.T) {
 }
 
 func TestVersionEndpointDevDefaults(t *testing.T) {
-	router := NewRouter(RouterConfig{})
-	router.SetBuildInfo(BuildInfo{})
+	router := NewRouter(RouterConfig{
+		BuildInfo: BuildInfo{},
+	})
 
 	req := httptest.NewRequest(http.MethodGet, "/version", nil)
 	w := httptest.NewRecorder()
@@ -164,11 +169,12 @@ func TestVersionEndpointDevDefaults(t *testing.T) {
 }
 
 func TestReadyzCheckerTimeout(t *testing.T) {
-	router := NewRouter(RouterConfig{})
-	router.SetBuildInfo(BuildInfo{Version: "1.0"})
-	router.SetHealthCheckers(
-		&mockHealthChecker{name: "slow", status: "healthy", delay: 10 * time.Second},
-	)
+	router := NewRouter(RouterConfig{
+		BuildInfo: BuildInfo{Version: "1.0"},
+		HealthCheckers: []HealthChecker{
+			&mockHealthChecker{name: "slow", status: "healthy", delay: 10 * time.Second},
+		},
+	})
 
 	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	w := httptest.NewRecorder()

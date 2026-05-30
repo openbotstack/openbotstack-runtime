@@ -34,6 +34,7 @@ func (ar *AdminRouter) handleUserKeys(w http.ResponseWriter, r *http.Request) {
 func (ar *AdminRouter) createAPIKey(w http.ResponseWriter, r *http.Request, userID string) {
 	var req struct {
 		Name string `json:"name"`
+		Role string `json:"role,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		slog.WarnContext(r.Context(), "request validation error",
@@ -99,9 +100,15 @@ func (ar *AdminRouter) createAPIKey(w http.ResponseWriter, r *http.Request, user
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 
 	keyID := fmt.Sprintf("key-%s", hex.EncodeToString(keyBytes[:8]))
-	_, err = ar.db.Exec(`INSERT INTO api_keys (id, tenant_id, user_id, key_prefix, key_hash, name, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		keyID, tenantID, userID, prefix, hashHex, req.Name, now)
+
+	role := req.Role
+	if role != "" && role != "admin" && role != "member" {
+		writeAPIError(w, http.StatusBadRequest, ErrInvalidRequest, "role must be 'admin' or 'member'")
+		return
+	}
+	_, err = ar.db.Exec(`INSERT INTO api_keys (id, tenant_id, user_id, key_prefix, key_hash, name, role, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		keyID, tenantID, userID, prefix, hashHex, req.Name, role, now)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "admin handler error",
 			"method", r.Method,
@@ -115,12 +122,12 @@ func (ar *AdminRouter) createAPIKey(w http.ResponseWriter, r *http.Request, user
 
 	writeJSON(w, http.StatusCreated, map[string]string{
 		"id": keyID, "key": fullKey, "key_prefix": prefix,
-		"name": req.Name, "created_at": now,
+		"name": req.Name, "role": role, "created_at": now,
 	})
 }
 
 func (ar *AdminRouter) listAPIKeys(w http.ResponseWriter, r *http.Request, userID string) {
-	rows, err := ar.db.Query(`SELECT id, key_prefix, name, created_at, revoked FROM api_keys WHERE user_id = ?`, userID)
+	rows, err := ar.db.Query(`SELECT id, key_prefix, name, role, created_at, revoked FROM api_keys WHERE user_id = ?`, userID)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "admin handler error",
 			"method", r.Method,
@@ -135,13 +142,13 @@ func (ar *AdminRouter) listAPIKeys(w http.ResponseWriter, r *http.Request, userI
 
 	var result []map[string]interface{}
 	for rows.Next() {
-		var id, prefix, name, createdAt string
+		var id, prefix, name, role, createdAt string
 		var revoked int
-		if err := rows.Scan(&id, &prefix, &name, &createdAt, &revoked); err != nil {
+		if err := rows.Scan(&id, &prefix, &name, &role, &createdAt, &revoked); err != nil {
 			continue
 		}
 		result = append(result, map[string]interface{}{
-			"id": id, "key_prefix": prefix, "name": name,
+			"id": id, "key_prefix": prefix, "name": name, "role": role,
 			"created_at": createdAt, "revoked": revoked == 1,
 		})
 	}

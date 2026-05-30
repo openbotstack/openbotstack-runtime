@@ -3,21 +3,35 @@ package harness
 import (
 	"context"
 	"fmt"
+	"strings"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/openbotstack/openbotstack-core/audit"
 	"github.com/openbotstack/openbotstack-core/execution"
+	"github.com/openbotstack/openbotstack-core/execution/template"
 	"github.com/openbotstack/openbotstack-core/planner"
+	"github.com/openbotstack/openbotstack-runtime/logging/execution_logs"
 	builtintools "github.com/openbotstack/openbotstack-runtime/tools/builtin"
 	"github.com/openbotstack/openbotstack-runtime/toolrunner"
 )
+
+// plannerCtxKey is used to thread PlannerContext through context for LLM steps.
+type plannerCtxKey struct{}
+
+// LLMGenerator generates a direct LLM text response (no planning).
+// Used for "respond" steps where the planner already decided a direct LLM reply is needed.
+type LLMGenerator func(ctx context.Context, systemPrompt, userMessage string) (string, error)
 
 // HarnessDeps captures all optional harness dependencies.
 // Pass to NewExecutionHarness to construct a fully-configured harness.
 // All fields are optional (nil = feature disabled).
 type HarnessDeps struct {
 	ReasoningLoop   ReasoningLoop
+	LLMGenerator    LLMGenerator
+	AuditLogger     execution_logs.AuditLogger
 	MCPRunner       toolrunner.ToolRunner
 	BuiltinRunner   *builtintools.BuiltinToolRunner
 	HookManager     *HookManager
@@ -34,6 +48,8 @@ type ExecutionHarness struct {
 	config          HarnessConfig
 	stepExecutor    *StepExecutor
 	reasoningLoop   ReasoningLoop
+	llmGenerator    LLMGenerator
+	auditLogger     execution_logs.AuditLogger
 	hookManager     *HookManager
 	failureHandler  *FailureHandler
 	permChecker     *PermissionChecker
@@ -55,6 +71,8 @@ func NewExecutionHarness(
 		config:          config,
 		stepExecutor:    NewStepExecutor(toolRunner, skillExecutor, StepExecutorDeps{MCPRunner: deps.MCPRunner, BuiltinRunner: deps.BuiltinRunner}),
 		reasoningLoop:   deps.ReasoningLoop,
+		llmGenerator:    deps.LLMGenerator,
+		auditLogger:     deps.AuditLogger,
 		hookManager:     deps.HookManager,
 		failureHandler:  deps.FailureHandler,
 		permChecker:     deps.PermChecker,
@@ -64,48 +82,6 @@ func NewExecutionHarness(
 		h.progressCB = deps.ProgressCB
 	}
 	return h
-}
-
-// SetReasoningLoop configures the reasoning loop for LLM-type steps.
-// Deprecated: Use HarnessDeps in NewExecutionHarness.
-func (h *ExecutionHarness) SetReasoningLoop(rl ReasoningLoop) { h.reasoningLoop = rl }
-
-// SetMCPRunner configures the MCP tool runner on the harness's step executor.
-// Deprecated: Use HarnessDeps in NewExecutionHarness.
-func (h *ExecutionHarness) SetMCPRunner(runner toolrunner.ToolRunner) {
-	h.stepExecutor.SetMCPRunner(runner)
-}
-
-// SetBuiltinRunner configures the built-in tool runner on the harness's step executor.
-// Deprecated: Use HarnessDeps in NewExecutionHarness.
-func (h *ExecutionHarness) SetBuiltinRunner(runner *builtintools.BuiltinToolRunner) {
-	h.stepExecutor.SetBuiltinRunner(runner)
-}
-
-// SetHookManager configures the hook manager.
-// Deprecated: Use HarnessDeps in NewExecutionHarness.
-func (h *ExecutionHarness) SetHookManager(hm *HookManager) { h.hookManager = hm }
-
-// SetFailureHandler configures the failure handler.
-// Deprecated: Use HarnessDeps in NewExecutionHarness.
-func (h *ExecutionHarness) SetFailureHandler(fh *FailureHandler) { h.failureHandler = fh }
-
-// SetPermissionChecker configures the permission checker.
-// Deprecated: Use HarnessDeps in NewExecutionHarness.
-func (h *ExecutionHarness) SetPermissionChecker(pc *PermissionChecker) { h.permChecker = pc }
-
-// SetApprovalGateway configures the approval gateway for critical-risk step approval.
-// Deprecated: Use HarnessDeps in NewExecutionHarness.
-func (h *ExecutionHarness) SetApprovalGateway(gw execution.ApprovalGateway) {
-	h.approvalGateway = gw
-}
-
-// SetProgressCallback configures a progress callback.
-// Deprecated: Use HarnessDeps in NewExecutionHarness.
-func (h *ExecutionHarness) SetProgressCallback(cb ProgressCallback) {
-	h.progressMu.Lock()
-	defer h.progressMu.Unlock()
-	h.progressCB = cb
 }
 
 // State returns the current harness state for observability.
@@ -165,13 +141,21 @@ func (h *ExecutionHarness) Run(ctx context.Context, plan *execution.ExecutionPla
 			stepTimeout = 120 * time.Second
 		}
 
+		// Resolve templates in step arguments so the trace shows actual values.
+		if step.Arguments != nil {
+			resolved := make(map[string]any, len(step.Arguments))
+			for k, v := range step.Arguments {
+				if s, ok := v.(string); ok {
+					resolved[k] = template.Resolve(s, prevResults)
+				} else {
+					resolved[k] = v
+				}
+			}
+			result.StepInputs[step.StepID] = resolved
+		}
+
 		stepResult, execErr := h.dispatchStep(ctx, step, i, plan, ec, prevResults, stepTimeout, result)
 		failedStepResult := stepResult // preserve original result for fail-fast append
-
-		// Save step input arguments for trace visualization.
-		if step.Arguments != nil {
-			result.StepInputs[step.StepID] = step.Arguments
-		}
 
 		if execErr != nil && h.failureHandler != nil {
 			h.setState(HarnessRetry)
@@ -194,6 +178,7 @@ func (h *ExecutionHarness) Run(ctx context.Context, plan *execution.ExecutionPla
 			if stepResult.Type == string(execution.StepTypeTool) || stepResult.Type == string(execution.StepTypeSkill) {
 				result.Metrics.TotalToolCalls++
 			}
+			h.emitStepAudit(ctx, step, stepResult, ec)
 		}
 
 		h.setState(HarnessHookPost)
@@ -300,10 +285,8 @@ func (h *ExecutionHarness) dispatchStep(
 	result *HarnessResult,
 ) (*execution.StepResult, error) {
 	switch step.Type {
-	case execution.StepTypeTool:
-		return h.executeToolStep(ctx, step, stepIndex, plan, ec, prevResults, stepTimeout)
-	case execution.StepTypeSkill:
-		return h.executeSkillStep(ctx, step, stepIndex, plan, ec, prevResults, stepTimeout)
+	case execution.StepTypeTool, execution.StepTypeSkill:
+		return h.executeStep(ctx, step, stepIndex, plan, ec, prevResults, stepTimeout)
 	case execution.StepTypeLLM:
 		return h.executeLLMStep(ctx, step, ec, result)
 	default:
@@ -315,8 +298,8 @@ func (h *ExecutionHarness) dispatchStep(
 	}
 }
 
-// executeToolStep handles tool-type steps with pre/post tool hooks.
-func (h *ExecutionHarness) executeToolStep(
+// executeStep handles tool and skill steps with unified pre/post hook logic.
+func (h *ExecutionHarness) executeStep(
 	ctx context.Context,
 	step execution.ExecutionStep,
 	stepIndex int,
@@ -332,48 +315,11 @@ func (h *ExecutionHarness) executeToolStep(
 			return &execution.StepResult{StepID: step.StepID, StepName: step.Name, Type: string(step.Type), Error: hookErr}, hookErr
 		}
 		if hookResult != nil && hookResult.Deny {
-			err := fmt.Errorf("tool %q denied by hook: %s", step.Name, hookResult.Reason)
+			err := fmt.Errorf("%s %q denied by hook: %s", step.Type, step.Name, hookResult.Reason)
 			return &execution.StepResult{StepID: step.StepID, StepName: step.Name, Type: string(step.Type), Error: err}, err
 		}
 	}
-	stepResult, execErr := h.stepExecutor.ExecuteTool(ctx, &step, ec, prevResults, stepTimeout)
-	if h.hookManager != nil {
-		// Pass a shallow copy so hooks cannot corrupt the canonical step result.
-		var outputCopy any
-		if stepResult != nil {
-			cp := *stepResult
-			outputCopy = &cp
-		}
-		hookCtx := &execution.HookContext{Step: snapshotStepPtr(step), StepIndex: stepIndex, Plan: plan, EC: ec, ToolOutput: outputCopy}
-		if err := h.hookManager.PostToolUse(ctx, hookCtx); err != nil {
-			warnLog(ctx, ec, "post-tool hook error", "step", step.Name, "error", err)
-		}
-	}
-	return stepResult, execErr
-}
-
-// executeSkillStep handles skill-type steps with pre/post tool hooks.
-func (h *ExecutionHarness) executeSkillStep(
-	ctx context.Context,
-	step execution.ExecutionStep,
-	stepIndex int,
-	plan *execution.ExecutionPlan,
-	ec *execution.ExecutionContext,
-	prevResults map[string]any,
-	stepTimeout time.Duration,
-) (*execution.StepResult, error) {
-	if h.hookManager != nil {
-		hookCtx := &execution.HookContext{Step: snapshotStepPtr(step), StepIndex: stepIndex, Plan: plan, EC: ec}
-		hookResult, hookErr := h.hookManager.PreToolUse(ctx, hookCtx)
-		if hookErr != nil {
-			return &execution.StepResult{StepID: step.StepID, StepName: step.Name, Type: string(step.Type), Error: hookErr}, hookErr
-		}
-		if hookResult != nil && hookResult.Deny {
-			err := fmt.Errorf("skill %q denied by hook: %s", step.Name, hookResult.Reason)
-			return &execution.StepResult{StepID: step.StepID, StepName: step.Name, Type: string(step.Type), Error: err}, err
-		}
-	}
-	stepResult, execErr := h.stepExecutor.ExecuteSkill(ctx, &step, ec, prevResults, stepTimeout)
+	stepResult, execErr := h.stepExecutor.Execute(ctx, &step, ec, prevResults, stepTimeout)
 	if h.hookManager != nil {
 		var outputCopy any
 		if stepResult != nil {
@@ -388,15 +334,11 @@ func (h *ExecutionHarness) executeSkillStep(
 	return stepResult, execErr
 }
 
-// executeLLMStep handles LLM-type steps via the reasoning loop.
+// executeLLMStep handles LLM-type steps.
+// For "respond" steps, calls LLM directly. For complex reasoning, uses the ReasoningLoop.
 func (h *ExecutionHarness) executeLLMStep(ctx context.Context, step execution.ExecutionStep, ec *execution.ExecutionContext, result *HarnessResult) (*execution.StepResult, error) {
-	if h.reasoningLoop == nil {
-		err := fmt.Errorf("step %q is LLM type but no reasoning loop configured", step.Name)
-		return &execution.StepResult{
-			StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
-			Error: err, Duration: 0,
-		}, err
-	}
+	startTime := time.Now()
+
 	// Derive user request: prefer ExpectedOutput, fall back to arguments.prompt.
 	userRequest := step.ExpectedOutput
 	if userRequest == "" {
@@ -404,7 +346,54 @@ func (h *ExecutionHarness) executeLLMStep(ctx context.Context, step execution.Ex
 			userRequest = prompt
 		}
 	}
+
+	// Recover the original PlannerContext (with Skills, Capabilities, Soul, etc.)
+	// that was threaded in via PlanAndRun.
+	var origCtx *planner.PlannerContext
+	if orig, ok := ctx.Value(plannerCtxKey{}).(*planner.PlannerContext); ok && orig != nil {
+		origCtx = orig
+	}
+
+	// "respond" steps: direct LLM generation (no iterative planning loop needed).
+	if step.Name == "respond" && h.llmGenerator != nil {
+		systemPrompt := ""
+		if origCtx != nil {
+			systemPrompt = origCtx.Soul.SystemPrompt
+		}
+		response, err := h.llmGenerator(ctx, systemPrompt, userRequest)
+		if err != nil {
+			return &execution.StepResult{
+				StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
+				Error: err, Duration: time.Since(startTime),
+			}, err
+		}
+		return &execution.StepResult{
+			StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
+			Output: response, Duration: time.Since(startTime),
+		}, nil
+	}
+
+	// Complex LLM steps: delegate to ReasoningLoop for iterative tool-calling.
+	if h.reasoningLoop == nil {
+		err := fmt.Errorf("step %q is LLM type but no reasoning loop configured", step.Name)
+		return &execution.StepResult{
+			StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
+			Error: err, Duration: 0,
+		}, err
+	}
+
 	pCtx := &planner.PlannerContext{UserRequest: userRequest}
+	if origCtx != nil {
+		pCtx = &planner.PlannerContext{
+			UserRequest:   userRequest,
+			Skills:        origCtx.Skills,
+			Capabilities:  origCtx.Capabilities,
+			Soul:          origCtx.Soul,
+			AssistantID:   origCtx.AssistantID,
+			MemoryContext: origCtx.MemoryContext,
+		}
+	}
+
 	rlResult, rlErr := h.reasoningLoop.Run(ctx, &step, pCtx, ec)
 	if rlErr != nil {
 		return &execution.StepResult{
@@ -435,14 +424,7 @@ func (h *ExecutionHarness) handleStepFailure(
 	stepTimeout time.Duration,
 ) (*execution.StepResult, error) {
 	fallbackResult, handleErr := h.failureHandler.Handle(ctx, &step, execErr, func() (*execution.StepResult, error) {
-		switch step.Type {
-		case execution.StepTypeTool:
-			return h.stepExecutor.ExecuteTool(ctx, &step, ec, prevResults, stepTimeout)
-		case execution.StepTypeSkill:
-			return h.stepExecutor.ExecuteSkill(ctx, &step, ec, prevResults, stepTimeout)
-		default:
-			return nil, execErr
-		}
+		return h.stepExecutor.Execute(ctx, &step, ec, prevResults, stepTimeout)
 	})
 
 	if handleErr != nil {
@@ -485,11 +467,22 @@ func (h *ExecutionHarness) runPostStep(
 }
 
 // buildPrevResults creates a map of previous step outputs for template interpolation.
+// Registers both the full step name (e.g. "builtin.web_fetch") and a short alias
+// (e.g. "web_fetch") so LLM-generated templates like {{web_fetch}} resolve correctly.
 func (h *ExecutionHarness) buildPrevResults(stepResults []execution.StepResult) map[string]any {
 	prevResults := make(map[string]any)
 	for _, sr := range stepResults {
 		if sr.Output != nil {
 			prevResults[sr.StepName] = sr.Output
+			// Register short aliases for prefixed step names.
+			for _, prefix := range []string{"builtin.", "mcp."} {
+				if strings.HasPrefix(sr.StepName, prefix) {
+					short := strings.TrimPrefix(sr.StepName, prefix)
+					if _, exists := prevResults[short]; !exists {
+						prevResults[short] = sr.Output
+					}
+				}
+			}
 		}
 	}
 	return prevResults
@@ -524,6 +517,10 @@ func PlanAndRun(ctx context.Context, pl planner.ExecutionPlanner, h *ExecutionHa
 	if err := plan.Validate(); err != nil {
 		return nil, fmt.Errorf("harness.PlanAndRun: plan validation failed: %w", err)
 	}
+
+	// Thread PlannerContext into the execution context so LLM steps can access
+	// the original Skills, Capabilities, Soul, and MemoryContext.
+	ctx = context.WithValue(ctx, plannerCtxKey{}, task.PlannerContext)
 
 	return h.Run(ctx, plan, ec)
 }
@@ -634,4 +631,45 @@ func snapshotStep(s execution.ExecutionStep) execution.ExecutionStep {
 		}
 	}
 	return cp
+}
+
+// emitStepAudit records a step-level audit event with full step context.
+func (h *ExecutionHarness) emitStepAudit(ctx context.Context, step execution.ExecutionStep, sr *execution.StepResult, ec *execution.ExecutionContext) {
+	if h.auditLogger == nil || ec == nil {
+		return
+	}
+
+	status := "completed"
+	var errStr string
+	if sr.Error != nil {
+		status = "error"
+		errStr = sr.Error.Error()
+	}
+
+	event := audit.AuditEvent{
+		ID:        step.StepID,
+		TenantID:  ec.TenantID,
+		UserID:    ec.UserID,
+		RequestID: ec.RequestID,
+		Source:    audit.SourceExecutor,
+		Action:    "harness.step",
+		Resource:  step.Name,
+		Outcome:   status,
+		Duration:  sr.Duration,
+		Timestamp: time.Now().UTC(),
+		StepID:    step.StepID,
+		StepName:  step.Name,
+		StepType:  sr.Type,
+		Status:    status,
+		Error:     errStr,
+		TraceID:   ec.RequestID,
+		ToolInput: step.Arguments,
+	}
+	if sr.Output != nil {
+		event.ToolOutput = sr.Output
+	}
+
+	if err := h.auditLogger.Log(ctx, event); err != nil {
+		slog.WarnContext(ctx, "harness: failed to emit step audit", "step", step.Name, "error", err)
+	}
 }

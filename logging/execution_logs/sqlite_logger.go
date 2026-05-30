@@ -41,7 +41,6 @@ func (l *SQLiteAuditLogger) Log(ctx context.Context, event audit.AuditEvent) err
 	var signature string
 	if l.signer != nil {
 		prevSig := l.lastSignature()
-		// Sign only the fields stored in DB so verification can reconstruct the same payload.
 		signable := audit.AuditEvent{
 			ID:        event.ID,
 			TenantID:  event.TenantID,
@@ -61,22 +60,29 @@ func (l *SQLiteAuditLogger) Log(ctx context.Context, event audit.AuditEvent) err
 		signature = sig
 	}
 
+	toolInputJSON, _ := json.Marshal(event.ToolInput)
+	if len(toolInputJSON) == 0 {
+		toolInputJSON = []byte("{}")
+	}
+	toolOutputJSON, _ := json.Marshal(event.ToolOutput)
+	if len(toolOutputJSON) == 0 {
+		toolOutputJSON = []byte("{}")
+	}
+
 	_, err = l.db.ExecContext(ctx, `
 		INSERT INTO audit_logs (id, tenant_id, user_id, request_id, action, resource,
-		                        outcome, source, duration_ms, metadata, timestamp, signature)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		event.ID,
-		event.TenantID,
-		event.UserID,
-		event.RequestID,
-		event.Action,
-		event.Resource,
-		event.Outcome,
-		string(event.Source),
-		event.Duration.Milliseconds(),
-		string(metadataJSON),
-		event.Timestamp.UTC().Format(time.RFC3339Nano),
+		                        outcome, source, duration_ms, metadata, timestamp, signature,
+		                        step_id, step_name, step_type, status,
+		                        tool_input, tool_output, error, trace_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		event.ID, event.TenantID, event.UserID, event.RequestID,
+		event.Action, event.Resource, event.Outcome,
+		string(event.Source), event.Duration.Milliseconds(),
+		string(metadataJSON), event.Timestamp.UTC().Format(time.RFC3339Nano),
 		signature,
+		event.StepID, event.StepName, event.StepType, event.Status,
+		string(toolInputJSON), string(toolOutputJSON),
+		event.Error, event.TraceID,
 	)
 	if err != nil {
 		return fmt.Errorf("log event %s: %w", event.ID, err)
@@ -94,11 +100,46 @@ func (l *SQLiteAuditLogger) lastSignature() string {
 	return sig
 }
 
+func scanEvent(rows *sql.Rows) (audit.AuditEvent, string, error) {
+	var e audit.AuditEvent
+	var durationMs int64
+	var metadataJSON, timestampStr, sourceStr, signatureStr string
+	var stepID, stepName, stepType, status string
+	var toolInputJSON, toolOutputJSON, errorStr, traceID string
+	if err := rows.Scan(&e.ID, &e.TenantID, &e.UserID, &e.RequestID,
+		&e.Action, &e.Resource, &e.Outcome, &sourceStr,
+		&durationMs, &metadataJSON, &timestampStr, &signatureStr,
+		&stepID, &stepName, &stepType, &status,
+		&toolInputJSON, &toolOutputJSON, &errorStr, &traceID); err != nil {
+		return audit.AuditEvent{}, "", fmt.Errorf("scan event: %w", err)
+	}
+	e.Source = audit.Source(sourceStr)
+	e.Duration = time.Duration(durationMs) * time.Millisecond
+	_ = json.Unmarshal([]byte(metadataJSON), &e.Metadata)
+	e.Timestamp, _ = time.Parse(time.RFC3339Nano, timestampStr)
+	e.StepID = stepID
+	e.StepName = stepName
+	e.StepType = stepType
+	e.Status = status
+	e.Error = errorStr
+	e.TraceID = traceID
+	if toolInputJSON != "" && toolInputJSON != "{}" {
+		_ = json.Unmarshal([]byte(toolInputJSON), &e.ToolInput)
+	}
+	if toolOutputJSON != "" && toolOutputJSON != "{}" {
+		_ = json.Unmarshal([]byte(toolOutputJSON), &e.ToolOutput)
+	}
+	return e, signatureStr, nil
+}
+
+const eventColumns = `id, tenant_id, user_id, request_id, action, resource,
+                     outcome, source, duration_ms, metadata, timestamp, signature,
+                     step_id, step_name, step_type, status,
+                     tool_input, tool_output, error, trace_id`
+
 // Query retrieves audit events matching the filter.
 func (l *SQLiteAuditLogger) Query(ctx context.Context, filter QueryFilter) ([]audit.AuditEvent, error) {
-	query := `SELECT id, tenant_id, user_id, request_id, action, resource,
-	                 outcome, source, duration_ms, metadata, timestamp, signature
-	          FROM audit_logs WHERE 1=1`
+	query := `SELECT ` + eventColumns + ` FROM audit_logs WHERE 1=1`
 	var args []any
 	query, args = l.buildWhere(query, args, filter)
 	query += " ORDER BY timestamp DESC"
@@ -115,18 +156,10 @@ func (l *SQLiteAuditLogger) Query(ctx context.Context, filter QueryFilter) ([]au
 
 	var events []audit.AuditEvent
 	for rows.Next() {
-		var e audit.AuditEvent
-		var durationMs int64
-		var metadataJSON, timestampStr, sourceStr, signatureStr string
-		if err := rows.Scan(&e.ID, &e.TenantID, &e.UserID, &e.RequestID,
-			&e.Action, &e.Resource, &e.Outcome, &sourceStr,
-			&durationMs, &metadataJSON, &timestampStr, &signatureStr); err != nil {
-			return nil, fmt.Errorf("scan event: %w", err)
+		e, _, err := scanEvent(rows)
+		if err != nil {
+			return nil, err
 		}
-		e.Source = audit.Source(sourceStr)
-		e.Duration = time.Duration(durationMs) * time.Millisecond
-		_ = json.Unmarshal([]byte(metadataJSON), &e.Metadata)
-		e.Timestamp, _ = time.Parse(time.RFC3339Nano, timestampStr)
 		events = append(events, e)
 	}
 	return events, rows.Err()
@@ -134,9 +167,7 @@ func (l *SQLiteAuditLogger) Query(ctx context.Context, filter QueryFilter) ([]au
 
 // QueryWithSignatures retrieves audit events with their chain signatures.
 func (l *SQLiteAuditLogger) QueryWithSignatures(ctx context.Context, filter QueryFilter) ([]audit.AuditEvent, []string, error) {
-	query := `SELECT id, tenant_id, user_id, request_id, action, resource,
-	                 outcome, source, duration_ms, metadata, timestamp, signature
-	          FROM audit_logs WHERE 1=1`
+	query := `SELECT ` + eventColumns + ` FROM audit_logs WHERE 1=1`
 	var args []any
 	query, args = l.buildWhere(query, args, filter)
 	query += " ORDER BY timestamp ASC"
@@ -154,20 +185,12 @@ func (l *SQLiteAuditLogger) QueryWithSignatures(ctx context.Context, filter Quer
 	var events []audit.AuditEvent
 	var signatures []string
 	for rows.Next() {
-		var e audit.AuditEvent
-		var durationMs int64
-		var metadataJSON, timestampStr, sourceStr, signatureStr string
-		if err := rows.Scan(&e.ID, &e.TenantID, &e.UserID, &e.RequestID,
-			&e.Action, &e.Resource, &e.Outcome, &sourceStr,
-			&durationMs, &metadataJSON, &timestampStr, &signatureStr); err != nil {
-			return nil, nil, fmt.Errorf("scan event: %w", err)
+		e, sig, err := scanEvent(rows)
+		if err != nil {
+			return nil, nil, err
 		}
-		e.Source = audit.Source(sourceStr)
-		e.Duration = time.Duration(durationMs) * time.Millisecond
-		_ = json.Unmarshal([]byte(metadataJSON), &e.Metadata)
-		e.Timestamp, _ = time.Parse(time.RFC3339Nano, timestampStr)
 		events = append(events, e)
-		signatures = append(signatures, signatureStr)
+		signatures = append(signatures, sig)
 	}
 	return events, signatures, rows.Err()
 }

@@ -126,31 +126,6 @@ func NewRouter(cfg RouterConfig) *Router {
 	return r
 }
 
-// SetAuthMiddleware allows setting auth middleware after construction (for tests).
-func (r *Router) SetAuthMiddleware(mw func(http.Handler) http.Handler) {
-	if mw != nil {
-		r.v1Handler = mw(r.v1Mux)
-	}
-}
-
-// SetReasoningStore allows setting the reasoning store after construction (for tests).
-func (r *Router) SetReasoningStore(s reasoning.Store) { r.reasoningStore = s }
-
-// SetBuildInfo allows setting build info after construction (for tests).
-func (r *Router) SetBuildInfo(info BuildInfo) { r.buildInfo = info }
-
-// SetHealthCheckers allows setting health checkers after construction (for tests).
-func (r *Router) SetHealthCheckers(checkers ...HealthChecker) { r.healthCheckers = checkers }
-
-// SetExecutionStore allows setting the execution store after construction (for tests).
-func (r *Router) SetExecutionStore(es ExecutionStore) { r.execStore = es }
-
-// SetHistoryProvider allows setting the history provider after construction (for tests).
-func (r *Router) SetHistoryProvider(hp HistoryProvider) { r.history = hp }
-
-// SetSkillProvider allows setting the skill provider after construction (for tests).
-func (r *Router) SetSkillProvider(sp SkillProvider) { r.skills = sp }
-
 // ServeHTTP implements http.Handler.
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	r.mux.ServeHTTP(w, req)

@@ -65,10 +65,10 @@ func main() {
 		InitAI().
 		InitExecution().
 		InitCapabilities().
+		InitAudit().
 		InitAgent().
 		InitMemory().
-		InitTelemetry().
-		InitAudit()
+		InitTelemetry()
 	defer builder.Cleanup()
 
 	deps := builder.Build()

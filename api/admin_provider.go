@@ -270,11 +270,17 @@ func (ar *AdminRouter) deleteProviderConfig(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	_, err := ar.db.Exec("DELETE FROM provider_config WHERE id = ?", req.ID)
+	result, err := ar.db.Exec("DELETE FROM provider_config WHERE id = ?", req.ID)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "admin handler error",
 			"method", r.Method, "path", r.URL.Path, "status", http.StatusInternalServerError, "error", err)
 		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to delete provider config")
+		return
+	}
+
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		writeAPIError(w, http.StatusNotFound, ErrNotFound, "provider config not found")
 		return
 	}
 

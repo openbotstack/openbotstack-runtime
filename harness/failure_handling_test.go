@@ -33,8 +33,7 @@ func TestFailure_RetryWithEventualSuccess(t *testing.T) {
 		FailFast:       false,
 	})
 
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-	h.SetFailureHandler(fh)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{FailureHandler: fh})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "flaky-tool", Type: execution.StepTypeTool, Arguments: map[string]any{}},
@@ -113,8 +112,7 @@ func TestFailure_PartialExecution_FailFast(t *testing.T) {
 		FailFast:       true,
 	})
 
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-	h.SetFailureHandler(fh)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{FailureHandler: fh})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "step-1", Type: execution.StepTypeTool, Arguments: map[string]any{}},
@@ -160,8 +158,7 @@ func TestFailure_PartialExecution_ContinueOnError(t *testing.T) {
 		FailFast:       false,
 	})
 
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-	h.SetFailureHandler(fh)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{FailureHandler: fh})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "step-1", Type: execution.StepTypeTool, Arguments: map[string]any{}},
@@ -206,8 +203,7 @@ func TestFailure_RetryBounded(t *testing.T) {
 		FailFast:       false,
 	})
 
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-	h.SetFailureHandler(fh)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{FailureHandler: fh})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "always-fail", Type: execution.StepTypeTool, Arguments: map[string]any{}},
@@ -215,7 +211,7 @@ func TestFailure_RetryBounded(t *testing.T) {
 	ec := testEC()
 
 	result, err := h.Run(context.Background(), plan, ec)
-	// Harness should not crash — error captured per-step
+	// Harness should not crash - error captured per-step
 	if err != nil {
 		t.Fatalf("unexpected error at harness level: %v", err)
 	}
@@ -252,8 +248,7 @@ func TestFailure_FailFastStopsImmediately(t *testing.T) {
 		FailFast:       true,
 	})
 
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-	h.SetFailureHandler(fh)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{FailureHandler: fh})
 
 	// 10-step plan, all steps fail
 	steps := make([]execution.ExecutionStep, 10)
@@ -299,8 +294,7 @@ func TestFailure_FallbackExecution(t *testing.T) {
 		FallbackTool:   "fallback-tool",
 	})
 
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-	h.SetFailureHandler(fh)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{FailureHandler: fh})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "primary-tool", Type: execution.StepTypeTool, Arguments: map[string]any{}},

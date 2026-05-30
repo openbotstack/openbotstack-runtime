@@ -351,7 +351,6 @@ func TestE2EBlackbox_R2_AuditTrace_FullReconstructable(t *testing.T) {
 	tr.err["ehr.query_labs"] = fmt.Errorf("labs service unavailable")
 	tr.result["analytics.risk_score"] = map[string]any{"score": 50.0}
 
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
 	al := NewAuditLayer()
 
 	hm := NewHookManager()
@@ -394,7 +393,7 @@ func TestE2EBlackbox_R2_AuditTrace_FullReconstructable(t *testing.T) {
 		})
 		return nil
 	})
-	h.SetHookManager(hm)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{HookManager: hm})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "ehr.query_patient", Type: execution.StepTypeTool, Arguments: map[string]any{"patient_id": "P001"}},
@@ -487,7 +486,6 @@ func TestE2EBlackbox_R2_AuditTrace_Reproducible(t *testing.T) {
 		cfg := DefaultHarnessConfig()
 		tr := newMockToolRunner()
 		tr.result["tool-a"] = "ok"
-		h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
 		al := NewAuditLayer()
 
 		hm := NewHookManager()
@@ -499,7 +497,7 @@ func TestE2EBlackbox_R2_AuditTrace_Reproducible(t *testing.T) {
 			})
 			return nil
 		})
-		h.SetHookManager(hm)
+		h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{HookManager: hm})
 
 		plan := makeFrozenPlan(
 			execution.ExecutionStep{Name: "tool-a", Type: execution.StepTypeTool, Arguments: map[string]any{}},

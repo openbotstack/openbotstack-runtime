@@ -111,13 +111,6 @@ func (a *HarnessAgent) SetContextAssembler(ca corecontext.ContextAssembler) { a.
 // SetMemoryManager sets the memory manager for retrieval.
 func (a *HarnessAgent) SetMemoryManager(mm abstraction.MemoryManager) { a.memoryManager = mm }
 
-// SetHookManager delegates hook manager installation to the underlying harness.
-func (a *HarnessAgent) SetHookManager(hm interface{}) {
-	if hookMgr, ok := hm.(*harness.HookManager); ok {
-		a.harness.SetHookManager(hookMgr)
-	}
-}
-
 // HandleMessage implements agent.Agent.
 func (a *HarnessAgent) HandleMessage(ctx context.Context, req agent.MessageRequest) (*agent.MessageResponse, error) {
 	if req.SessionID == "" {
@@ -333,7 +326,7 @@ func (a *HarnessAgent) extractMessage(result *harness.HarnessResult) string {
 			return fmt.Sprintf("%v", sr.Output)
 		}
 		if sr.Error != nil {
-			return fmt.Sprintf("Step %q failed: %v", sr.StepName, sr.Error)
+			return fmt.Sprintf("Step %q failed: %s", sr.StepName, sanitizeStepError(sr.Error))
 		}
 	}
 	// All steps were tool calls — provide a summary instead of raw JSON
@@ -502,4 +495,43 @@ func (a *HarnessAgent) loadHistory(ctx context.Context, req agent.MessageRequest
 	}
 
 	return history
+}
+
+// sanitizeStepError returns a user-safe error message.
+// Internal details (LLM provider errors, auth failures, connection strings)
+// are replaced with generic descriptions to avoid leaking sensitive info.
+func sanitizeStepError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+
+	// Map known internal error patterns to user-safe messages.
+	switch {
+	case strings.Contains(msg, "authentication failed"):
+		return "LLM provider authentication error"
+	case strings.Contains(msg, "connection refused"):
+		return "LLM provider connection error"
+	case strings.Contains(msg, "timeout") || strings.Contains(msg, "deadline exceeded"):
+		return "execution timed out"
+	case strings.Contains(msg, "context canceled"):
+		return "execution was cancelled"
+	case strings.Contains(msg, "no tool runner configured"):
+		return "tool execution is not available"
+	case strings.Contains(msg, "no skill executor configured"):
+		return "skill execution is not available"
+	case strings.Contains(msg, "no reasoning loop configured"):
+		return "LLM reasoning is not available"
+	case strings.Contains(msg, "denied by hook"):
+		return "execution denied by policy"
+	case strings.Contains(msg, "denied:"):
+		return "execution denied by policy"
+	}
+
+	// Default: return the error as-is for unexpected errors (for debuggability).
+	// In production, consider truncating to a max length.
+	if len(msg) > 200 {
+		msg = msg[:200] + "..."
+	}
+	return msg
 }

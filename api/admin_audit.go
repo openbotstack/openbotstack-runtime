@@ -144,7 +144,13 @@ func (ar *AdminRouter) handleAuditExport(w http.ResponseWriter, r *http.Request)
 }
 
 // HandleMe returns the authenticated user's identity and role.
+// Only GET is allowed.
 func HandleMe(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
+		return
+	}
+
 	user, ok := middleware.UserFromContext(r.Context())
 	if !ok || user == nil {
 		writeAPIError(w, http.StatusUnauthorized, ErrUnauthorized, "not authenticated")

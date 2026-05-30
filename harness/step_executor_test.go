@@ -300,6 +300,154 @@ func TestStepExecutor_SkillWithStepTimeout(t *testing.T) {
 	}
 }
 
+// --- TDD: Unified Execute dispatches all step types through one method ---
+
+func TestStepExecutor_Execute_DispatchesToolStep(t *testing.T) {
+	tr := newMockToolRunner()
+	tr.result["my-tool"] = "tool-output"
+	se := NewStepExecutor(tr, nil, StepExecutorDeps{})
+
+	step := &execution.ExecutionStep{
+		StepID:    "step-1",
+		Name:      "my-tool",
+		Type:      execution.StepTypeTool,
+		Arguments: map[string]any{"key": "value"},
+	}
+	ec := testEC()
+
+	result, err := se.Execute(context.Background(), step, ec, nil, 5*time.Second)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.StepName != "my-tool" {
+		t.Errorf("StepName = %q, want %q", result.StepName, "my-tool")
+	}
+	if result.Output != "tool-output" {
+		t.Errorf("Output = %v, want tool-output", result.Output)
+	}
+}
+
+func TestStepExecutor_Execute_DispatchesSkillStep(t *testing.T) {
+	skillExec := &mockSkillExecutor{resp: []byte(`{"result":"skill-output"}`)}
+	se := NewStepExecutor(nil, skillExec, StepExecutorDeps{})
+
+	step := &execution.ExecutionStep{
+		StepID:    "step-1",
+		Name:      "my-skill",
+		Type:      execution.StepTypeSkill,
+		Arguments: map[string]any{"input": "data"},
+	}
+	ec := testEC()
+
+	result, err := se.Execute(context.Background(), step, ec, nil, 5*time.Second)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.StepName != "my-skill" {
+		t.Errorf("StepName = %q, want %q", result.StepName, "my-skill")
+	}
+	if skillExec.callCount() != 1 {
+		t.Errorf("skill calls = %d, want 1", skillExec.callCount())
+	}
+}
+
+func TestStepExecutor_Execute_ClonesBeforeMutation(t *testing.T) {
+	tr := newMockToolRunner()
+	tr.result["my-tool"] = "ok"
+	se := NewStepExecutor(tr, nil, StepExecutorDeps{})
+
+	originalArgs := map[string]any{"input": "{{step-a}}"}
+	step := &execution.ExecutionStep{
+		StepID:    "step-1",
+		Name:      "my-tool",
+		Type:      execution.StepTypeTool,
+		Arguments: originalArgs,
+	}
+	prevResults := map[string]any{"step-a": "resolved"}
+	ec := testEC()
+
+	_, err := se.Execute(context.Background(), step, ec, prevResults, 5*time.Second)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Original arguments must NOT be mutated
+	if step.Arguments["input"] != "{{step-a}}" {
+		t.Errorf("original args mutated: input = %v, want {{step-a}}", step.Arguments["input"])
+	}
+	// Tool runner receives resolved values
+	if tr.LastArgs["input"] != "resolved" {
+		t.Errorf("tool args = %v, want 'resolved'", tr.LastArgs["input"])
+	}
+}
+
+func TestStepExecutor_Execute_CoercesAndResolves(t *testing.T) {
+	tr := newMockToolRunner()
+	tr.result["math"] = "ok"
+	se := NewStepExecutor(tr, nil, StepExecutorDeps{})
+
+	step := &execution.ExecutionStep{
+		StepID:    "step-1",
+		Name:      "math",
+		Type:      execution.StepTypeTool,
+		Arguments: map[string]any{"a": "42", "b": "{{prev}}"},
+	}
+	prevResults := map[string]any{"prev": "value"}
+	ec := testEC()
+
+	_, err := se.Execute(context.Background(), step, ec, prevResults, 5*time.Second)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if tr.LastArgs["a"] != int64(42) {
+		t.Errorf("a = %v (%T), want int64(42)", tr.LastArgs["a"], tr.LastArgs["a"])
+	}
+	if tr.LastArgs["b"] != "value" {
+		t.Errorf("b = %v, want 'value'", tr.LastArgs["b"])
+	}
+}
+
+func TestStepExecutor_Execute_RoutesMCPPrefix(t *testing.T) {
+	mcpRunner := newMockToolRunner()
+	mcpRunner.result["mcp.search"] = "search-results"
+	se := NewStepExecutor(nil, nil, StepExecutorDeps{MCPRunner: mcpRunner})
+
+	step := &execution.ExecutionStep{
+		StepID:    "step-1",
+		Name:      "mcp.search",
+		Type:      execution.StepTypeTool,
+		Arguments: map[string]any{},
+	}
+	ec := testEC()
+
+	result, err := se.Execute(context.Background(), step, ec, nil, 5*time.Second)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Output != "search-results" {
+		t.Errorf("Output = %v, want search-results", result.Output)
+	}
+}
+
+func TestStepExecutor_Execute_NoRunnerForStepType(t *testing.T) {
+	se := NewStepExecutor(nil, nil, StepExecutorDeps{})
+
+	step := &execution.ExecutionStep{
+		StepID:    "step-1",
+		Name:      "unknown",
+		Type:      execution.StepTypeTool,
+		Arguments: map[string]any{},
+	}
+	ec := testEC()
+
+	result, err := se.Execute(context.Background(), step, ec, nil, 5*time.Second)
+	if err == nil {
+		t.Fatal("expected error for no tool runner")
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result even on error")
+	}
+}
+
 // Ensure mockSkillExecutor implements the interface at compile time
 var _ execution.SkillExecutor = (*mockSkillExecutor)(nil)
 

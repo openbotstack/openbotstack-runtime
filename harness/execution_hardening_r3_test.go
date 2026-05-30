@@ -45,10 +45,8 @@ func TestPolicy_EnforcerDenyWithRealEnforcer(t *testing.T) {
 	cfg := DefaultHarnessConfig()
 	tr := newMockToolRunner()
 	tr.result["secret-tool"] = "classified"
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-
 	pc := NewPermissionChecker(nil, enforcer)
-	h.SetPermissionChecker(pc)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{PermChecker: pc})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "secret-tool", Type: execution.StepTypeTool, Arguments: map[string]any{}},
@@ -81,10 +79,8 @@ func TestPolicy_EnforcerAllowsNonMatching(t *testing.T) {
 	cfg := DefaultHarnessConfig()
 	tr := newMockToolRunner()
 	tr.result["safe-tool"] = "ok"
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-
 	pc := NewPermissionChecker(nil, enforcer)
-	h.SetPermissionChecker(pc)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{PermChecker: pc})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "safe-tool", Type: execution.StepTypeTool, Arguments: map[string]any{}},
@@ -116,10 +112,8 @@ func TestPolicy_EnforcerAllowOverrideDeny(t *testing.T) {
 	cfg := DefaultHarnessConfig()
 	tr := newMockToolRunner()
 	tr.result["safe-tool"] = "ok"
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-
 	pc := NewPermissionChecker(nil, enforcer)
-	h.SetPermissionChecker(pc)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{PermChecker: pc})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "safe-tool", Type: execution.StepTypeTool, Arguments: map[string]any{}},
@@ -211,13 +205,11 @@ func TestHook_PreToolUseHookError_ReturnsError(t *testing.T) {
 	cfg := DefaultHarnessConfig()
 	tr := newMockToolRunner()
 	tr.result["tool-a"] = "ok"
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-
 	hm := NewHookManager()
 	hm.RegisterPreToolUse(func(ctx context.Context, hctx *execution.HookContext) (*execution.HookResult, error) {
 		return nil, fmt.Errorf("pre-tool hook runtime error")
 	})
-	h.SetHookManager(hm)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{HookManager: hm})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "tool-a", Type: execution.StepTypeTool, Arguments: map[string]any{}},
@@ -237,13 +229,11 @@ func TestHook_PostToolUseHookError_NonFatal(t *testing.T) {
 	cfg := DefaultHarnessConfig()
 	tr := newMockToolRunner()
 	tr.result["tool-a"] = "ok"
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-
 	hm := NewHookManager()
 	hm.RegisterPostToolUse(func(ctx context.Context, hctx *execution.HookContext) error {
 		return fmt.Errorf("post-tool hook runtime error")
 	})
-	h.SetHookManager(hm)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{HookManager: hm})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "tool-a", Type: execution.StepTypeTool, Arguments: map[string]any{}},
@@ -261,13 +251,11 @@ func TestHook_PostToolUseHookError_NonFatal(t *testing.T) {
 func TestHook_PreToolUseDeny_SkillStep(t *testing.T) {
 	cfg := DefaultHarnessConfig()
 	skillExec := &mockSkillExecutor{resp: []byte(`{"ok":true}`)}
-	h := NewExecutionHarness(cfg, nil, skillExec, HarnessDeps{})
-
 	hm := NewHookManager()
 	hm.RegisterPreToolUse(func(ctx context.Context, hctx *execution.HookContext) (*execution.HookResult, error) {
 		return &execution.HookResult{Deny: true, Reason: "skill not allowed"}, nil
 	})
-	h.SetHookManager(hm)
+	h := NewExecutionHarness(cfg, nil, skillExec, HarnessDeps{HookManager: hm})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "denied-skill", Type: execution.StepTypeSkill, Arguments: map[string]any{}},
@@ -450,13 +438,11 @@ func TestReasoningLoop_CompactionErrorDoesNotStopLoop(t *testing.T) {
 func TestHarness_PreStepHookError_ReturnsNilResult(t *testing.T) {
 	cfg := DefaultHarnessConfig()
 	tr := newMockToolRunner()
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-
 	hm := NewHookManager()
 	hm.RegisterPreStepExecute(func(ctx context.Context, hctx *execution.HookContext) (*execution.HookResult, error) {
 		return nil, fmt.Errorf("hook runtime crash")
 	})
-	h.SetHookManager(hm)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{HookManager: hm})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "tool-a", Type: execution.StepTypeTool, Arguments: map[string]any{}},

@@ -154,11 +154,19 @@ func aggregateHealthStatus(components map[string]ComponentHealth) string {
 }
 
 func (r *Router) handleHealthz(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "healthy"})
 }
 
 func (r *Router) handleReadyz(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
+		return
+	}
 	components := runHealthChecks(req.Context(), r.healthCheckers)
 	status := aggregateHealthStatus(components)
 
@@ -186,6 +194,10 @@ func (r *Router) handleReadyz(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) handleVersion(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
+		return
+	}
 	info := BuildInfo{
 		Version:   r.buildInfo.Version,
 		Commit:    r.buildInfo.Commit,

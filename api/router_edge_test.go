@@ -287,15 +287,15 @@ func TestConcurrentRequests(t *testing.T) {
 
 func TestChatStreamEndpointUsesAuthenticatedIdentity(t *testing.T) {
 	ca := &captureAgent{}
-	router := api.NewRouter(api.RouterConfig{Agent: ca})
-
-	// Set auth middleware that injects a user into context
-	router.SetAuthMiddleware(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			user := &auth.User{ID: "auth-user", TenantID: "auth-tenant"}
-			ctx := middleware.WithUser(r.Context(), user)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
+	router := api.NewRouter(api.RouterConfig{
+		Agent: ca,
+		AuthMiddleware: func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				user := &auth.User{ID: "auth-user", TenantID: "auth-tenant"}
+				ctx := middleware.WithUser(r.Context(), user)
+				next.ServeHTTP(w, r.WithContext(ctx))
+			})
+		},
 	})
 
 	// Request body has different tenant/user than the authenticated one

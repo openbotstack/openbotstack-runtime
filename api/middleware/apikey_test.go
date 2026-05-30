@@ -264,11 +264,13 @@ func TestRequireAdmin(t *testing.T) {
 	tests := []struct {
 		name       string
 		role       string // role to inject, empty = no role
+		hasUser    bool   // whether to inject a user into context
 		expectCode int
 	}{
-		{"admin allowed", "admin", 0},
-		{"member rejected", "member", http.StatusForbidden},
-		{"no role rejected", "", http.StatusForbidden},
+		{"admin allowed", "admin", true, 0},
+		{"member rejected", "member", true, http.StatusForbidden},
+		{"no role rejected", "", true, http.StatusForbidden},
+		{"no user rejected", "admin", false, http.StatusUnauthorized},
 	}
 
 	for _, tt := range tests {
@@ -283,6 +285,10 @@ func TestRequireAdmin(t *testing.T) {
 			)
 
 			req := httptest.NewRequest("GET", "/test", nil)
+			if tt.hasUser {
+				ctx := WithUser(req.Context(), &auth.User{ID: "test", TenantID: "default"})
+				req = req.WithContext(ctx)
+			}
 			if tt.role != "" {
 				ctx := WithUserRole(req.Context(), tt.role)
 				req = req.WithContext(ctx)

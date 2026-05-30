@@ -70,8 +70,7 @@ func TestSkillsEndpointReturnsSkills(t *testing.T) {
 		},
 	}
 
-	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}})
-	handler.SetSkillProvider(provider)
+	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}, Skills: provider})
 
 	req := httptest.NewRequest("GET", "/v1/skills", nil)
 	rr := httptest.NewRecorder()
@@ -107,8 +106,7 @@ func TestSkillsEndpointReturnsSkills(t *testing.T) {
 
 func TestSkillsEndpointEmpty(t *testing.T) {
 	provider := &mockSkillProvider{skills: map[string]*testSkill{}}
-	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}})
-	handler.SetSkillProvider(provider)
+	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}, Skills: provider})
 
 	req := httptest.NewRequest("GET", "/v1/skills", nil)
 	rr := httptest.NewRecorder()
@@ -183,8 +181,7 @@ func TestExecutionsEndpoint(t *testing.T) {
 	})
 
 	execStore := api.NewAuditExecutionStore(logger)
-	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}})
-	handler.SetExecutionStore(execStore)
+	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}, ExecStore: execStore})
 
 	req := httptest.NewRequest("GET", "/v1/executions", nil)
 	rr := httptest.NewRecorder()
@@ -240,8 +237,7 @@ func TestExecutionsEndpoint(t *testing.T) {
 func TestExecutionsEndpointEmpty(t *testing.T) {
 	logger := execution_logs.NewInMemoryAuditLogger()
 	execStore := api.NewAuditExecutionStore(logger)
-	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}})
-	handler.SetExecutionStore(execStore)
+	handler := api.NewRouter(api.RouterConfig{Agent: &mockAgent{}, ExecStore: execStore})
 
 	req := httptest.NewRequest("GET", "/v1/executions", nil)
 	rr := httptest.NewRecorder()

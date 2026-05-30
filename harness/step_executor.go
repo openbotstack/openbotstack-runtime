@@ -39,18 +39,6 @@ func NewStepExecutor(toolRunner toolrunner.ToolRunner, skillExecutor execution.S
 	}
 }
 
-// SetMCPRunner sets the MCP tool runner.
-// Deprecated: Use StepExecutorDeps in NewStepExecutor.
-func (se *StepExecutor) SetMCPRunner(runner toolrunner.ToolRunner) {
-	se.mcpRunner = runner
-}
-
-// SetBuiltinRunner sets the built-in tool runner.
-// Deprecated: Use StepExecutorDeps in NewStepExecutor.
-func (se *StepExecutor) SetBuiltinRunner(runner *builtintools.BuiltinToolRunner) {
-	se.builtinRunner = runner
-}
-
 // routedRunner identifies which runner handles a step based on name prefix.
 type routedRunner int
 
@@ -59,6 +47,32 @@ const (
 	runnerMCP
 	runnerBuiltin
 )
+
+// Execute dispatches a single step to the correct runner based on step type and name prefix.
+// This is the unified entry point that replaces direct calls to ExecuteTool/ExecuteSkill.
+// It clones arguments before mutation, coerces string numbers, resolves templates, and
+// routes to the appropriate runner.
+func (se *StepExecutor) Execute(
+	ctx context.Context,
+	step *execution.ExecutionStep,
+	ec *execution.ExecutionContext,
+	prevResults map[string]any,
+	stepTimeout time.Duration,
+) (*execution.StepResult, error) {
+	switch step.Type {
+	case execution.StepTypeTool:
+		return se.ExecuteTool(ctx, step, ec, prevResults, stepTimeout)
+	case execution.StepTypeSkill:
+		return se.ExecuteSkill(ctx, step, ec, prevResults, stepTimeout)
+	default:
+		return &execution.StepResult{
+			StepID:   step.StepID,
+			StepName: step.Name,
+			Type:     string(step.Type),
+			Error:    fmt.Errorf("unknown step type: %s", step.Type),
+		}, fmt.Errorf("unknown step type: %s", step.Type)
+	}
+}
 
 // route determines which runner handles the step based on name prefix.
 func (se *StepExecutor) route(stepName string) routedRunner {

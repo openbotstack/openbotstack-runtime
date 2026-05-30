@@ -52,13 +52,13 @@ func APIKeyMiddleware(config APIKeyMiddlewareConfig) func(http.Handler) http.Han
 
 			// Look up key + user info in single query
 			var userID, tenantID, userName, userRole string
-			var expiresAt string
+			var keyRole, expiresAt string
 			err := config.DB.QueryRow(`
-				SELECT u.id, u.tenant_id, u.name, u.role, k.expires_at
+				SELECT u.id, u.tenant_id, u.name, u.role, k.role, k.expires_at
 				FROM api_keys k
 				JOIN users u ON k.user_id = u.id
 				WHERE k.key_hash = ? AND k.revoked = 0`, hashHex,
-			).Scan(&userID, &tenantID, &userName, &userRole, &expiresAt)
+			).Scan(&userID, &tenantID, &userName, &userRole, &keyRole, &expiresAt)
 
 			if err == sql.ErrNoRows {
 				// Key was provided but invalid — always reject
@@ -101,13 +101,17 @@ func APIKeyMiddleware(config APIKeyMiddlewareConfig) func(http.Handler) http.Han
 				}
 			}
 
-			// Inject user + role into context
+			// Inject user + role into context (key role overrides user role)
+			effectiveRole := userRole
+			if keyRole != "" {
+				effectiveRole = keyRole
+			}
 			user := &auth.User{
 				ID:       userID,
 				TenantID: tenantID,
 				Name:     userName,
 			}
-			ctx := WithUserRole(WithUser(r.Context(), user), userRole)
+			ctx := WithUserRole(WithUser(r.Context(), user), effectiveRole)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

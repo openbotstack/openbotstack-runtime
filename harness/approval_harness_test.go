@@ -51,8 +51,7 @@ func TestHarness_CriticalStepApproval(t *testing.T) {
 	tr.result["critical_step"] = map[string]any{"status": "executed"}
 
 	gw := newMockApprovalGateway()
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-	h.SetApprovalGateway(gw)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{ApprovalGateway: gw})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "safe_step", Type: execution.StepTypeTool, RiskLevel: "info"},
@@ -104,8 +103,7 @@ func TestHarness_CriticalStepDenied(t *testing.T) {
 	tr.result["safe_step"] = map[string]any{"status": "ok"}
 
 	gw := newMockApprovalGateway()
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-	h.SetApprovalGateway(gw)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{ApprovalGateway: gw})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "safe_step", Type: execution.StepTypeTool, RiskLevel: "info"},
@@ -156,8 +154,7 @@ func TestHarness_CriticalStepApprovalTimeout(t *testing.T) {
 	tr.result["critical_step"] = map[string]any{"status": "ok"}
 
 	gw := newMockApprovalGateway()
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-	h.SetApprovalGateway(gw)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{ApprovalGateway: gw})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "critical_step", Type: execution.StepTypeTool, RiskLevel: "critical"},
@@ -189,8 +186,7 @@ func TestHarness_NonCriticalStepSkipsApproval(t *testing.T) {
 	tr.result["clinical_step"] = map[string]any{"status": "ok"}
 
 	gw := newMockApprovalGateway()
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-	h.SetApprovalGateway(gw)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{ApprovalGateway: gw})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "info_step", Type: execution.StepTypeTool, RiskLevel: "info"},
@@ -249,8 +245,7 @@ func TestHarness_MultipleCriticalSteps(t *testing.T) {
 	tr.result["critical_2"] = map[string]any{"status": "ok"}
 
 	gw := newMockApprovalGateway()
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-	h.SetApprovalGateway(gw)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{ApprovalGateway: gw})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "critical_1", Type: execution.StepTypeTool, RiskLevel: "critical"},

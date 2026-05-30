@@ -51,9 +51,9 @@ func (db *DB) SeedDefaults() (string, error) {
 		return "", fmt.Errorf("insert admin user: %w", err)
 	}
 
-	_, err = tx.Exec(`INSERT INTO api_keys (id, tenant_id, user_id, key_prefix, key_hash, name, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		"default-key", "default", "admin", prefix, hashHex, "default", now)
+	_, err = tx.Exec(`INSERT INTO api_keys (id, tenant_id, user_id, key_prefix, key_hash, name, role, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		"default-key", "default", "admin", prefix, hashHex, "default", "admin", now)
 	if err != nil {
 		return "", fmt.Errorf("insert default key: %w", err)
 	}

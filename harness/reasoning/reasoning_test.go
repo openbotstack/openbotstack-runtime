@@ -329,8 +329,7 @@ func TestAPI_ReasoningEndpoint(t *testing.T) {
 	}
 	store.StoreTrail("exec-123", trail)
 
-	router := api.NewRouter(api.RouterConfig{})
-	router.SetReasoningStore(store)
+	router := api.NewRouter(api.RouterConfig{ReasoningStore: store})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/execution/exec-123/reasoning", nil)
 	rr := httptest.NewRecorder()
@@ -370,8 +369,7 @@ func TestAPI_ReasoningEndpoint_DebugMode(t *testing.T) {
 	}
 	store.StoreTrail("exec-456", trail)
 
-	router := api.NewRouter(api.RouterConfig{})
-	router.SetReasoningStore(store)
+	router := api.NewRouter(api.RouterConfig{ReasoningStore: store})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/execution/exec-456/reasoning?debug=true", nil)
 	rr := httptest.NewRecorder()
@@ -396,8 +394,7 @@ func TestAPI_ReasoningEndpoint_DebugMode(t *testing.T) {
 // A3: Missing execution returns 404
 func TestAPI_ReasoningEndpoint_NotFound(t *testing.T) {
 	store := reasoning.NewInMemoryStore()
-	router := api.NewRouter(api.RouterConfig{})
-	router.SetReasoningStore(store)
+	router := api.NewRouter(api.RouterConfig{ReasoningStore: store})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/execution/nonexistent/reasoning", nil)
 	rr := httptest.NewRecorder()
@@ -424,8 +421,7 @@ func TestAPI_ReasoningEndpoint_NoStore(t *testing.T) {
 
 // A5: POST method returns 405
 func TestAPI_ReasoningEndpoint_MethodNotAllowed(t *testing.T) {
-	router := api.NewRouter(api.RouterConfig{})
-	router.SetReasoningStore(reasoning.NewInMemoryStore())
+	router := api.NewRouter(api.RouterConfig{ReasoningStore: reasoning.NewInMemoryStore()})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/execution/x/reasoning", nil)
 	rr := httptest.NewRecorder()
@@ -534,8 +530,7 @@ func TestFullPipeline(t *testing.T) {
 	// Verify API response
 	store := reasoning.NewInMemoryStore()
 	store.StoreTrail("full-1", trail)
-	router := api.NewRouter(api.RouterConfig{})
-	router.SetReasoningStore(store)
+	router := api.NewRouter(api.RouterConfig{ReasoningStore: store})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/execution/full-1/reasoning?debug=true", nil)
 	rr := httptest.NewRecorder()

@@ -35,8 +35,6 @@ func TestHook_R2_PostStepExecuteReceivesResults(t *testing.T) {
 	tr := newMockToolRunner()
 	tr.result["tool-a"] = "output-a"
 
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-
 	hm := NewHookManager()
 	var capturedOutput string
 	hm.RegisterPostStepExecute(func(ctx context.Context, hctx *execution.HookContext) error {
@@ -45,7 +43,7 @@ func TestHook_R2_PostStepExecuteReceivesResults(t *testing.T) {
 		}
 		return nil
 	})
-	h.SetHookManager(hm)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{HookManager: hm})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "tool-a", Type: execution.StepTypeTool, Arguments: map[string]any{}},
@@ -63,14 +61,12 @@ func TestHook_R2_PostStepExecuteReceivesResults(t *testing.T) {
 func TestHook_R2_OnStopCalledOnCompletion(t *testing.T) {
 	cfg := DefaultHarnessConfig()
 	tr := newMockToolRunner()
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-
 	hm := NewHookManager()
 	var stopCalled bool
 	hm.RegisterOnStop(func(ctx context.Context, hctx *execution.HookContext) {
 		stopCalled = true
 	})
-	h.SetHookManager(hm)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{HookManager: hm})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "tool-a", Type: execution.StepTypeTool, Arguments: map[string]any{}},
@@ -90,16 +86,17 @@ func TestHook_R2_OnStopCalledOnFailFast(t *testing.T) {
 	tr := newMockToolRunner()
 	tr.err["fail-step"] = fmt.Errorf("fatal")
 
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
 	fh := NewFailureHandler(execution.RetryPolicy{MaxRetries: 0, FailFast: true})
-	h.SetFailureHandler(fh)
 
 	hm := NewHookManager()
 	var stopCalled bool
 	hm.RegisterOnStop(func(ctx context.Context, hctx *execution.HookContext) {
 		stopCalled = true
 	})
-	h.SetHookManager(hm)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{
+		FailureHandler: fh,
+		HookManager:    hm,
+	})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "fail-step", Type: execution.StepTypeTool, Arguments: map[string]any{}},
@@ -118,12 +115,11 @@ func TestHook_R2_PostStepErrorDoesNotStopExecution(t *testing.T) {
 	tr.result["tool-a"] = "ok"
 	tr.result["tool-b"] = "ok"
 
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
 	hm := NewHookManager()
 	hm.RegisterPostStepExecute(func(ctx context.Context, hctx *execution.HookContext) error {
 		return fmt.Errorf("hook error")
 	})
-	h.SetHookManager(hm)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{HookManager: hm})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "tool-a", Type: execution.StepTypeTool, Arguments: map[string]any{}},
@@ -142,13 +138,11 @@ func TestHook_R2_PostStepErrorDoesNotStopExecution(t *testing.T) {
 func TestHook_R2_PreStepErrorReturnsError(t *testing.T) {
 	cfg := DefaultHarnessConfig()
 	tr := newMockToolRunner()
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-
 	hm := NewHookManager()
 	hm.RegisterPreStepExecute(func(ctx context.Context, hctx *execution.HookContext) (*execution.HookResult, error) {
 		return nil, fmt.Errorf("hook runtime panic simulation")
 	})
-	h.SetHookManager(hm)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{HookManager: hm})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "tool-a", Type: execution.StepTypeTool, Arguments: map[string]any{}},

@@ -934,8 +934,8 @@ func TestAdminEndpointRejectsNonAdmin(t *testing.T) {
 
 	rec := doAdminRequest(t, handler, "GET", "/v1/admin/tenants", nil)
 
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want %d for non-admin", rec.Code, http.StatusForbidden)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d for unauthenticated request", rec.Code, http.StatusUnauthorized)
 	}
 }
 

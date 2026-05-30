@@ -21,8 +21,7 @@ func (m *mockMCPToolRunner) Execute(_ context.Context, name string, _ map[string
 
 func TestStepExecutor_MCPRouting(t *testing.T) {
 	mcpRunner := &mockMCPToolRunner{}
-	se := NewStepExecutor(nil, nil, StepExecutorDeps{})
-	se.SetMCPRunner(mcpRunner)
+	se := NewStepExecutor(nil, nil, StepExecutorDeps{MCPRunner: mcpRunner})
 
 	step := &execution.ExecutionStep{
 		StepID:    "step-1",
@@ -49,8 +48,7 @@ func TestStepExecutor_MCPRouting(t *testing.T) {
 
 func TestStepExecutor_NonMCPUseDefaultRunner(t *testing.T) {
 	mcpRunner := &mockMCPToolRunner{}
-	se := NewStepExecutor(nil, nil, StepExecutorDeps{})
-	se.SetMCPRunner(mcpRunner)
+	se := NewStepExecutor(nil, nil, StepExecutorDeps{MCPRunner: mcpRunner})
 
 	step := &execution.ExecutionStep{
 		StepID:    "step-1",

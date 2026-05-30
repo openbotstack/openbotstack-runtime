@@ -68,7 +68,7 @@ func TestAuthMiddlewareChain_Composite(t *testing.T) {
 		{"admin key allowed", adminKey, http.StatusOK},
 		{"member key forbidden", memberKey, http.StatusForbidden},
 		{"invalid key rejected", "obs_invalidkey1234567890abcdef", http.StatusUnauthorized},
-		{"no key passes through (non-strict)", "", http.StatusForbidden},
+		{"no key rejected (non-strict, no auth context)", "", http.StatusUnauthorized},
 	}
 
 	for _, tt := range tests {

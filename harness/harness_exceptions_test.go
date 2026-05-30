@@ -99,13 +99,11 @@ func TestHarness_ContextCancellation(t *testing.T) {
 func TestHarness_HookDeny(t *testing.T) {
 	cfg := DefaultHarnessConfig()
 	tr := newMockToolRunner()
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-
 	hm := NewHookManager()
 	hm.RegisterPreStepExecute(func(ctx context.Context, hctx *execution.HookContext) (*execution.HookResult, error) {
 		return &execution.HookResult{Deny: true, Reason: "blocked by policy"}, nil
 	})
-	h.SetHookManager(hm)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{HookManager: hm})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "blocked-step", Type: execution.StepTypeTool, Arguments: map[string]any{}},
@@ -127,12 +125,10 @@ func TestHarness_HookDeny(t *testing.T) {
 func TestHarness_PermissionDeny(t *testing.T) {
 	cfg := DefaultHarnessConfig()
 	tr := newMockToolRunner()
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-
 	pc := NewPermissionChecker(&execution.PermissionConfig{
 		DeniedTools: map[string]bool{"dangerous-tool": true},
 	}, nil)
-	h.SetPermissionChecker(pc)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{PermChecker: pc})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "dangerous-tool", Type: execution.StepTypeTool, Arguments: map[string]any{}},
@@ -174,8 +170,6 @@ func TestHarness_LLMStepWithoutReasoningLoop(t *testing.T) {
 
 func TestHarness_LLMStepWithReasoningLoop(t *testing.T) {
 	cfg := DefaultHarnessConfig()
-	h := NewExecutionHarness(cfg, nil, nil, HarnessDeps{})
-
 	mp := &mockPlanner{
 		plans: []*execution.ExecutionPlan{makeToolPlan("inner-tool")},
 	}
@@ -184,7 +178,7 @@ func TestHarness_LLMStepWithReasoningLoop(t *testing.T) {
 	rlCfg := DefaultReasoningLoopConfig()
 	rlCfg.MaxTurns = 1
 	rl := NewDefaultReasoningLoop(rlCfg, mp, innerSE, nil)
-	h.SetReasoningLoop(rl)
+	h := NewExecutionHarness(cfg, nil, nil, HarnessDeps{ReasoningLoop: rl})
 
 	outerPlan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "reason-step", Type: execution.StepTypeLLM, Arguments: map[string]any{}, ExpectedOutput: "test task"},
@@ -233,15 +227,13 @@ func TestHarness_FailureHandlerRetry(t *testing.T) {
 	cfg := DefaultHarnessConfig()
 	tr := newMockToolRunner()
 	tr.err["flaky-tool"] = fmt.Errorf("transient error")
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-
 	fh := NewFailureHandler(execution.RetryPolicy{
 		MaxRetries:     2,
 		InitialBackoff: 1 * time.Millisecond, // fast for tests
 		MaxBackoff:     5 * time.Millisecond,
 		FailFast:       false,
 	})
-	h.SetFailureHandler(fh)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{FailureHandler: fh})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "flaky-tool", Type: execution.StepTypeTool, Arguments: map[string]any{}},
@@ -262,8 +254,6 @@ func TestHarness_FailureHandlerFallback(t *testing.T) {
 	cfg := DefaultHarnessConfig()
 	tr := newMockToolRunner()
 	tr.err["fail-tool"] = fmt.Errorf("permanent error")
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-
 	fh := NewFailureHandler(execution.RetryPolicy{
 		MaxRetries:     1,
 		InitialBackoff: 1 * time.Millisecond,
@@ -271,7 +261,7 @@ func TestHarness_FailureHandlerFallback(t *testing.T) {
 		FailFast:       false,
 		FallbackTool:   "fail-tool", // fallback to same tool (which also fails, but tests the path)
 	})
-	h.SetFailureHandler(fh)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{FailureHandler: fh})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "fail-tool", Type: execution.StepTypeTool, Arguments: map[string]any{}},
@@ -292,15 +282,13 @@ func TestHarness_FailureHandlerFailFast(t *testing.T) {
 	cfg := DefaultHarnessConfig()
 	tr := newMockToolRunner()
 	tr.err["fail-tool"] = fmt.Errorf("fatal error")
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-
 	fh := NewFailureHandler(execution.RetryPolicy{
 		MaxRetries:     1,
 		InitialBackoff: 1 * time.Millisecond,
 		MaxBackoff:     5 * time.Millisecond,
 		FailFast:       true,
 	})
-	h.SetFailureHandler(fh)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{FailureHandler: fh})
 
 	plan := makeFrozenPlan(
 		execution.ExecutionStep{Name: "fail-tool", Type: execution.StepTypeTool, Arguments: map[string]any{}},
@@ -407,11 +395,11 @@ func TestHarness_MultipleStepsSequencing(t *testing.T) {
 func TestHarness_ProgressCallback(t *testing.T) {
 	cfg := DefaultHarnessConfig()
 	tr := newMockToolRunner()
-	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
-
 	var events []ProgressEvent
-	h.SetProgressCallback(func(event ProgressEvent) {
-		events = append(events, event)
+	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{
+		ProgressCB: func(event ProgressEvent) {
+			events = append(events, event)
+		},
 	})
 
 	plan := makeFrozenPlan(
