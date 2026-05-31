@@ -18,8 +18,8 @@ import (
 	"github.com/openbotstack/openbotstack-runtime/toolrunner"
 )
 
-// plannerCtxKey is used to thread PlannerContext through context for LLM steps.
-type plannerCtxKey struct{}
+// PlannerContext is now passed explicitly via ExecutionContext.SetPlannerContext().
+// See ADR-018 and execution.ExecutionContext for the explicit seam.
 
 // LLMGenerator generates a direct LLM text response (no planning).
 // Used for "respond" steps where the planner already decided a direct LLM reply is needed.
@@ -348,10 +348,10 @@ func (h *ExecutionHarness) executeLLMStep(ctx context.Context, step execution.Ex
 	}
 
 	// Recover the original PlannerContext (with Skills, Capabilities, Soul, etc.)
-	// that was threaded in via PlanAndRun.
+	// that was set on ExecutionContext via PlanAndRun.
 	var origCtx *planner.PlannerContext
-	if orig, ok := ctx.Value(plannerCtxKey{}).(*planner.PlannerContext); ok && orig != nil {
-		origCtx = orig
+	if ec.PlannerContext() != nil {
+		origCtx, _ = ec.PlannerContext().(*planner.PlannerContext)
 	}
 
 	// "respond" steps: direct LLM generation (no iterative planning loop needed).
@@ -518,9 +518,9 @@ func PlanAndRun(ctx context.Context, pl planner.ExecutionPlanner, h *ExecutionHa
 		return nil, fmt.Errorf("harness.PlanAndRun: plan validation failed: %w", err)
 	}
 
-	// Thread PlannerContext into the execution context so LLM steps can access
+	// Set PlannerContext on ExecutionContext so LLM steps can access
 	// the original Skills, Capabilities, Soul, and MemoryContext.
-	ctx = context.WithValue(ctx, plannerCtxKey{}, task.PlannerContext)
+	ec.SetPlannerContext(task.PlannerContext)
 
 	return h.Run(ctx, plan, ec)
 }
