@@ -12,10 +12,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/openbotstack/openbotstack-core/ai/providers"
 	"github.com/openbotstack/openbotstack-core/ai/router"
+	"github.com/openbotstack/openbotstack-core/ai/types"
 	"github.com/openbotstack/openbotstack-core/assistant"
 	"github.com/openbotstack/openbotstack-core/capability"
 	"github.com/openbotstack/openbotstack-core/control/agent"
-	"github.com/openbotstack/openbotstack-core/control/skills"
 	coretelemetry "github.com/openbotstack/openbotstack-core/telemetry"
 	plannerpkg "github.com/openbotstack/openbotstack-core/planner"
 	agentpkg "github.com/openbotstack/openbotstack-runtime/agent"
@@ -221,10 +221,10 @@ func (b *ServerBuilder) InitExecution() *ServerBuilder {
 
 	hostFuncs := &wasm.HostFunctions{
 		LLMGenerate: func(ctx context.Context, prompt string) (string, error) {
-			mReq := skills.GenerateRequest{
-				Messages: []skills.Message{{Role: "user", Content: prompt}},
+			mReq := types.GenerateRequest{
+				Messages: []types.Message{{Role: "user", Content: prompt}},
 			}
-			prov, err := b.modelRouter.Route([]skills.CapabilityType{skills.CapTextGeneration}, skills.ModelConstraints{})
+			prov, err := b.modelRouter.Route([]types.CapabilityType{types.CapTextGeneration}, types.ModelConstraints{})
 			if err != nil {
 				return "LLM not configured or suitable provider not found", nil
 			}
@@ -576,18 +576,18 @@ func parseLogLevel(s string) slog.Level {
 // buildLLMGenerator creates a function that generates direct LLM text responses.
 func (b *ServerBuilder) buildLLMGenerator() harnesspkg.LLMGenerator {
 	return func(ctx context.Context, systemPrompt, userMessage string) (string, error) {
-		provider, err := b.modelRouter.Route([]skills.CapabilityType{skills.CapTextGeneration}, skills.ModelConstraints{})
+		provider, err := b.modelRouter.Route([]types.CapabilityType{types.CapTextGeneration}, types.ModelConstraints{})
 		if err != nil {
 			return "", fmt.Errorf("llm generator: route failed: %w", err)
 		}
 
-		msgs := []skills.Message{}
+		msgs := []types.Message{}
 		if systemPrompt != "" {
-			msgs = append(msgs, skills.Message{Role: "system", Content: systemPrompt})
+			msgs = append(msgs, types.Message{Role: "system", Content: systemPrompt})
 		}
-		msgs = append(msgs, skills.Message{Role: "user", Content: userMessage})
+		msgs = append(msgs, types.Message{Role: "user", Content: userMessage})
 
-		resp, err := provider.Generate(ctx, skills.GenerateRequest{
+		resp, err := provider.Generate(ctx, types.GenerateRequest{
 			Messages:  msgs,
 			MaxTokens: 4096,
 		})

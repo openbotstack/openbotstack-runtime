@@ -8,7 +8,7 @@ import (
 	"time"
 
 	corecontext "github.com/openbotstack/openbotstack-core/context"
-	"github.com/openbotstack/openbotstack-core/control/skills"
+	"github.com/openbotstack/openbotstack-core/ai/types"
 	"github.com/openbotstack/openbotstack-core/memory/abstraction"
 	skillregistry "github.com/openbotstack/openbotstack-core/registry/skills"
 )
@@ -47,7 +47,7 @@ func TestAssemble_BasicPrompt(t *testing.T) {
 func TestAssemble_WithConversationHistory(t *testing.T) {
 	assembler := NewRuntimeContextAssembler(nil, nil)
 
-	history := []skills.Message{
+	history := []types.Message{
 		{Role: "user", Content: "What is Go?"},
 		{Role: "assistant", Content: "Go is a programming language."},
 	}
@@ -77,7 +77,7 @@ func TestAssemble_WithSkillTools(t *testing.T) {
 				id:          "search",
 				name:        "Search",
 				description: "Search the web",
-				inputSchema: &skills.JSONSchema{Type: "object"},
+				inputSchema: &types.JSONSchema{Type: "object"},
 			},
 		},
 	}
@@ -184,7 +184,7 @@ func TestAssemble_MemoryAndHistory(t *testing.T) {
 	}
 	assembler := NewRuntimeContextAssembler(nil, memoryManager)
 
-	history := []skills.Message{
+	history := []types.Message{
 		{Role: "user", Content: "Previous question"},
 		{Role: "assistant", Content: "Previous answer"},
 	}
@@ -315,7 +315,7 @@ func TestContract_MemoryMessagesPrecedeHistory(t *testing.T) {
 		entries: []abstraction.MemoryEntry{{Content: "remembered"}},
 	}
 	assembler := NewRuntimeContextAssembler(nil, memoryManager)
-	history := []skills.Message{
+	history := []types.Message{
 		{Role: "user", Content: "history msg"},
 	}
 	result, err := assembler.Assemble(
@@ -381,17 +381,17 @@ func (r *mockRegistry) Get(id string) (skillregistry.Skill, error) {
 	return s, nil
 }
 
-// mockSkill implements skills.Skill.
+// mockSkill implements registry/skills.Skill.
 type mockSkill struct {
 	id, name, description string
-	inputSchema           *skills.JSONSchema
+	inputSchema           *types.JSONSchema
 }
 
 func (s mockSkill) ID() string                      { return s.id }
 func (s mockSkill) Name() string                    { return s.name }
 func (s mockSkill) Description() string             { return s.description }
-func (s mockSkill) InputSchema() *skills.JSONSchema { return s.inputSchema }
-func (s mockSkill) OutputSchema() *skills.JSONSchema { return nil }
+func (s mockSkill) InputSchema() *types.JSONSchema { return s.inputSchema }
+func (s mockSkill) OutputSchema() *types.JSONSchema { return nil }
 func (s mockSkill) RequiredPermissions() []string   { return nil }
 func (s mockSkill) Timeout() time.Duration           { return 30 * time.Second }
 func (s mockSkill) Validate() error                  { return nil }

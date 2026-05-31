@@ -5,7 +5,7 @@ import (
 
 	"github.com/openbotstack/openbotstack-core/ai/providers"
 	"github.com/openbotstack/openbotstack-core/ai/router"
-	"github.com/openbotstack/openbotstack-core/control/skills"
+	"github.com/openbotstack/openbotstack-core/ai/types"
 	"github.com/openbotstack/openbotstack-runtime/api"
 )
 
@@ -18,7 +18,7 @@ func (m *ModelRouterLister) ListProviders() []api.ProviderInfo {
 	ids := m.Router.List()
 	result := make([]api.ProviderInfo, 0, len(ids))
 	for _, id := range ids {
-		provider, err := m.Router.Route(nil, skills.ModelConstraints{})
+		provider, err := m.Router.Route(nil, types.ModelConstraints{})
 		caps := []string{}
 		if err == nil && provider != nil {
 			for _, c := range provider.Capabilities() {

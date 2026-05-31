@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	mcpcore "github.com/openbotstack/openbotstack-core/mcp"
-	"github.com/openbotstack/openbotstack-core/control/skills"
+	"github.com/openbotstack/openbotstack-core/ai/types"
 )
 
 func TestHealthCheck_NoServers(t *testing.T) {
@@ -21,7 +21,7 @@ func TestValidateTools_ValidTool(t *testing.T) {
 		{
 			Name:        "search",
 			Description: "Search documents",
-			InputSchema: &skills.JSONSchema{Type: "object"},
+			InputSchema: &types.JSONSchema{Type: "object"},
 		},
 	}
 	validations := validateTools(tools)
@@ -38,7 +38,7 @@ func TestValidateTools_MissingName(t *testing.T) {
 		{
 			Name:        "",
 			Description: "No name tool",
-			InputSchema: &skills.JSONSchema{Type: "object"},
+			InputSchema: &types.JSONSchema{Type: "object"},
 		},
 	}
 	validations := validateTools(tools)
@@ -52,7 +52,7 @@ func TestValidateTools_MissingDescription(t *testing.T) {
 		{
 			Name:        "search",
 			Description: "",
-			InputSchema: &skills.JSONSchema{Type: "object"},
+			InputSchema: &types.JSONSchema{Type: "object"},
 		},
 	}
 	validations := validateTools(tools)
@@ -81,7 +81,7 @@ func TestValidateTools_InputSchemaNoType(t *testing.T) {
 		{
 			Name:        "search",
 			Description: "Search",
-			InputSchema: &skills.JSONSchema{Type: ""},
+			InputSchema: &types.JSONSchema{Type: ""},
 		},
 	}
 	validations := validateTools(tools)
@@ -95,12 +95,12 @@ func TestValidateTools_AllValid(t *testing.T) {
 		{
 			Name:        "search",
 			Description: "Search documents",
-			InputSchema: &skills.JSONSchema{Type: "object"},
+			InputSchema: &types.JSONSchema{Type: "object"},
 		},
 		{
 			Name:        "summarize",
 			Description: "Summarize text",
-			InputSchema: &skills.JSONSchema{Type: "object"},
+			InputSchema: &types.JSONSchema{Type: "object"},
 		},
 	}
 	validations := validateTools(tools)

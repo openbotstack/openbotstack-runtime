@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/openbotstack/openbotstack-core/ai/providers"
-	"github.com/openbotstack/openbotstack-core/control/skills"
+	"github.com/openbotstack/openbotstack-core/ai/types"
 )
 
 // LLMTextGenerator adapts a ModelRouter to the executor.TextGenerator interface.
@@ -15,12 +15,12 @@ type LLMTextGenerator struct {
 }
 
 func (g *LLMTextGenerator) GenerateText(ctx context.Context, prompt string) (string, error) {
-	provider, err := g.Router.Route([]skills.CapabilityType{skills.CapTextGeneration}, skills.ModelConstraints{})
+	provider, err := g.Router.Route([]types.CapabilityType{types.CapTextGeneration}, types.ModelConstraints{})
 	if err != nil {
 		return "", fmt.Errorf("no text generation provider: %w", err)
 	}
-	resp, err := provider.Generate(ctx, skills.GenerateRequest{
-		Messages: []skills.Message{
+	resp, err := provider.Generate(ctx, types.GenerateRequest{
+		Messages: []types.Message{
 			{Role: "user", Content: prompt},
 		},
 	})
@@ -33,13 +33,13 @@ func (g *LLMTextGenerator) GenerateText(ctx context.Context, prompt string) (str
 // GenerateStreamText performs token-level streaming generation.
 // It uses the provider's GenerateStream when available, falling back to Generate.
 func (g *LLMTextGenerator) GenerateStreamText(ctx context.Context, prompt string, tokenFn func(string)) (string, error) {
-	provider, err := g.Router.Route([]skills.CapabilityType{skills.CapTextGeneration}, skills.ModelConstraints{})
+	provider, err := g.Router.Route([]types.CapabilityType{types.CapTextGeneration}, types.ModelConstraints{})
 	if err != nil {
 		return "", fmt.Errorf("no text generation provider: %w", err)
 	}
 
-	req := skills.GenerateRequest{
-		Messages: []skills.Message{
+	req := types.GenerateRequest{
+		Messages: []types.Message{
 			{Role: "user", Content: prompt},
 		},
 	}

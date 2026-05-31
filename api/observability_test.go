@@ -9,7 +9,7 @@ import (
 	"time"
 
 	coreaudit "github.com/openbotstack/openbotstack-core/audit"
-	control_skills "github.com/openbotstack/openbotstack-core/control/skills"
+	"github.com/openbotstack/openbotstack-core/ai/types"
 	"github.com/openbotstack/openbotstack-core/registry/skills"
 	"github.com/openbotstack/openbotstack-runtime/api"
 	"github.com/openbotstack/openbotstack-runtime/logging/execution_logs"
@@ -26,8 +26,8 @@ type testSkill struct {
 func (s *testSkill) ID() string                      { return s.id }
 func (s *testSkill) Name() string                    { return s.name }
 func (s *testSkill) Description() string             { return s.description }
-func (s *testSkill) InputSchema() *control_skills.JSONSchema  { return nil }
-func (s *testSkill) OutputSchema() *control_skills.JSONSchema { return nil }
+func (s *testSkill) InputSchema() *types.JSONSchema  { return nil }
+func (s *testSkill) OutputSchema() *types.JSONSchema { return nil }
 func (s *testSkill) RequiredPermissions() []string   { return nil }
 func (s *testSkill) Timeout() time.Duration          { return 30 * time.Second }
 func (s *testSkill) Validate() error                 { return nil }

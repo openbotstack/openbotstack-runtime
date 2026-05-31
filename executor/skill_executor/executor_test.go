@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openbotstack/openbotstack-core/ai/types"
 	"github.com/openbotstack/openbotstack-core/audit"
 	"github.com/openbotstack/openbotstack-core/execution"
-	control_skills "github.com/openbotstack/openbotstack-core/control/skills"
 	executor "github.com/openbotstack/openbotstack-runtime/executor/skill_executor"
 	"github.com/openbotstack/openbotstack-runtime/logging/execution_logs"
 	"github.com/openbotstack/openbotstack-runtime/sandbox/wasm"
@@ -30,8 +30,8 @@ func (m *mockSkill) ID() string                      { return m.id }
 func (m *mockSkill) Name() string                    { return "mock-" + m.id }
 func (m *mockSkill) Description() string             { return "Test skill " + m.id }
 func (m *mockSkill) Timeout() time.Duration          { return m.timeout }
-func (m *mockSkill) InputSchema() *control_skills.JSONSchema  { return nil }
-func (m *mockSkill) OutputSchema() *control_skills.JSONSchema { return nil }
+func (m *mockSkill) InputSchema() *types.JSONSchema  { return nil }
+func (m *mockSkill) OutputSchema() *types.JSONSchema { return nil }
 func (m *mockSkill) RequiredPermissions() []string   { return m.permissions }
 func (m *mockSkill) ExecutionMode() string           { return m.executionMode }
 func (m *mockSkill) Prompt() string                  { return m.prompt }
@@ -50,10 +50,10 @@ func newMockSkill(id string, valid bool) *mockSkill {
 // schemaMockSkill extends mockSkill with an input schema.
 type schemaMockSkill struct {
 	mockSkill
-	inputSchema *control_skills.JSONSchema
+	inputSchema *types.JSONSchema
 }
 
-func (s *schemaMockSkill) InputSchema() *control_skills.JSONSchema { return s.inputSchema }
+func (s *schemaMockSkill) InputSchema() *types.JSONSchema { return s.inputSchema }
 
 // Minimal valid Wasm module with execute export
 var testWasm = []byte{
@@ -762,10 +762,10 @@ func TestExecute_SchemaValidationReject(t *testing.T) {
 
 	skill := &schemaMockSkill{
 		mockSkill: mockSkill{id: "schema-skill", valid: true, timeout: 30 * time.Second},
-		inputSchema: &control_skills.JSONSchema{
+		inputSchema: &types.JSONSchema{
 			Type:     "object",
 			Required: []string{"text"},
-			Properties: map[string]*control_skills.JSONSchema{
+			Properties: map[string]*types.JSONSchema{
 				"text": {Type: "string"},
 			},
 		},
@@ -791,10 +791,10 @@ func TestExecute_SchemaValidationPass(t *testing.T) {
 
 	skill := &schemaMockSkill{
 		mockSkill: mockSkill{id: "schema-skill-pass", valid: true, timeout: 30 * time.Second, executionMode: "declarative"},
-		inputSchema: &control_skills.JSONSchema{
+		inputSchema: &types.JSONSchema{
 			Type:     "object",
 			Required: []string{"text"},
-			Properties: map[string]*control_skills.JSONSchema{
+			Properties: map[string]*types.JSONSchema{
 				"text": {Type: "string"},
 			},
 		},

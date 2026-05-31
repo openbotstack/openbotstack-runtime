@@ -3,14 +3,12 @@ package ai
 import (
 	"testing"
 	"time"
-
-	"github.com/openbotstack/openbotstack-core/ai/providers"
 )
 
 func TestInMemoryModelRegistry_RegisterAndList(t *testing.T) {
 	r := NewInMemoryModelRegistry()
 
-	err := r.Register(providers.ModelEntry{
+	err := r.Register(ModelEntry{
 		ID:           "openai/gpt-4o",
 		Provider:     "openai",
 		Model:        "gpt-4o",
@@ -20,7 +18,7 @@ func TestInMemoryModelRegistry_RegisterAndList(t *testing.T) {
 		t.Fatalf("Register failed: %v", err)
 	}
 
-	err = r.Register(providers.ModelEntry{
+	err = r.Register(ModelEntry{
 		ID:           "anthropic/claude-3-opus",
 		Provider:     "anthropic",
 		Model:        "claude-3-opus",
@@ -38,7 +36,7 @@ func TestInMemoryModelRegistry_RegisterAndList(t *testing.T) {
 
 func TestInMemoryModelRegistry_Get(t *testing.T) {
 	r := NewInMemoryModelRegistry()
-	r.Register(providers.ModelEntry{ID: "test/model"})
+	r.Register(ModelEntry{ID: "test/model"})
 
 	entry, ok := r.Get("test/model")
 	if !ok {
@@ -57,7 +55,7 @@ func TestInMemoryModelRegistry_Get(t *testing.T) {
 func TestInMemoryModelRegistry_RecordUsage(t *testing.T) {
 	r := NewInMemoryModelRegistry()
 
-	err := r.RecordUsage(providers.ModelUsage{
+	err := r.RecordUsage(ModelUsage{
 		ExecutionID: "exec-1",
 		ModelID:     "openai/gpt-4o",
 	})
@@ -77,12 +75,12 @@ func TestInMemoryModelRegistry_RecordUsage(t *testing.T) {
 func TestInMemoryModelRegistry_RecordUsageValidation(t *testing.T) {
 	r := NewInMemoryModelRegistry()
 
-	err := r.RecordUsage(providers.ModelUsage{ExecutionID: ""})
+	err := r.RecordUsage(ModelUsage{ExecutionID: ""})
 	if err == nil {
 		t.Error("should reject empty execution_id")
 	}
 
-	err = r.RecordUsage(providers.ModelUsage{ExecutionID: "exec-1", ModelID: ""})
+	err = r.RecordUsage(ModelUsage{ExecutionID: "exec-1", ModelID: ""})
 	if err == nil {
 		t.Error("should reject empty model_id")
 	}
@@ -92,7 +90,7 @@ func TestInMemoryModelRegistry_AutoTimestamps(t *testing.T) {
 	r := NewInMemoryModelRegistry()
 	before := time.Now()
 
-	r.Register(providers.ModelEntry{ID: "test/model"})
+	r.Register(ModelEntry{ID: "test/model"})
 	entry, _ := r.Get("test/model")
 
 	if entry.RegisteredAt.Before(before) {
@@ -102,7 +100,7 @@ func TestInMemoryModelRegistry_AutoTimestamps(t *testing.T) {
 
 func TestInMemoryModelRegistry_RegisterValidation(t *testing.T) {
 	r := NewInMemoryModelRegistry()
-	err := r.Register(providers.ModelEntry{ID: ""})
+	err := r.Register(ModelEntry{ID: ""})
 	if err == nil {
 		t.Error("should reject empty ID")
 	}
@@ -110,13 +108,13 @@ func TestInMemoryModelRegistry_RegisterValidation(t *testing.T) {
 
 func TestInMemoryModelRegistry_AdminInterface(t *testing.T) {
 	r := NewInMemoryModelRegistry()
-	r.Register(providers.ModelEntry{
+	r.Register(ModelEntry{
 		ID:           "openai/gpt-4o",
 		Provider:     "openai",
 		Model:        "gpt-4o",
 		Capabilities: []string{"text_generation"},
 	})
-	r.RecordUsage(providers.ModelUsage{
+	r.RecordUsage(ModelUsage{
 		ExecutionID: "exec-1",
 		ModelID:     "openai/gpt-4o",
 	})

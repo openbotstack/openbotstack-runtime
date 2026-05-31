@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/openbotstack/openbotstack-core/ai/types"
 	"github.com/openbotstack/openbotstack-core/capability"
-	"github.com/openbotstack/openbotstack-core/control/skills"
 	executor "github.com/openbotstack/openbotstack-runtime/executor/skill_executor"
 	builtintools "github.com/openbotstack/openbotstack-runtime/tools/builtin"
 )
@@ -55,15 +55,15 @@ func (r *CapabilityRegistrar) RegisterBuiltins() *builtintools.BuiltinToolRunner
 
 	for _, tool := range runner.Tools() {
 		params := tool.Parameters()
-		props := make(map[string]*skills.JSONSchema, len(params))
+		props := make(map[string]*types.JSONSchema, len(params))
 		for name, typ := range params {
-			props[name] = &skills.JSONSchema{Type: typ}
+			props[name] = &types.JSONSchema{Type: typ}
 		}
 		adapter := capability.NewFromNative(
 			"builtin."+tool.Name(),
 			tool.Name(),
 			tool.Description(),
-			&skills.JSONSchema{
+			&types.JSONSchema{
 				Type:       "object",
 				Properties: props,
 				Required:   tool.Required(),

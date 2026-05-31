@@ -2,8 +2,8 @@ package agent
 
 import (
 	"testing"
+	"time"
 
-	agent "github.com/openbotstack/openbotstack-core/control/agent"
 	"github.com/openbotstack/openbotstack-core/control/skills"
 	"github.com/openbotstack/openbotstack-core/planner"
 )
@@ -18,7 +18,6 @@ func TestSkillDescriptorTypeIdentity(t *testing.T) {
 		InputSchema: &skills.JSONSchema{Type: "object"},
 	}
 
-	// agent.SkillDescriptorFromSkill must return skills.SkillDescriptor
 	_ = sd
 
 	// Slice of skills.SkillDescriptor must be assignable to planner.PlannerContext.Skills
@@ -33,14 +32,17 @@ func TestSkillDescriptorTypeIdentity(t *testing.T) {
 		t.Errorf("ID = %q, want %q", pCtx.Skills[0].ID, "core/test")
 	}
 
-	// agent.SkillDescriptor (now removed) was a type alias — verify the
-	// conversion function still works with the canonical type.
-	_ = agent.SkillDescriptorFromSkill
+	// Verify the canonical skillToDescriptor function works via capability.SkillToDescriptor.
+	desc := skillToDescriptor("test", &mockSkillForHelper{id: "h1", name: "Helper", desc: "test skill"})
+	if desc.ID != "h1" {
+		t.Errorf("skillToDescriptor ID = %q, want %q", desc.ID, "h1")
+	}
+	if desc.Name != "Helper" {
+		t.Errorf("skillToDescriptor Name = %q, want %q", desc.Name, "Helper")
+	}
 }
 
 func TestSkillDescriptorDirectPassThrough(t *testing.T) {
-	// Verify that skill descriptors can be passed directly to
-	// planner.PlannerContext without any conversion function.
 	descs := []skills.SkillDescriptor{
 		{ID: "s1", Name: "Skill1", Description: "First"},
 		{ID: "s2", Name: "Skill2", Description: "Second"},
@@ -60,3 +62,19 @@ func TestSkillDescriptorDirectPassThrough(t *testing.T) {
 		t.Errorf("Skills[1].Name = %q, want %q", pCtx.Skills[1].Name, "Skill2")
 	}
 }
+
+// mockSkillForHelper is a minimal Skill implementation for testing skillToDescriptor.
+type mockSkillForHelper struct {
+	id, name, desc string
+}
+
+func (m *mockSkillForHelper) ID() string          { return m.id }
+func (m *mockSkillForHelper) Name() string        { return m.name }
+func (m *mockSkillForHelper) Description() string { return m.desc }
+func (m *mockSkillForHelper) InputSchema() *skills.JSONSchema {
+	return &skills.JSONSchema{Type: "object"}
+}
+func (m *mockSkillForHelper) OutputSchema() *skills.JSONSchema       { return nil }
+func (m *mockSkillForHelper) RequiredPermissions() []string          { return nil }
+func (m *mockSkillForHelper) Timeout() time.Duration                 { return 0 }
+func (m *mockSkillForHelper) Validate() error                        { return nil }

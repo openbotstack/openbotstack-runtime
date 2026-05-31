@@ -13,7 +13,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/openbotstack/openbotstack-core/audit"
-	"github.com/openbotstack/openbotstack-core/control/agent"
 	"github.com/openbotstack/openbotstack-core/execution"
 	"github.com/openbotstack/openbotstack-core/registry/skills"
 	"github.com/openbotstack/openbotstack-core/validation"
@@ -505,46 +504,6 @@ func (e *DefaultExecutor) SkillCount() int {
 }
 
 var ErrNilExecutionPlan = errors.New("executor: nil execution plan")
-
-func (e *DefaultExecutor) ExecuteFromPlan(ctx context.Context, plan *execution.ExecutionPlan, meta agent.ExecutionMeta) (*execution.ExecutionResult, error) {
-	if plan == nil {
-		return nil, ErrNilExecutionPlan
-	}
-	if plan.IsFrozen() {
-		if len(plan.Steps) == 0 {
-			return &execution.ExecutionResult{
-				Status: execution.StatusRejected,
-				Error:  "empty execution plan",
-			}, fmt.Errorf("executor: empty execution plan")
-		}
-	} else {
-		if err := plan.Validate(); err != nil {
-			return &execution.ExecutionResult{
-				Status: execution.StatusRejected,
-				Error:  err.Error(),
-			}, err
-		}
-	}
-
-	step := plan.Steps[0]
-	inputBytes, err := step.ArgumentsJSON()
-	if err != nil {
-		return &execution.ExecutionResult{
-			Status: execution.StatusFailed,
-			Error:  "failed to serialize arguments: " + err.Error(),
-		}, err
-	}
-
-	req := execution.ExecutionRequest{
-		SkillID:   step.Name,
-		Input:     inputBytes,
-		TenantID:  meta.TenantID,
-		UserID:    meta.UserID,
-		RequestID: meta.RequestID,
-	}
-
-	return e.Execute(ctx, req)
-}
 
 func (e *DefaultExecutor) ExecutePlan(ctx context.Context, plan *execution.ExecutionPlan, ec *execution.ExecutionContext) error {
 	if plan == nil {

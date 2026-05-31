@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"github.com/openbotstack/openbotstack-core/capability"
 	csSkills "github.com/openbotstack/openbotstack-core/control/skills"
 	"github.com/openbotstack/openbotstack-core/registry/skills"
 )
@@ -8,19 +9,10 @@ import (
 // defaultMemoryRetrievalLimit is the default number of memories to retrieve during planning.
 const defaultMemoryRetrievalLimit = 5
 
-// skillToDescriptor extracts descriptor fields from a Skill.
+// skillToDescriptor extracts descriptor fields from a Skill using the canonical
+// capability.SkillToDescriptor conversion (ADR-019 Capability Plane).
 func skillToDescriptor(id string, s skills.Skill) csSkills.SkillDescriptor {
-	return csSkills.SkillDescriptor{
-		ID:          s.ID(),
-		Name:        s.Name(),
-		Description: s.Description(),
-		InputSchema: func() *csSkills.JSONSchema {
-			if schema := s.InputSchema(); schema != nil {
-				return schema
-			}
-			return nil
-		}(),
-	}
+	return csSkills.SkillDescriptor(capability.SkillToDescriptor(s))
 }
 
 // skillIDsFromDescriptors extracts skill IDs from descriptors.

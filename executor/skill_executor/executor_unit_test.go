@@ -10,9 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openbotstack/openbotstack-core/ai/types"
 	"github.com/openbotstack/openbotstack-core/audit"
-	"github.com/openbotstack/openbotstack-core/control/agent"
-	control_skills "github.com/openbotstack/openbotstack-core/control/skills"
 	"github.com/openbotstack/openbotstack-core/execution"
 	executor "github.com/openbotstack/openbotstack-runtime/executor/skill_executor"
 	"github.com/openbotstack/openbotstack-runtime/logging/execution_logs"
@@ -332,118 +331,6 @@ func TestLoadSkillWithWasm_Duplicate(t *testing.T) {
 }
 
 // ============================================================================
-// ExecuteFromPlan Tests
-// ============================================================================
-
-func TestExecuteFromPlan_NilPlan(t *testing.T) {
-	e := executor.NewDefaultExecutor()
-	ctx := context.Background()
-	meta := agent.ExecutionMeta{TenantID: "t1", UserID: "u1", RequestID: "r1"}
-
-	_, err := e.ExecuteFromPlan(ctx, nil, meta)
-	if err != executor.ErrNilExecutionPlan {
-		t.Errorf("Expected ErrNilExecutionPlan, got %v", err)
-	}
-}
-
-func TestExecuteFromPlan_EmptyPlan(t *testing.T) {
-	e := executor.NewDefaultExecutor()
-	ctx := context.Background()
-	meta := agent.ExecutionMeta{TenantID: "t1", UserID: "u1", RequestID: "r1"}
-
-	plan := &execution.ExecutionPlan{Steps: []execution.ExecutionStep{}}
-	_ = plan.Validate() // validates and freezes
-
-	_, err := e.ExecuteFromPlan(ctx, plan, meta)
-	if err == nil {
-		t.Fatal("Expected error for empty plan")
-	}
-}
-
-func TestExecuteFromPlan_ValidPlan(t *testing.T) {
-	e := executor.NewDefaultExecutor()
-	ctx := context.Background()
-
-	skill := newMockSkill("plan-skill", true)
-	_ = e.LoadSkill(ctx, skill)
-	e.SetTextGenerator(&mockTextGenerator{response: "plan result"})
-
-	meta := agent.ExecutionMeta{TenantID: "t1", UserID: "u1", RequestID: "r1"}
-
-	plan := &execution.ExecutionPlan{
-		Steps: []execution.ExecutionStep{
-			{
-				Name:      "plan-skill",
-				Type:      execution.StepTypeSkill,
-				Arguments: map[string]any{"text": "hello"},
-			},
-		},
-	}
-	if err := plan.Validate(); err != nil {
-		t.Fatalf("Validate plan: %v", err)
-	}
-
-	result, err := e.ExecuteFromPlan(ctx, plan, meta)
-	if err != nil {
-		t.Fatalf("ExecuteFromPlan failed: %v", err)
-	}
-	if result.Status != execution.StatusSuccess {
-		t.Errorf("Expected StatusSuccess, got %v", result.Status)
-	}
-	if string(result.Output) != "plan result" {
-		t.Errorf("Output = %q, want %q", string(result.Output), "plan result")
-	}
-}
-
-func TestExecuteFromPlan_PropagatesContext(t *testing.T) {
-	e := executor.NewDefaultExecutor()
-	ctx := context.Background()
-
-	skill := newMockSkill("ctx-skill", true)
-	_ = e.LoadSkill(ctx, skill)
-	e.SetTextGenerator(&mockTextGenerator{response: "ok"})
-
-	meta := agent.ExecutionMeta{
-		TenantID:  "tenant-42",
-		UserID:    "user-99",
-		RequestID: "req-100",
-	}
-
-	plan := &execution.ExecutionPlan{
-		Steps: []execution.ExecutionStep{
-			{
-				Name:      "ctx-skill",
-				Type:      execution.StepTypeSkill,
-				Arguments: map[string]any{},
-			},
-		},
-	}
-	_ = plan.Validate()
-
-	// Verify audit events contain the metadata from ExecutionMeta
-	auditLog := execution_logs.NewInMemoryAuditLogger()
-	e.SetAuditLogger(auditLog)
-
-	_, err := e.ExecuteFromPlan(ctx, plan, meta)
-	if err != nil {
-		t.Fatalf("ExecuteFromPlan failed: %v", err)
-	}
-
-	events, _ := auditLog.Query(ctx, execution_logs.QueryFilter{RequestID: "req-100"})
-	if len(events) == 0 {
-		t.Fatal("Expected audit events with RequestID from meta")
-	}
-	for _, evt := range events {
-		if evt.TenantID != "tenant-42" {
-			t.Errorf("TenantID = %q, want %q", evt.TenantID, "tenant-42")
-		}
-		if evt.UserID != "user-99" {
-			t.Errorf("UserID = %q, want %q", evt.UserID, "user-99")
-		}
-	}
-}
-
-// ============================================================================
 // ExecutePlan (multi-step) Tests
 // ============================================================================
 
@@ -678,7 +565,7 @@ func TestExecute_InvalidJSONInput_WithSchema(t *testing.T) {
 
 	skill := &schemaMockSkill{
 		mockSkill:   mockSkill{id: "json-skill", valid: true, timeout: 30 * time.Second},
-		inputSchema: &control_skills.JSONSchema{Type: "object"},
+		inputSchema: &types.JSONSchema{Type: "object"},
 	}
 	_ = e.LoadSkill(ctx, skill)
 
@@ -723,7 +610,7 @@ func TestExecute_SchemaValidation_AuditRejectedEvent(t *testing.T) {
 
 	skill := &schemaMockSkill{
 		mockSkill: mockSkill{id: "reject-audit-skill", valid: true, timeout: 30 * time.Second},
-		inputSchema: &control_skills.JSONSchema{
+		inputSchema: &types.JSONSchema{
 			Type:     "object",
 			Required: []string{"required_field"},
 		},

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openbotstack/openbotstack-core/control/skills"
+	"github.com/openbotstack/openbotstack-core/ai/types"
 	"github.com/openbotstack/openbotstack-core/execution"
 	registry "github.com/openbotstack/openbotstack-core/registry/skills"
 	skilloperator "github.com/openbotstack/openbotstack-runtime/executor/skill_executor"
@@ -164,8 +164,8 @@ type manifestSkill struct {
 	id            string
 	name          string
 	description   string
-	inputSchema   *skills.JSONSchema
-	outputSchema  *skills.JSONSchema
+	inputSchema   *types.JSONSchema
+	outputSchema  *types.JSONSchema
 	executionMode string
 	prompt        string
 }
@@ -174,8 +174,8 @@ func (s *manifestSkill) ID() string                      { return s.id }
 func (s *manifestSkill) Name() string                    { return s.name }
 func (s *manifestSkill) Description() string             { return s.description }
 func (s *manifestSkill) Timeout() time.Duration          { return 30 * time.Second }
-func (s *manifestSkill) InputSchema() *skills.JSONSchema  { return s.inputSchema }
-func (s *manifestSkill) OutputSchema() *skills.JSONSchema { return s.outputSchema }
+func (s *manifestSkill) InputSchema() *types.JSONSchema  { return s.inputSchema }
+func (s *manifestSkill) OutputSchema() *types.JSONSchema { return s.outputSchema }
 func (s *manifestSkill) RequiredPermissions() []string   { return nil }
 func (s *manifestSkill) ExecutionMode() string           { return s.executionMode }
 func (s *manifestSkill) Prompt() string                  { return s.prompt }

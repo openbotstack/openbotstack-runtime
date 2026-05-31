@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync/atomic"
 
-	skills "github.com/openbotstack/openbotstack-core/control/skills"
+	"github.com/openbotstack/openbotstack-core/ai/types"
 	"github.com/openbotstack/openbotstack-core/mcp"
 )
 
@@ -153,7 +153,7 @@ func jsonRawResult(v any) (json.RawMessage, error) {
 }
 
 // convertSchema converts a raw map[string]any schema to a structured JSONSchema.
-func convertSchema(raw map[string]any) *skills.JSONSchema {
+func convertSchema(raw map[string]any) *types.JSONSchema {
 	if raw == nil {
 		return nil
 	}
@@ -161,7 +161,7 @@ func convertSchema(raw map[string]any) *skills.JSONSchema {
 	if err != nil {
 		return nil
 	}
-	var schema skills.JSONSchema
+	var schema types.JSONSchema
 	if err := json.Unmarshal(data, &schema); err != nil {
 		return nil
 	}

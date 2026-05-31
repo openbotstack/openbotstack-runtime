@@ -5,26 +5,41 @@ import (
 	"sync"
 	"time"
 
-	"github.com/openbotstack/openbotstack-core/ai/providers"
 	"github.com/openbotstack/openbotstack-runtime/api"
 )
 
-// InMemoryModelRegistry implements providers.ModelRegistry with in-memory storage.
+// ModelEntry records a registered model's metadata for governance tracking.
+type ModelEntry struct {
+	ID           string    `json:"id"`
+	Provider     string    `json:"provider"`
+	Model        string    `json:"model"`
+	Capabilities []string  `json:"capabilities"`
+	RegisteredAt time.Time `json:"registered_at"`
+}
+
+// ModelUsage records which model was used for a specific execution.
+type ModelUsage struct {
+	ExecutionID string    `json:"execution_id"`
+	ModelID     string    `json:"model_id"`
+	UsedAt      time.Time `json:"used_at"`
+}
+
+// InMemoryModelRegistry implements model governance with in-memory storage.
 type InMemoryModelRegistry struct {
-	mu       sync.RWMutex
-	models   map[string]providers.ModelEntry
-	usage    map[string]providers.ModelUsage // executionID → usage
+	mu     sync.RWMutex
+	models map[string]ModelEntry
+	usage  map[string]ModelUsage // executionID → usage
 }
 
 // NewInMemoryModelRegistry creates a new in-memory model registry.
 func NewInMemoryModelRegistry() *InMemoryModelRegistry {
 	return &InMemoryModelRegistry{
-		models: make(map[string]providers.ModelEntry),
-		usage:  make(map[string]providers.ModelUsage),
+		models: make(map[string]ModelEntry),
+		usage:  make(map[string]ModelUsage),
 	}
 }
 
-func (r *InMemoryModelRegistry) Register(entry providers.ModelEntry) error {
+func (r *InMemoryModelRegistry) Register(entry ModelEntry) error {
 	if entry.ID == "" {
 		return fmt.Errorf("model registry: entry ID is required")
 	}
@@ -37,24 +52,24 @@ func (r *InMemoryModelRegistry) Register(entry providers.ModelEntry) error {
 	return nil
 }
 
-func (r *InMemoryModelRegistry) List() []providers.ModelEntry {
+func (r *InMemoryModelRegistry) List() []ModelEntry {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	result := make([]providers.ModelEntry, 0, len(r.models))
+	result := make([]ModelEntry, 0, len(r.models))
 	for _, m := range r.models {
 		result = append(result, m)
 	}
 	return result
 }
 
-func (r *InMemoryModelRegistry) Get(id string) (providers.ModelEntry, bool) {
+func (r *InMemoryModelRegistry) Get(id string) (ModelEntry, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	m, ok := r.models[id]
 	return m, ok
 }
 
-func (r *InMemoryModelRegistry) RecordUsage(usage providers.ModelUsage) error {
+func (r *InMemoryModelRegistry) RecordUsage(usage ModelUsage) error {
 	if usage.ExecutionID == "" || usage.ModelID == "" {
 		return fmt.Errorf("model registry: execution_id and model_id are required")
 	}
@@ -67,7 +82,7 @@ func (r *InMemoryModelRegistry) RecordUsage(usage providers.ModelUsage) error {
 	return nil
 }
 
-func (r *InMemoryModelRegistry) UsageForExecution(executionID string) (providers.ModelUsage, bool) {
+func (r *InMemoryModelRegistry) UsageForExecution(executionID string) (ModelUsage, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	u, ok := r.usage[executionID]

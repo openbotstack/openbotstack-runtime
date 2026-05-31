@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/openbotstack/openbotstack-core/ai/providers"
-	"github.com/openbotstack/openbotstack-core/control/skills"
+	"github.com/openbotstack/openbotstack-core/ai/types"
 )
 
 // EmbeddingService generates vector embeddings via ModelProvider.
@@ -45,8 +45,8 @@ func (s *EmbeddingService) EmbedBatch(ctx context.Context, texts []string) ([][]
 	}
 
 	provider, err := s.router.Route(
-		[]skills.CapabilityType{skills.CapEmbedding},
-		skills.ModelConstraints{},
+		[]types.CapabilityType{types.CapEmbedding},
+		types.ModelConstraints{},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("embedding service: no embedding provider available: %w", err)

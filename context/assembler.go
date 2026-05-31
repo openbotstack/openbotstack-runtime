@@ -10,7 +10,7 @@ import (
 
 	corecontext "github.com/openbotstack/openbotstack-core/context"
 	"github.com/openbotstack/openbotstack-core/control/agent"
-	"github.com/openbotstack/openbotstack-core/control/skills"
+	"github.com/openbotstack/openbotstack-core/ai/types"
 	"github.com/openbotstack/openbotstack-core/memory/abstraction"
 )
 
@@ -38,7 +38,7 @@ func (a *RuntimeContextAssembler) Assemble(
 	ctx context.Context,
 	assistant corecontext.AssistantContext,
 	request corecontext.UserRequest,
-	conversationHistory []skills.Message,
+	conversationHistory []types.Message,
 ) (*corecontext.AssembledContext, error) {
 	// 1. Build system prompt from persona + base prompt
 	systemPrompt := buildPersonaSystemPrompt(assistant.Persona, assistant.BaseSystemPrompt)
@@ -56,7 +56,7 @@ func (a *RuntimeContextAssembler) Assemble(
 	}
 
 	// 3. Build messages array
-	var messages []skills.Message
+	var messages []types.Message
 
 	// Inject memory context as system message if found
 	if len(relevantMemories) > 0 {
@@ -64,7 +64,7 @@ func (a *RuntimeContextAssembler) Assemble(
 		for _, m := range relevantMemories {
 			memParts = append(memParts, "- "+m.Content)
 		}
-		messages = append(messages, skills.Message{
+		messages = append(messages, types.Message{
 			Role:    "system",
 			Content: "Relevant context from memory:\n" + strings.Join(memParts, "\n"),
 		})
@@ -74,7 +74,7 @@ func (a *RuntimeContextAssembler) Assemble(
 	messages = append(messages, conversationHistory...)
 
 	// 4. Build available tools from enabled skills
-	var availableTools []skills.ToolDefinition
+	var availableTools []types.ToolDefinition
 	if a.registry != nil && len(assistant.EnabledSkillIDs) > 0 {
 		seen := make(map[string]bool, len(assistant.EnabledSkillIDs))
 		for _, id := range assistant.EnabledSkillIDs {
@@ -88,7 +88,7 @@ func (a *RuntimeContextAssembler) Assemble(
 					"skill_id", id, "profile_id", assistant.ProfileID)
 				continue
 			}
-			availableTools = append(availableTools, skills.ToolDefinition{
+			availableTools = append(availableTools, types.ToolDefinition{
 				Name:        s.ID(),
 				Description: s.Description(),
 				Parameters:  s.InputSchema(),
@@ -100,7 +100,7 @@ func (a *RuntimeContextAssembler) Assemble(
 		SystemPrompt:    systemPrompt,
 		Messages:        messages,
 		AvailableTools:  availableTools,
-		Constraints:     skills.ModelConstraints{}, // caller is responsible for setting limits
+		Constraints:     types.ModelConstraints{}, // caller is responsible for setting limits
 		RelevantMemories: relevantMemories,
 	}, nil
 }

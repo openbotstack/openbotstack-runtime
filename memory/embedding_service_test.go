@@ -7,7 +7,7 @@ import (
 
 	"github.com/openbotstack/openbotstack-core/ai"
 	"github.com/openbotstack/openbotstack-core/ai/providers"
-	"github.com/openbotstack/openbotstack-core/control/skills"
+	"github.com/openbotstack/openbotstack-core/ai/types"
 )
 
 // mockEmbedProvider is a mock provider that supports CapEmbedding.
@@ -18,11 +18,11 @@ type mockEmbedProvider struct {
 
 func (m *mockEmbedProvider) ID() string { return "mock/embed" }
 
-func (m *mockEmbedProvider) Capabilities() []skills.CapabilityType {
-	return []skills.CapabilityType{skills.CapEmbedding}
+func (m *mockEmbedProvider) Capabilities() []types.CapabilityType {
+	return []types.CapabilityType{types.CapEmbedding}
 }
 
-func (m *mockEmbedProvider) Generate(_ context.Context, _ skills.GenerateRequest) (*skills.GenerateResponse, error) {
+func (m *mockEmbedProvider) Generate(_ context.Context, _ types.GenerateRequest) (*types.GenerateResponse, error) {
 	return nil, ai.ErrCapabilityNotSupported
 }
 
@@ -53,12 +53,12 @@ type mockRouter struct {
 	provider providers.ModelProvider
 }
 
-func (r *mockRouter) Route(requirements []skills.CapabilityType, _ skills.ModelConstraints) (providers.ModelProvider, error) {
+func (r *mockRouter) Route(requirements []types.CapabilityType, _ types.ModelConstraints) (providers.ModelProvider, error) {
 	if r.provider == nil {
 		return nil, ai.ErrNoMatchingProvider
 	}
 	caps := r.provider.Capabilities()
-	capSet := make(map[skills.CapabilityType]bool)
+	capSet := make(map[types.CapabilityType]bool)
 	for _, c := range caps {
 		capSet[c] = true
 	}

@@ -14,10 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openbotstack/openbotstack-core/ai/types"
 	"github.com/openbotstack/openbotstack-core/audit"
-	"github.com/openbotstack/openbotstack-core/control/agent"
 	"github.com/openbotstack/openbotstack-core/control/skills"
-	control_skills "github.com/openbotstack/openbotstack-core/control/skills"
 	"github.com/openbotstack/openbotstack-core/execution"
 	registry "github.com/openbotstack/openbotstack-core/registry/skills"
 	skilloperator "github.com/openbotstack/openbotstack-runtime/executor/skill_executor"
@@ -955,10 +954,10 @@ func TestE2E_Declarative_SchemaValidationPass(t *testing.T) {
 
 	skill := &schemaMockSkill{
 		mockSkill: mockSkill{id: "e2e/schema-pass", valid: true, timeout: 30 * time.Second, executionMode: "declarative"},
-		inputSchema: &control_skills.JSONSchema{
+		inputSchema: &types.JSONSchema{
 			Type:     "object",
 			Required: []string{"text"},
-			Properties: map[string]*control_skills.JSONSchema{
+			Properties: map[string]*types.JSONSchema{
 				"text": {Type: "string"},
 			},
 		},
@@ -1117,10 +1116,10 @@ func TestE2E_Declarative_SchemaValidationReject(t *testing.T) {
 
 	skill := &schemaMockSkill{
 		mockSkill: mockSkill{id: "e2e/schema-reject", valid: true, timeout: 30 * time.Second, executionMode: "declarative"},
-		inputSchema: &control_skills.JSONSchema{
+		inputSchema: &types.JSONSchema{
 			Type:     "object",
 			Required: []string{"text"},
-			Properties: map[string]*control_skills.JSONSchema{
+			Properties: map[string]*types.JSONSchema{
 				"text": {Type: "string"},
 			},
 		},
@@ -1145,7 +1144,7 @@ func TestE2E_Declarative_MalformedJSONInput(t *testing.T) {
 
 	skill := &schemaMockSkill{
 		mockSkill: mockSkill{id: "e2e/bad-json", valid: true, timeout: 30 * time.Second, executionMode: "declarative"},
-		inputSchema: &control_skills.JSONSchema{
+		inputSchema: &types.JSONSchema{
 			Type: "object",
 		},
 	}
@@ -1170,9 +1169,9 @@ func TestE2E_Declarative_MaxLengthExceeded(t *testing.T) {
 	maxLen := 10
 	skill := &schemaMockSkill{
 		mockSkill: mockSkill{id: "e2e/maxlen", valid: true, timeout: 30 * time.Second, executionMode: "declarative"},
-		inputSchema: &control_skills.JSONSchema{
+		inputSchema: &types.JSONSchema{
 			Type: "object",
-			Properties: map[string]*control_skills.JSONSchema{
+			Properties: map[string]*types.JSONSchema{
 				"text": {Type: "string", MaxLength: &maxLen},
 			},
 		},
@@ -1198,10 +1197,10 @@ func TestE2E_Declarative_MissingRequiredField(t *testing.T) {
 
 	skill := &schemaMockSkill{
 		mockSkill: mockSkill{id: "e2e/missing-field", valid: true, timeout: 30 * time.Second, executionMode: "declarative"},
-		inputSchema: &control_skills.JSONSchema{
+		inputSchema: &types.JSONSchema{
 			Type:     "object",
 			Required: []string{"name", "email"},
-			Properties: map[string]*control_skills.JSONSchema{
+			Properties: map[string]*types.JSONSchema{
 				"name":  {Type: "string"},
 				"email": {Type: "string"},
 			},
@@ -1227,9 +1226,9 @@ func TestE2E_Declarative_ExtraFieldsAccepted(t *testing.T) {
 
 	skill := &schemaMockSkill{
 		mockSkill: mockSkill{id: "e2e/extra-fields", valid: true, timeout: 30 * time.Second, executionMode: "declarative"},
-		inputSchema: &control_skills.JSONSchema{
+		inputSchema: &types.JSONSchema{
 			Type: "object",
-			Properties: map[string]*control_skills.JSONSchema{
+			Properties: map[string]*types.JSONSchema{
 				"name": {Type: "string"},
 			},
 		},
@@ -1625,9 +1624,9 @@ func TestE2E_Wasm_InvalidTypeInInput(t *testing.T) {
 
 	e := skilloperator.NewDefaultExecutorWithRuntime(rt, nil)
 
-	schema := &control_skills.JSONSchema{
+	schema := &types.JSONSchema{
 		Type: "object",
-		Properties: map[string]*control_skills.JSONSchema{
+		Properties: map[string]*types.JSONSchema{
 			"a": {Type: "number"},
 			"b": {Type: "number"},
 		},
@@ -1849,10 +1848,10 @@ func TestE2E_Wasm_ConcurrentExecution(t *testing.T) {
 // ============================================================================
 
 func TestE2E_SkillDescriptor_AllFields(t *testing.T) {
-	schema := &skills.JSONSchema{
+	schema := &types.JSONSchema{
 		Type:        "object",
 		Description: "Test schema",
-		Properties: map[string]*skills.JSONSchema{
+		Properties: map[string]*types.JSONSchema{
 			"text": {Type: "string", Description: "Input text"},
 		},
 		Required: []string{"text"},
@@ -1878,15 +1877,15 @@ func TestE2E_SkillDescriptor_AllFields(t *testing.T) {
 }
 
 func TestE2E_ToolDefinition_Parameters(t *testing.T) {
-	params := &skills.JSONSchema{
+	params := &types.JSONSchema{
 		Type: "object",
-		Properties: map[string]*skills.JSONSchema{
+		Properties: map[string]*types.JSONSchema{
 			"query": {Type: "string"},
 			"limit": {Type: "integer"},
 		},
 		Required: []string{"query"},
 	}
-	td := skills.ToolDefinition{
+	td := types.ToolDefinition{
 		Name:        "search",
 		Description: "Search for items",
 		Parameters:  params,
@@ -1900,12 +1899,12 @@ func TestE2E_ToolDefinition_Parameters(t *testing.T) {
 }
 
 func TestE2E_ToolSpec_NestedObjects(t *testing.T) {
-	schema := &skills.JSONSchema{
+	schema := &types.JSONSchema{
 		Type: "object",
-		Properties: map[string]*skills.JSONSchema{
+		Properties: map[string]*types.JSONSchema{
 			"address": {
 				Type: "object",
-				Properties: map[string]*skills.JSONSchema{
+				Properties: map[string]*types.JSONSchema{
 					"street": {Type: "string"},
 					"city":   {Type: "string"},
 					"zip":    {Type: "string"},
@@ -1913,7 +1912,7 @@ func TestE2E_ToolSpec_NestedObjects(t *testing.T) {
 			},
 		},
 	}
-	td := skills.ToolDefinition{
+	td := types.ToolDefinition{
 		Name:       "update_address",
 		Parameters: schema,
 	}
@@ -1927,20 +1926,20 @@ func TestE2E_ToolSpec_NestedObjects(t *testing.T) {
 }
 
 func TestE2E_ToolSpec_ArrayTypes(t *testing.T) {
-	schema := &skills.JSONSchema{
+	schema := &types.JSONSchema{
 		Type: "object",
-		Properties: map[string]*skills.JSONSchema{
+		Properties: map[string]*types.JSONSchema{
 			"tags": {
 				Type:  "array",
-				Items: &skills.JSONSchema{Type: "string"},
+				Items: &types.JSONSchema{Type: "string"},
 			},
 			"scores": {
 				Type:  "array",
-				Items: &skills.JSONSchema{Type: "number"},
+				Items: &types.JSONSchema{Type: "number"},
 			},
 		},
 	}
-	td := skills.ToolDefinition{
+	td := types.ToolDefinition{
 		Name:       "process",
 		Parameters: schema,
 	}
@@ -1954,7 +1953,7 @@ func TestE2E_ToolSpec_ArrayTypes(t *testing.T) {
 }
 
 func TestE2E_ToolSpec_NilSchemaEmptyParameters(t *testing.T) {
-	td := skills.ToolDefinition{
+	td := types.ToolDefinition{
 		Name:        "no-schema-tool",
 		Description: "A tool with no schema",
 		Parameters:  nil,
@@ -1965,11 +1964,11 @@ func TestE2E_ToolSpec_NilSchemaEmptyParameters(t *testing.T) {
 }
 
 func TestE2E_ToolSpec_EmptyProperties(t *testing.T) {
-	schema := &skills.JSONSchema{
+	schema := &types.JSONSchema{
 		Type:       "object",
-		Properties: map[string]*skills.JSONSchema{},
+		Properties: map[string]*types.JSONSchema{},
 	}
-	td := skills.ToolDefinition{
+	td := types.ToolDefinition{
 		Name:       "empty-props",
 		Parameters: schema,
 	}
@@ -1980,18 +1979,18 @@ func TestE2E_ToolSpec_EmptyProperties(t *testing.T) {
 
 func TestE2E_ToolSpec_DeeplyNestedSchema(t *testing.T) {
 	// Create a schema with 6 levels of nesting
-	inner := &skills.JSONSchema{Type: "string"}
+	inner := &types.JSONSchema{Type: "string"}
 	for i := 0; i < 5; i++ {
-		inner = &skills.JSONSchema{
+		inner = &types.JSONSchema{
 			Type:       "object",
-			Properties: map[string]*skills.JSONSchema{"child": inner},
+			Properties: map[string]*types.JSONSchema{"child": inner},
 		}
 	}
-	schema := &skills.JSONSchema{
+	schema := &types.JSONSchema{
 		Type:       "object",
-		Properties: map[string]*skills.JSONSchema{"root": inner},
+		Properties: map[string]*types.JSONSchema{"root": inner},
 	}
-	td := skills.ToolDefinition{
+	td := types.ToolDefinition{
 		Name:       "deep-nested",
 		Parameters: schema,
 	}
@@ -2012,13 +2011,13 @@ func TestE2E_ToolSpec_DeeplyNestedSchema(t *testing.T) {
 }
 
 func TestE2E_ToolSpec_EnumWithVariousTypes(t *testing.T) {
-	schema := &skills.JSONSchema{
+	schema := &types.JSONSchema{
 		Type: "string",
 		Enum: []any{"US", "EU", "CN"},
 	}
-	td := skills.ToolDefinition{
+	td := types.ToolDefinition{
 		Name:       "region-tool",
-		Parameters: &skills.JSONSchema{Type: "object", Properties: map[string]*skills.JSONSchema{"region": schema}},
+		Parameters: &types.JSONSchema{Type: "object", Properties: map[string]*types.JSONSchema{"region": schema}},
 	}
 	regionProp := td.Parameters.Properties["region"]
 	if len(regionProp.Enum) != 3 {
@@ -2027,45 +2026,45 @@ func TestE2E_ToolSpec_EnumWithVariousTypes(t *testing.T) {
 }
 
 func TestE2E_ToolSpec_AllOptional(t *testing.T) {
-	schema := &skills.JSONSchema{
+	schema := &types.JSONSchema{
 		Type: "object",
-		Properties: map[string]*skills.JSONSchema{
+		Properties: map[string]*types.JSONSchema{
 			"opt1": {Type: "string"},
 			"opt2": {Type: "number"},
 		},
 		Required: []string{},
 	}
-	td := skills.ToolDefinition{Name: "all-opt", Parameters: schema}
+	td := types.ToolDefinition{Name: "all-opt", Parameters: schema}
 	if len(td.Parameters.Required) != 0 {
 		t.Errorf("Required should be empty, got %v", td.Parameters.Required)
 	}
 }
 
 func TestE2E_ToolSpec_AllRequired(t *testing.T) {
-	schema := &skills.JSONSchema{
+	schema := &types.JSONSchema{
 		Type: "object",
-		Properties: map[string]*skills.JSONSchema{
+		Properties: map[string]*types.JSONSchema{
 			"req1": {Type: "string"},
 			"req2": {Type: "number"},
 		},
 		Required: []string{"req1", "req2"},
 	}
-	td := skills.ToolDefinition{Name: "all-req", Parameters: schema}
+	td := types.ToolDefinition{Name: "all-req", Parameters: schema}
 	if len(td.Parameters.Required) != 2 {
 		t.Errorf("Required should have 2 items, got %d", len(td.Parameters.Required))
 	}
 }
 
 func TestE2E_ToolSpec_ManyProperties(t *testing.T) {
-	props := make(map[string]*skills.JSONSchema)
+	props := make(map[string]*types.JSONSchema)
 	for i := 0; i < 100; i++ {
-		props[fmt.Sprintf("field_%03d", i)] = &skills.JSONSchema{Type: "string"}
+		props[fmt.Sprintf("field_%03d", i)] = &types.JSONSchema{Type: "string"}
 	}
-	schema := &skills.JSONSchema{
+	schema := &types.JSONSchema{
 		Type:       "object",
 		Properties: props,
 	}
-	td := skills.ToolDefinition{Name: "many-props", Parameters: schema}
+	td := types.ToolDefinition{Name: "many-props", Parameters: schema}
 	if len(td.Parameters.Properties) != 100 {
 		t.Errorf("Expected 100 properties, got %d", len(td.Parameters.Properties))
 	}
@@ -2599,13 +2598,6 @@ func TestE2E_NonDeclarativeNoWasm_NoRuntimeFails(t *testing.T) {
 	}
 }
 
-func TestE2E_ExecuteFromPlan_NilPlan(t *testing.T) {
-	e := skilloperator.NewDefaultExecutor()
-	_, err := e.ExecuteFromPlan(context.Background(), nil, agent.ExecutionMeta{})
-	if err == nil {
-		t.Error("expected error for nil plan")
-	}
-}
 
 func TestE2E_ExecutePlan_NilPlan(t *testing.T) {
 	e := skilloperator.NewDefaultExecutor()
@@ -2672,10 +2664,10 @@ func TestE2E_Audit_RejectedValidation(t *testing.T) {
 
 	skill := &schemaMockSkill{
 		mockSkill: mockSkill{id: "e2e/audit-reject", valid: true, timeout: 30 * time.Second, executionMode: "declarative"},
-		inputSchema: &control_skills.JSONSchema{
+		inputSchema: &types.JSONSchema{
 			Type:     "object",
 			Required: []string{"required_field"},
-			Properties: map[string]*control_skills.JSONSchema{
+			Properties: map[string]*types.JSONSchema{
 				"required_field": {Type: "string"},
 			},
 		},
@@ -2803,8 +2795,8 @@ func (s *noPromptSkill) ID() string                          { return s.id }
 func (s *noPromptSkill) Name() string                        { return "no-prompt-" + s.id }
 func (s *noPromptSkill) Description() string                 { return "no prompt" }
 func (s *noPromptSkill) Timeout() time.Duration              { return 30 * time.Second }
-func (s *noPromptSkill) InputSchema() *control_skills.JSONSchema  { return nil }
-func (s *noPromptSkill) OutputSchema() *control_skills.JSONSchema { return nil }
+func (s *noPromptSkill) InputSchema() *types.JSONSchema  { return nil }
+func (s *noPromptSkill) OutputSchema() *types.JSONSchema { return nil }
 func (s *noPromptSkill) RequiredPermissions() []string       { return nil }
 func (s *noPromptSkill) Validate() error                     { return nil }
 
@@ -2817,8 +2809,8 @@ func (s *noExecModeSkill) ID() string                          { return s.id }
 func (s *noExecModeSkill) Name() string                        { return "no-mode-" + s.id }
 func (s *noExecModeSkill) Description() string                 { return "no mode" }
 func (s *noExecModeSkill) Timeout() time.Duration              { return 30 * time.Second }
-func (s *noExecModeSkill) InputSchema() *control_skills.JSONSchema  { return nil }
-func (s *noExecModeSkill) OutputSchema() *control_skills.JSONSchema { return nil }
+func (s *noExecModeSkill) InputSchema() *types.JSONSchema  { return nil }
+func (s *noExecModeSkill) OutputSchema() *types.JSONSchema { return nil }
 func (s *noExecModeSkill) RequiredPermissions() []string       { return nil }
 func (s *noExecModeSkill) Validate() error                     { return nil }
 
@@ -2840,8 +2832,8 @@ type manifestSkillE2E struct {
 	id            string
 	name          string
 	description   string
-	inputSchema   *control_skills.JSONSchema
-	outputSchema  *control_skills.JSONSchema
+	inputSchema   *types.JSONSchema
+	outputSchema  *types.JSONSchema
 	executionMode string
 	prompt        string
 }
@@ -2850,8 +2842,8 @@ func (s *manifestSkillE2E) ID() string                          { return s.id }
 func (s *manifestSkillE2E) Name() string                        { return s.name }
 func (s *manifestSkillE2E) Description() string                 { return s.description }
 func (s *manifestSkillE2E) Timeout() time.Duration              { return 30 * time.Second }
-func (s *manifestSkillE2E) InputSchema() *control_skills.JSONSchema  { return s.inputSchema }
-func (s *manifestSkillE2E) OutputSchema() *control_skills.JSONSchema { return s.outputSchema }
+func (s *manifestSkillE2E) InputSchema() *types.JSONSchema  { return s.inputSchema }
+func (s *manifestSkillE2E) OutputSchema() *types.JSONSchema { return s.outputSchema }
 func (s *manifestSkillE2E) RequiredPermissions() []string       { return nil }
 func (s *manifestSkillE2E) ExecutionMode() string               { return s.executionMode }
 func (s *manifestSkillE2E) Prompt() string                      { return s.prompt }
@@ -2925,16 +2917,16 @@ func parseManifestE2E(t *testing.T, dir string) *registry.SkillManifest {
 func TestE2E_SchemaValidation_Table(t *testing.T) {
 	tests := []struct {
 		name    string
-		schema  *control_skills.JSONSchema
+		schema  *types.JSONSchema
 		input   string
 		wantErr bool
 	}{
 		{
 			name: "valid object with required field",
-			schema: &control_skills.JSONSchema{
+			schema: &types.JSONSchema{
 				Type:     "object",
 				Required: []string{"name"},
-				Properties: map[string]*control_skills.JSONSchema{
+				Properties: map[string]*types.JSONSchema{
 					"name": {Type: "string"},
 				},
 			},
@@ -2943,10 +2935,10 @@ func TestE2E_SchemaValidation_Table(t *testing.T) {
 		},
 		{
 			name: "missing required field",
-			schema: &control_skills.JSONSchema{
+			schema: &types.JSONSchema{
 				Type:     "object",
 				Required: []string{"name"},
-				Properties: map[string]*control_skills.JSONSchema{
+				Properties: map[string]*types.JSONSchema{
 					"name": {Type: "string"},
 				},
 			},
@@ -2955,9 +2947,9 @@ func TestE2E_SchemaValidation_Table(t *testing.T) {
 		},
 		{
 			name: "wrong type for field",
-			schema: &control_skills.JSONSchema{
+			schema: &types.JSONSchema{
 				Type: "object",
-				Properties: map[string]*control_skills.JSONSchema{
+				Properties: map[string]*types.JSONSchema{
 					"count": {Type: "integer"},
 				},
 			},
@@ -2966,7 +2958,7 @@ func TestE2E_SchemaValidation_Table(t *testing.T) {
 		},
 		{
 			name: "enum value match",
-			schema: &control_skills.JSONSchema{
+			schema: &types.JSONSchema{
 				Type: "string",
 				Enum: []any{"US", "EU", "CN"},
 			},
@@ -2975,7 +2967,7 @@ func TestE2E_SchemaValidation_Table(t *testing.T) {
 		},
 		{
 			name: "enum value mismatch",
-			schema: &control_skills.JSONSchema{
+			schema: &types.JSONSchema{
 				Type: "string",
 				Enum: []any{"US", "EU", "CN"},
 			},
@@ -2984,7 +2976,7 @@ func TestE2E_SchemaValidation_Table(t *testing.T) {
 		},
 		{
 			name: "number minimum violation",
-			schema: &control_skills.JSONSchema{
+			schema: &types.JSONSchema{
 				Type:    "number",
 				Minimum: float64Ptr(0),
 			},
@@ -2993,7 +2985,7 @@ func TestE2E_SchemaValidation_Table(t *testing.T) {
 		},
 		{
 			name: "number maximum violation",
-			schema: &control_skills.JSONSchema{
+			schema: &types.JSONSchema{
 				Type:    "number",
 				Maximum: float64Ptr(100),
 			},
@@ -3002,7 +2994,7 @@ func TestE2E_SchemaValidation_Table(t *testing.T) {
 		},
 		{
 			name: "string minLength violation",
-			schema: &control_skills.JSONSchema{
+			schema: &types.JSONSchema{
 				Type:      "string",
 				MinLength: intPtr(3),
 			},
@@ -3011,7 +3003,7 @@ func TestE2E_SchemaValidation_Table(t *testing.T) {
 		},
 		{
 			name: "string maxLength violation",
-			schema: &control_skills.JSONSchema{
+			schema: &types.JSONSchema{
 				Type:      "string",
 				MaxLength: intPtr(5),
 			},
@@ -3020,30 +3012,30 @@ func TestE2E_SchemaValidation_Table(t *testing.T) {
 		},
 		{
 			name: "array with item validation",
-			schema: &control_skills.JSONSchema{
+			schema: &types.JSONSchema{
 				Type:  "array",
-				Items: &control_skills.JSONSchema{Type: "string"},
+				Items: &types.JSONSchema{Type: "string"},
 			},
 			input:   `["a", "b", "c"]`,
 			wantErr: false,
 		},
 		{
 			name: "array with invalid item",
-			schema: &control_skills.JSONSchema{
+			schema: &types.JSONSchema{
 				Type:  "array",
-				Items: &control_skills.JSONSchema{Type: "string"},
+				Items: &types.JSONSchema{Type: "string"},
 			},
 			input:   `["a", 123, "c"]`,
 			wantErr: true,
 		},
 		{
 			name: "nested object validation",
-			schema: &control_skills.JSONSchema{
+			schema: &types.JSONSchema{
 				Type: "object",
-				Properties: map[string]*control_skills.JSONSchema{
+				Properties: map[string]*types.JSONSchema{
 					"address": {
 						Type: "object",
-						Properties: map[string]*control_skills.JSONSchema{
+						Properties: map[string]*types.JSONSchema{
 							"city": {Type: "string"},
 						},
 					},
@@ -3054,7 +3046,7 @@ func TestE2E_SchemaValidation_Table(t *testing.T) {
 		},
 		{
 			name: "invalid JSON input",
-			schema: &control_skills.JSONSchema{
+			schema: &types.JSONSchema{
 				Type: "object",
 			},
 			input:   `{broken json`,

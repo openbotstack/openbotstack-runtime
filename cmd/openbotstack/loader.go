@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/openbotstack/openbotstack-core/control/skills"
+	"github.com/openbotstack/openbotstack-core/ai/types"
 	registry "github.com/openbotstack/openbotstack-core/registry/skills"
 	executor "github.com/openbotstack/openbotstack-runtime/executor/skill_executor"
 )
@@ -74,7 +74,7 @@ func loadSkillFromDir(ctx context.Context, exec *executor.DefaultExecutor, skill
 	}
 
 	var version string
-	var inputSchema, outputSchema *skills.JSONSchema
+	var inputSchema, outputSchema *types.JSONSchema
 	var timeout time.Duration
 	var permissions []string
 	var executionMode string
@@ -162,8 +162,8 @@ type simpleSkill struct {
 	name          string
 	description   string
 	version       string
-	inputSchema   *skills.JSONSchema
-	outputSchema  *skills.JSONSchema
+	inputSchema   *types.JSONSchema
+	outputSchema  *types.JSONSchema
 	timeout       time.Duration
 	permissions   []string
 	executionMode string
@@ -185,8 +185,8 @@ func (s *simpleSkill) Timeout() time.Duration {
 	}
 	return 30 * time.Second
 }
-func (s *simpleSkill) InputSchema() *skills.JSONSchema  { return s.inputSchema }
-func (s *simpleSkill) OutputSchema() *skills.JSONSchema { return s.outputSchema }
+func (s *simpleSkill) InputSchema() *types.JSONSchema  { return s.inputSchema }
+func (s *simpleSkill) OutputSchema() *types.JSONSchema { return s.outputSchema }
 func (s *simpleSkill) RequiredPermissions() []string    { return s.permissions }
 func (s *simpleSkill) Validate() error                  { return nil }
 func (s *simpleSkill) ExecutionMode() string            { return s.executionMode }
