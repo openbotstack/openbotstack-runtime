@@ -101,7 +101,7 @@ func TestResolveTasks_NoWorkflowResolver_SingleTask(t *testing.T) {
 	pCtx := &planner.PlannerContext{UserRequest: "do something"}
 	req := agent.MessageRequest{Message: "do something"}
 
-	tasks := a.resolveTasks(req, pCtx)
+	tasks := a.resolveTasks(context.Background(), req, pCtx)
 	if len(tasks) != 1 {
 		t.Fatalf("tasks len = %d, want 1", len(tasks))
 	}

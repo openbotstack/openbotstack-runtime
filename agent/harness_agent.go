@@ -156,14 +156,14 @@ func (a *HarnessAgent) buildPlannerContext(ctx context.Context, req agent.Messag
 
 // resolveTasks determines execution tasks via workflow decomposition,
 // falling back to a single task if no workflow matches.
-func (a *HarnessAgent) resolveTasks(req agent.MessageRequest, pCtx *planner.PlannerContext) []harness.TaskInput {
+func (a *HarnessAgent) resolveTasks(ctx context.Context, req agent.MessageRequest, pCtx *planner.PlannerContext) []harness.TaskInput {
 	if a.workflowResolver == nil {
 		return []harness.TaskInput{{TaskDescription: req.Message, PlannerContext: pCtx}}
 	}
 
 	wf, input, resolveErr := a.workflowResolver.Resolve(req.Message)
 	if resolveErr != nil {
-		slog.WarnContext(context.Background(), "workflow resolver error, falling back to single task", "error", resolveErr)
+		slog.WarnContext(ctx, "workflow resolver error, falling back to single task", "error", resolveErr)
 		return []harness.TaskInput{{TaskDescription: req.Message, PlannerContext: pCtx}}
 	}
 	if wf == nil {
@@ -172,7 +172,7 @@ func (a *HarnessAgent) resolveTasks(req agent.MessageRequest, pCtx *planner.Plan
 
 	tasks, err := DecomposeToTasks(wf, input, pCtx)
 	if err != nil {
-		slog.WarnContext(context.Background(), "workflow decomposition error, falling back to single task", "error", err)
+		slog.WarnContext(ctx, "workflow decomposition error, falling back to single task", "error", err)
 		return []harness.TaskInput{{TaskDescription: req.Message, PlannerContext: pCtx}}
 	}
 	if len(tasks) == 0 {
@@ -211,7 +211,7 @@ func (a *HarnessAgent) HandleMessage(ctx context.Context, req agent.MessageReque
 	}
 
 	// Phase 3: Resolve tasks
-	tasks := a.resolveTasks(req, pCtx)
+	tasks := a.resolveTasks(ctx, req, pCtx)
 
 	// Phase 4: Prepare execution context
 	execID := uuid.NewString()
@@ -398,6 +398,8 @@ func (a *HarnessAgent) gatherSkillDescriptors() ([]csSkills.SkillDescriptor, []c
 				Name:        c.Name,
 				Description: c.Description,
 				InputSchema: c.InputSchema,
+				Kind:        c.Kind,
+				SourceID:    c.SourceID,
 			})
 			capDescs = append(capDescs, c)
 		}
