@@ -10,48 +10,39 @@ import (
 	"log/slog"
 
 	"github.com/openbotstack/openbotstack-core/execution"
-	builtintools "github.com/openbotstack/openbotstack-runtime/tools/builtin"
 	"github.com/openbotstack/openbotstack-runtime/toolrunner"
 )
 
 // StepExecutor handles execution of individual tool and skill steps.
-// Extracted from the InnerLoop ACT phase into a standalone, testable unit.
 type StepExecutor struct {
 	toolRunner    toolrunner.ToolRunner
-	mcpRunner     toolrunner.ToolRunner
 	skillExecutor execution.SkillExecutor
-	builtinRunner *builtintools.BuiltinToolRunner
+	runners       map[string]toolrunner.ToolRunner // prefix → runner
 }
 
 // StepExecutorDeps captures optional runners.
 type StepExecutorDeps struct {
 	MCPRunner     toolrunner.ToolRunner
-	BuiltinRunner *builtintools.BuiltinToolRunner
+	BuiltinRunner toolrunner.ToolRunner
 }
 
 // NewStepExecutor creates a step executor.
 func NewStepExecutor(toolRunner toolrunner.ToolRunner, skillExecutor execution.SkillExecutor, deps StepExecutorDeps) *StepExecutor {
+	runners := make(map[string]toolrunner.ToolRunner)
+	if deps.MCPRunner != nil {
+		runners["mcp."] = deps.MCPRunner
+	}
+	if deps.BuiltinRunner != nil {
+		runners["builtin."] = deps.BuiltinRunner
+	}
 	return &StepExecutor{
 		toolRunner:    toolRunner,
 		skillExecutor: skillExecutor,
-		mcpRunner:     deps.MCPRunner,
-		builtinRunner: deps.BuiltinRunner,
+		runners:       runners,
 	}
 }
 
-// routedRunner identifies which runner handles a step based on name prefix.
-type routedRunner int
-
-const (
-	runnerDefault routedRunner = iota
-	runnerMCP
-	runnerBuiltin
-)
-
 // Execute dispatches a single step to the correct runner based on step type and name prefix.
-// This is the unified entry point that replaces direct calls to ExecuteTool/ExecuteSkill.
-// It clones arguments before mutation, coerces string numbers, resolves templates, and
-// routes to the appropriate runner.
 func (se *StepExecutor) Execute(
 	ctx context.Context,
 	step *execution.ExecutionStep,
@@ -74,15 +65,14 @@ func (se *StepExecutor) Execute(
 	}
 }
 
-// route determines which runner handles the step based on name prefix.
-func (se *StepExecutor) route(stepName string) routedRunner {
-	if strings.HasPrefix(stepName, "builtin.") && se.builtinRunner != nil {
-		return runnerBuiltin
+// lookupRunner finds a runner by step name prefix.
+func (se *StepExecutor) lookupRunner(stepName string) toolrunner.ToolRunner {
+	for prefix, runner := range se.runners {
+		if strings.HasPrefix(stepName, prefix) {
+			return runner
+		}
 	}
-	if strings.HasPrefix(stepName, "mcp.") && se.mcpRunner != nil {
-		return runnerMCP
-	}
-	return runnerDefault
+	return nil
 }
 
 // ExecuteTool runs a single tool step.
@@ -93,9 +83,6 @@ func (se *StepExecutor) ExecuteTool(
 	prevResults map[string]any,
 	stepTimeout time.Duration,
 ) (*execution.StepResult, error) {
-	// Clone arguments before mutation to preserve the frozen plan's original values.
-	// CoerceStringNumbers and ResolveArguments are template-resolution operations that
-	// must not mutate the plan's canonical Arguments map.
 	step = step.Clone()
 	if n := step.CoerceStringNumbers(); n > 0 {
 		slog.DebugContext(ctx, "step_executor: coerced argument types", "step", step.Name, "count", n)
@@ -104,57 +91,25 @@ func (se *StepExecutor) ExecuteTool(
 
 	start := time.Now()
 
-	switch se.route(step.Name) {
-	case runnerBuiltin:
-		// Permissions are gated by the ExecutionContext. When GrantedPermissions is set
-		// (populated by the control plane from config/OBS_FILE_ALLOWED_DIRS), tools with
-		// required permissions (read_file, write_file, web_fetch) are validated at the
-		// runner level as defense-in-depth below the plan-level PermissionChecker.
-		var result map[string]any
-		var err error
-		if ec != nil && len(ec.GrantedPermissions) > 0 {
-			result, err = se.builtinRunner.RunWithPermissions(ctx, step.Name, step.Arguments, ec.GrantedPermissions)
-		} else {
-			result, err = se.builtinRunner.Run(ctx, step.Name, step.Arguments)
-		}
-		duration := time.Since(start)
-		if err != nil {
-			return &execution.StepResult{
-				StepID:   step.StepID,
-				StepName: step.Name,
-				Type:     string(step.Type),
-				Error:    err,
-				Duration: duration,
-			}, err
-		}
+	// Route to prefix-matched runner first, then default toolRunner.
+	if runner := se.lookupRunner(step.Name); runner != nil {
+		return se.executeWithRunner(ctx, runner, step, ec, stepTimeout, start)
+	}
+
+	if se.toolRunner == nil {
 		return &execution.StepResult{
 			StepID:   step.StepID,
 			StepName: step.Name,
 			Type:     string(step.Type),
-			Output:   result,
-			Duration: duration,
-		}, nil
-
-	case runnerMCP:
-		return se.executeWithToolRunner(ctx, se.mcpRunner, step, ec, stepTimeout, start)
-
-	default:
-		if se.toolRunner == nil {
-			return &execution.StepResult{
-				StepID:   step.StepID,
-				StepName: step.Name,
-				Type:     string(step.Type),
-				Error:    fmt.Errorf("no tool runner configured"),
-				Duration: time.Since(start),
-			}, fmt.Errorf("tool step %q skipped: no tool runner configured", step.Name)
-		}
-		return se.executeWithToolRunner(ctx, se.toolRunner, step, ec, stepTimeout, start)
+			Error:    fmt.Errorf("no tool runner configured"),
+			Duration: time.Since(start),
+		}, fmt.Errorf("tool step %q skipped: no tool runner configured", step.Name)
 	}
+	return se.executeWithRunner(ctx, se.toolRunner, step, ec, stepTimeout, start)
 }
 
-// executeWithToolRunner handles the common pattern of running a tool via a ToolRunner
-// interface with timeout context management and result mapping.
-func (se *StepExecutor) executeWithToolRunner(
+// executeWithRunner handles tool execution via any ToolRunner with timeout management.
+func (se *StepExecutor) executeWithRunner(
 	ctx context.Context,
 	runner toolrunner.ToolRunner,
 	step *execution.ExecutionStep,
@@ -177,19 +132,13 @@ func (se *StepExecutor) executeWithToolRunner(
 	if err != nil {
 		if ctx.Err() != nil {
 			return &execution.StepResult{
-				StepID:   step.StepID,
-				StepName: step.Name,
-				Type:     string(step.Type),
-				Error:    ctx.Err(),
-				Duration: duration,
+				StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
+				Error: ctx.Err(), Duration: duration,
 			}, ctx.Err()
 		}
 		return &execution.StepResult{
-			StepID:   step.StepID,
-			StepName: step.Name,
-			Type:     string(step.Type),
-			Error:    err,
-			Duration: duration,
+			StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
+			Error: err, Duration: duration,
 		}, err
 	}
 
@@ -199,18 +148,12 @@ func (se *StepExecutor) executeWithToolRunner(
 	}
 
 	return &execution.StepResult{
-		StepID:   step.StepID,
-		StepName: step.Name,
-		Type:     string(step.Type),
-		Output:   output,
-		Duration: duration,
+		StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
+		Output: output, Duration: duration,
 	}, nil
 }
 
 // ExecuteSkill runs a single skill step.
-// If the step name has a recognized prefix ("mcp." or "builtin.") and the
-// corresponding runner is configured, it is routed to ExecuteTool regardless
-// of step type.
 func (se *StepExecutor) ExecuteSkill(
 	ctx context.Context,
 	step *execution.ExecutionStep,
@@ -218,13 +161,11 @@ func (se *StepExecutor) ExecuteSkill(
 	prevResults map[string]any,
 	stepTimeout time.Duration,
 ) (*execution.StepResult, error) {
-	switch se.route(step.Name) {
-	case runnerBuiltin, runnerMCP:
+	// Prefix-routed steps (mcp.*, builtin.*) are handled as tool steps.
+	if se.lookupRunner(step.Name) != nil {
 		return se.ExecuteTool(ctx, step, ec, prevResults, stepTimeout)
-	default:
 	}
 
-	// Clone arguments before mutation (same rationale as ExecuteTool).
 	step = step.Clone()
 	if n := step.CoerceStringNumbers(); n > 0 {
 		slog.DebugContext(ctx, "step_executor: coerced argument types", "step", step.Name, "count", n)
@@ -235,22 +176,16 @@ func (se *StepExecutor) ExecuteSkill(
 
 	if se.skillExecutor == nil {
 		return &execution.StepResult{
-			StepID:   step.StepID,
-			StepName: step.Name,
-			Type:     string(step.Type),
-			Error:    fmt.Errorf("no skill executor configured"),
-			Duration: time.Since(start),
+			StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
+			Error: fmt.Errorf("no skill executor configured"), Duration: time.Since(start),
 		}, fmt.Errorf("skill step %q skipped: no skill executor configured", step.Name)
 	}
 
 	inputBytes, err := step.ArgumentsJSON()
 	if err != nil {
 		return &execution.StepResult{
-			StepID:   step.StepID,
-			StepName: step.Name,
-			Type:     string(step.Type),
-			Error:    fmt.Errorf("serialize arguments: %w", err),
-			Duration: time.Since(start),
+			StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
+			Error: fmt.Errorf("serialize arguments: %w", err), Duration: time.Since(start),
 		}, fmt.Errorf("skill step %q: serialize arguments: %w", step.Name, err)
 	}
 
@@ -268,7 +203,6 @@ func (se *StepExecutor) ExecuteSkill(
 		RequestID: ec.RequestID,
 	}
 
-	// Wire streaming token callback for declarative (LLM-based) skills
 	if ec.ProgressFn != nil {
 		req.TokenFn = func(token string) {
 			ec.ProgressFn("token", token, 0, "")
@@ -281,19 +215,13 @@ func (se *StepExecutor) ExecuteSkill(
 	if err != nil {
 		if ctx.Err() != nil {
 			return &execution.StepResult{
-				StepID:   step.StepID,
-				StepName: step.Name,
-				Type:     string(step.Type),
-				Error:    ctx.Err(),
-				Duration: duration,
+				StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
+				Error: ctx.Err(), Duration: duration,
 			}, ctx.Err()
 		}
 		return &execution.StepResult{
-			StepID:   step.StepID,
-			StepName: step.Name,
-			Type:     string(step.Type),
-			Error:    err,
-			Duration: duration,
+			StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
+			Error: err, Duration: duration,
 		}, err
 	}
 
@@ -303,11 +231,8 @@ func (se *StepExecutor) ExecuteSkill(
 	}
 
 	return &execution.StepResult{
-		StepID:   step.StepID,
-		StepName: step.Name,
-		Type:     string(step.Type),
-		Output:   output,
-		Duration: duration,
+		StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
+		Output: output, Duration: duration,
 	}, nil
 }
 
@@ -329,12 +254,10 @@ func (se *StepExecutor) ExecuteFallback(
 }
 
 // ArgumentsToMap converts step arguments to a map for template resolution.
-// This is a convenience function for result passing between steps.
 func ArgumentsToMap(result *execution.StepResult) map[string]any {
 	if result == nil {
 		return nil
 	}
-	// Try to parse output as JSON if it's a string
 	if str, ok := result.Output.(string); ok && str != "" {
 		var m map[string]any
 		if err := json.Unmarshal([]byte(str), &m); err == nil {

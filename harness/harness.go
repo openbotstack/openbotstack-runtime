@@ -14,7 +14,6 @@ import (
 	"github.com/openbotstack/openbotstack-core/execution/template"
 	"github.com/openbotstack/openbotstack-core/planner"
 	"github.com/openbotstack/openbotstack-runtime/logging/execution_logs"
-	builtintools "github.com/openbotstack/openbotstack-runtime/tools/builtin"
 	"github.com/openbotstack/openbotstack-runtime/toolrunner"
 )
 
@@ -33,7 +32,7 @@ type HarnessDeps struct {
 	LLMGenerator    LLMGenerator
 	AuditLogger     execution_logs.AuditLogger
 	MCPRunner       toolrunner.ToolRunner
-	BuiltinRunner   *builtintools.BuiltinToolRunner
+	BuiltinRunner   toolrunner.ToolRunner
 	HookManager     *HookManager
 	FailureHandler  *FailureHandler
 	PermChecker     *PermissionChecker

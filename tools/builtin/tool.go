@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/openbotstack/openbotstack-core/execution"
 )
 
 // BuiltinTool is a platform-primitive tool with no business logic.
@@ -96,6 +98,22 @@ func (r *BuiltinToolRunner) AllPermissions() []string {
 		}
 	}
 	return perms
+}
+
+// Execute implements toolrunner.ToolRunner. It dispatches to Run or RunWithPermissions
+// based on whether the ExecutionContext carries granted permissions.
+func (r *BuiltinToolRunner) Execute(ctx context.Context, toolID string, input map[string]any, ec *execution.ExecutionContext) (*execution.StepResult, error) {
+	var output map[string]any
+	var err error
+	if ec != nil && len(ec.GrantedPermissions) > 0 {
+		output, err = r.RunWithPermissions(ctx, toolID, input, ec.GrantedPermissions)
+	} else {
+		output, err = r.Run(ctx, toolID, input)
+	}
+	if err != nil {
+		return &execution.StepResult{StepName: toolID, Type: "tool", Error: err}, err
+	}
+	return &execution.StepResult{StepName: toolID, Type: "tool", Output: output}, nil
 }
 
 func stripPrefix(id string) string {
