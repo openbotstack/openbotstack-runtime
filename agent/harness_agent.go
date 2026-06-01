@@ -13,7 +13,8 @@ import (
 	"github.com/openbotstack/openbotstack-core/assistant"
 	"github.com/openbotstack/openbotstack-core/audit"
 	"github.com/openbotstack/openbotstack-core/capability"
-	csSkills "github.com/openbotstack/openbotstack-core/control/skills"
+	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
+
 	corecontext "github.com/openbotstack/openbotstack-core/context"
 	"github.com/openbotstack/openbotstack-core/execution"
 	"github.com/openbotstack/openbotstack-core/memory/abstraction"
@@ -95,7 +96,7 @@ func (a *HarnessAgent) SetMemoryManager(mm abstraction.MemoryManager)      { a.m
 
 // buildPlannerContext assembles the PlannerContext: loads history, enriches via
 // ContextAssembler, retrieves memory, and constructs the planning context.
-func (a *HarnessAgent) buildPlannerContext(ctx context.Context, req agent.MessageRequest, skillDescs []csSkills.SkillDescriptor, capDescs []capability.CapabilityDescriptor) (*planner.PlannerContext, error) {
+func (a *HarnessAgent) buildPlannerContext(ctx context.Context, req agent.MessageRequest, skillDescs []aitypes.SkillDescriptor, capDescs []capability.CapabilityDescriptor) (*planner.PlannerContext, error) {
 	var conversationHistory []agent.Message
 	if a.conversationStore != nil && req.SessionID != "" {
 		conversationHistory = a.loadHistory(ctx, req)
@@ -384,16 +385,16 @@ func stepResultsToAuditTrail(results []execution.StepResult, traceID string) []a
 	return entries
 }
 
-func (a *HarnessAgent) gatherSkillDescriptors() ([]csSkills.SkillDescriptor, []capability.CapabilityDescriptor, error) {
+func (a *HarnessAgent) gatherSkillDescriptors() ([]aitypes.SkillDescriptor, []capability.CapabilityDescriptor, error) {
 	if a.capRegistry != nil {
 		caps := a.capRegistry.List()
-		descs := make([]csSkills.SkillDescriptor, 0, len(caps))
+		descs := make([]aitypes.SkillDescriptor, 0, len(caps))
 		capDescs := make([]capability.CapabilityDescriptor, 0, len(caps))
 		for _, c := range caps {
 			if a.skillDisabled != nil && a.skillDisabled(c.ID) {
 				continue
 			}
-			descs = append(descs, csSkills.SkillDescriptor{
+			descs = append(descs, aitypes.SkillDescriptor{
 				ID:          c.ID,
 				Name:        c.Name,
 				Description: c.Description,
@@ -406,7 +407,7 @@ func (a *HarnessAgent) gatherSkillDescriptors() ([]csSkills.SkillDescriptor, []c
 		return descs, capDescs, nil
 	}
 	ids := a.skillRegistry.List()
-	descs := make([]csSkills.SkillDescriptor, 0, len(ids))
+	descs := make([]aitypes.SkillDescriptor, 0, len(ids))
 	for _, id := range ids {
 		if a.skillDisabled != nil && a.skillDisabled(id) {
 			continue

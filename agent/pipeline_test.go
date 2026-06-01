@@ -6,7 +6,7 @@ import (
 
 	agent "github.com/openbotstack/openbotstack-core/control/agent"
 	"github.com/openbotstack/openbotstack-core/assistant"
-	csSkills "github.com/openbotstack/openbotstack-core/control/skills"
+	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
 	"github.com/openbotstack/openbotstack-core/planner"
 )
 
@@ -37,7 +37,7 @@ func TestBuildPlannerContext_SetsAssistantIdentity(t *testing.T) {
 	req := agent.MessageRequest{
 		TenantID: "t1", UserID: "u1", SessionID: "s1", Message: "hello",
 	}
-	skillDescs := []csSkills.SkillDescriptor{
+	skillDescs := []aitypes.SkillDescriptor{
 		{ID: "skill-1", Name: "Test", Description: "A test skill"},
 	}
 

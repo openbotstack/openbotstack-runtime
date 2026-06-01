@@ -16,7 +16,7 @@ import (
 
 	"github.com/openbotstack/openbotstack-core/ai/types"
 	"github.com/openbotstack/openbotstack-core/audit"
-	"github.com/openbotstack/openbotstack-core/control/skills"
+	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
 	"github.com/openbotstack/openbotstack-core/execution"
 	registry "github.com/openbotstack/openbotstack-core/registry/skills"
 	skilloperator "github.com/openbotstack/openbotstack-runtime/executor/skill_executor"
@@ -1856,7 +1856,7 @@ func TestE2E_SkillDescriptor_AllFields(t *testing.T) {
 		},
 		Required: []string{"text"},
 	}
-	desc := skills.SkillDescriptor{
+	desc := aitypes.SkillDescriptor{
 		ID:          "test/skill",
 		Name:        "Test Skill",
 		Description: "A test skill descriptor",
@@ -3443,7 +3443,7 @@ func TestE2E_SpecAlign_ProgressiveLoading_PlannerSeesNoBody(t *testing.T) {
 	}
 
 	// Planner only needs name + description
-	desc := skills.SkillDescriptor{
+	desc := aitypes.SkillDescriptor{
 		ID:          registry.DeriveSkillID(dir),
 		Name:        smd.Name,
 		Description: smd.Description,

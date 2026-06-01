@@ -4,24 +4,24 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openbotstack/openbotstack-core/control/skills"
+	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
 	"github.com/openbotstack/openbotstack-core/planner"
 )
 
 func TestSkillDescriptorTypeIdentity(t *testing.T) {
-	// Verify that skills.SkillDescriptor is the canonical type used directly
+	// Verify that aitypes.SkillDescriptor is the canonical type used directly
 	// by both agent and planner packages (no aliases needed).
-	var sd skills.SkillDescriptor = skills.SkillDescriptor{
+	var sd aitypes.SkillDescriptor = aitypes.SkillDescriptor{
 		ID:          "core/test",
 		Name:        "Test",
 		Description: "A test skill",
-		InputSchema: &skills.JSONSchema{Type: "object"},
+		InputSchema: &aitypes.JSONSchema{Type: "object"},
 	}
 
 	_ = sd
 
-	// Slice of skills.SkillDescriptor must be assignable to planner.PlannerContext.Skills
-	skillSlice := []skills.SkillDescriptor{sd}
+	// Slice of aitypes.SkillDescriptor must be assignable to planner.PlannerContext.Skills
+	skillSlice := []aitypes.SkillDescriptor{sd}
 	pCtx := &planner.PlannerContext{
 		Skills: skillSlice,
 	}
@@ -43,7 +43,7 @@ func TestSkillDescriptorTypeIdentity(t *testing.T) {
 }
 
 func TestSkillDescriptorDirectPassThrough(t *testing.T) {
-	descs := []skills.SkillDescriptor{
+	descs := []aitypes.SkillDescriptor{
 		{ID: "s1", Name: "Skill1", Description: "First"},
 		{ID: "s2", Name: "Skill2", Description: "Second"},
 	}
@@ -71,10 +71,10 @@ type mockSkillForHelper struct {
 func (m *mockSkillForHelper) ID() string          { return m.id }
 func (m *mockSkillForHelper) Name() string        { return m.name }
 func (m *mockSkillForHelper) Description() string { return m.desc }
-func (m *mockSkillForHelper) InputSchema() *skills.JSONSchema {
-	return &skills.JSONSchema{Type: "object"}
+func (m *mockSkillForHelper) InputSchema() *aitypes.JSONSchema {
+	return &aitypes.JSONSchema{Type: "object"}
 }
-func (m *mockSkillForHelper) OutputSchema() *skills.JSONSchema       { return nil }
+func (m *mockSkillForHelper) OutputSchema() *aitypes.JSONSchema       { return nil }
 func (m *mockSkillForHelper) RequiredPermissions() []string          { return nil }
 func (m *mockSkillForHelper) Timeout() time.Duration                 { return 0 }
 func (m *mockSkillForHelper) Validate() error                        { return nil }
