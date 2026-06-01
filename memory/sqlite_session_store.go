@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	"github.com/openbotstack/openbotstack-runtime/api/middleware"
 )
 
 // SQLiteSessionStateStore implements SessionStateStore using SQLite.
@@ -31,6 +33,13 @@ func NewSQLiteSessionStateStore(db *sql.DB, opts ...SessionStoreOption) *SQLiteS
 		opt(s)
 	}
 	return s
+}
+
+func tenantFromCtx(ctx context.Context) string {
+	if user, ok := middleware.UserFromContext(ctx); ok {
+		return user.TenantID
+	}
+	return ""
 }
 
 // requireTenant returns the tenant ID from context or an error if strict mode is enabled

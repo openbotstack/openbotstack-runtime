@@ -4,7 +4,29 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/openbotstack/openbotstack-runtime/api/middleware"
+	"github.com/openbotstack/openbotstack-runtime/persistence"
+
+	auth "github.com/openbotstack/openbotstack-core/access/auth"
 )
+
+func setupMemoryTestDB(t *testing.T) *persistence.DB {
+	t.Helper()
+	db, err := persistence.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	return db
+}
+
+func ctxWithTenant(tenantID string) context.Context {
+	user := &auth.User{ID: "user1", TenantID: tenantID, Name: "Test"}
+	return middleware.WithUser(context.Background(), user)
+}
 
 func TestSessionStateStore_UpsertCreate(t *testing.T) {
 	db := setupMemoryTestDB(t)

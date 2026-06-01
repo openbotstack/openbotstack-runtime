@@ -31,16 +31,6 @@ type SessionInfo struct {
 	UpdatedAt time.Time // timestamp of the last entry
 }
 
-// ShortTermStore provides TTL-based short-term memory operations.
-// Session metadata listing is handled by SessionStateStore.
-type ShortTermStore interface {
-	Store(ctx context.Context, entry Entry) error
-	Retrieve(ctx context.Context, id string) (*Entry, error)
-	ListBySession(ctx context.Context, sessionID string) ([]Entry, error)
-	Delete(ctx context.Context, id string) error
-	ClearSession(ctx context.Context, sessionID string) error
-}
-
 // SessionMeta contains the data needed to create or update a session metadata record.
 type SessionMeta struct {
 	SessionID          string
