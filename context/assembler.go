@@ -27,6 +27,10 @@ type skillGetter interface {
 type RuntimeContextAssembler struct {
 	registry      skillGetter
 	memoryManager abstraction.MemoryManager
+	// prefetchedMemories, when non-nil, bypasses the internal RetrieveSimilar call
+	// and uses these memories instead. This prevents duplicate retrieval when
+	// HarnessAgent already fetched memories via ConversationManager.
+	prefetchedMemories []abstraction.MemoryEntry
 }
 
 // NewRuntimeContextAssembler creates a new context assembler.
@@ -36,6 +40,12 @@ func NewRuntimeContextAssembler(registry skillGetter, memoryManager abstraction.
 		registry:      registry,
 		memoryManager: memoryManager,
 	}
+}
+
+// SetPrefetchedMemories configures the assembler to use pre-fetched memories
+// instead of calling RetrieveSimilar internally. Pass nil to disable.
+func (a *RuntimeContextAssembler) SetPrefetchedMemories(memories []abstraction.MemoryEntry) {
+	a.prefetchedMemories = memories
 }
 
 // Assemble builds the complete context for an LLM request.
@@ -48,9 +58,13 @@ func (a *RuntimeContextAssembler) Assemble(
 	// 1. Build system prompt from persona + base prompt
 	systemPrompt := buildPersonaSystemPrompt(assistant.Persona, assistant.BaseSystemPrompt)
 
-	// 2. Retrieve relevant memories (best-effort)
+	// 2. Retrieve relevant memories (best-effort).
+	// If prefetched memories were provided (e.g., by ConversationManager), use those
+	// to avoid duplicate RetrieveSimilar calls.
 	var relevantMemories []abstraction.MemoryEntry
-	if a.memoryManager != nil && request.Message != "" {
+	if a.prefetchedMemories != nil {
+		relevantMemories = a.prefetchedMemories
+	} else if a.memoryManager != nil && request.Message != "" {
 		memories, err := a.memoryManager.RetrieveSimilar(ctx, request.Message, 5)
 		if err != nil {
 			slog.WarnContext(ctx, "context assembler: memory retrieval failed",

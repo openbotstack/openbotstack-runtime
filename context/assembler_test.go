@@ -435,3 +435,90 @@ func (m *successMemoryManager) Forget(_ context.Context, _ string) error { retur
 func (m *successMemoryManager) Summarize(_ context.Context, _ []abstraction.MemoryEntry) (abstraction.MemoryEntry, error) {
 	return abstraction.MemoryEntry{}, nil
 }
+
+// trackingMemoryManager tracks RetrieveSimilar calls for deduplication tests.
+type trackingMemoryManager struct {
+	entries     []abstraction.MemoryEntry
+	callCount   int
+	retrieveErr error
+}
+
+func (m *trackingMemoryManager) StoreShortTerm(_ context.Context, _ abstraction.MemoryEntry) error {
+	return nil
+}
+func (m *trackingMemoryManager) StoreLongTerm(_ context.Context, _ abstraction.MemoryEntry) error {
+	return nil
+}
+func (m *trackingMemoryManager) RetrieveSimilar(_ context.Context, _ string, _ int) ([]abstraction.MemoryEntry, error) {
+	m.callCount++
+	if m.retrieveErr != nil {
+		return nil, m.retrieveErr
+	}
+	return m.entries, nil
+}
+func (m *trackingMemoryManager) RetrieveByTag(_ context.Context, _ []string, _ int) ([]abstraction.MemoryEntry, error) {
+	return nil, nil
+}
+func (m *trackingMemoryManager) Forget(_ context.Context, _ string) error { return nil }
+func (m *trackingMemoryManager) Summarize(_ context.Context, _ []abstraction.MemoryEntry) (abstraction.MemoryEntry, error) {
+	return abstraction.MemoryEntry{}, nil
+}
+
+func TestAssemble_PrefetchedMemoriesBypassInternalRetrieval(t *testing.T) {
+	tracker := &trackingMemoryManager{
+		entries: []abstraction.MemoryEntry{
+			{Content: "internal retrieval result"},
+		},
+	}
+	assembler := NewRuntimeContextAssembler(nil, tracker)
+	prefetched := []abstraction.MemoryEntry{
+		{Content: "prefetched result 1"},
+		{Content: "prefetched result 2"},
+	}
+	assembler.SetPrefetchedMemories(prefetched)
+
+	result, err := assembler.Assemble(
+		context.Background(),
+		corecontext.AssistantContext{ProfileID: "test"},
+		corecontext.UserRequest{Message: "hello"},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("Assemble failed: %v", err)
+	}
+	if tracker.callCount != 0 {
+		t.Errorf("RetrieveSimilar called %d times, want 0 (should use prefetched)", tracker.callCount)
+	}
+	if len(result.RelevantMemories) != 2 {
+		t.Fatalf("expected 2 relevant memories, got %d", len(result.RelevantMemories))
+	}
+	if result.RelevantMemories[0].Content != "prefetched result 1" {
+		t.Errorf("memory[0] = %q, want %q", result.RelevantMemories[0].Content, "prefetched result 1")
+	}
+}
+
+func TestAssemble_PrefetchedNil_FallsBackToMemoryManager(t *testing.T) {
+	tracker := &trackingMemoryManager{
+		entries: []abstraction.MemoryEntry{
+			{Content: "from memory manager"},
+		},
+	}
+	assembler := NewRuntimeContextAssembler(nil, tracker)
+	assembler.SetPrefetchedMemories(nil)
+
+	result, err := assembler.Assemble(
+		context.Background(),
+		corecontext.AssistantContext{ProfileID: "test"},
+		corecontext.UserRequest{Message: "hello"},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("Assemble failed: %v", err)
+	}
+	if tracker.callCount != 1 {
+		t.Errorf("RetrieveSimilar called %d times, want 1 (should use fallback)", tracker.callCount)
+	}
+	if len(result.RelevantMemories) != 1 {
+		t.Fatalf("expected 1 relevant memory, got %d", len(result.RelevantMemories))
+	}
+}

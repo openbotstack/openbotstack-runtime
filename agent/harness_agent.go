@@ -20,8 +20,9 @@ import (
 	"github.com/openbotstack/openbotstack-core/memory/abstraction"
 	"github.com/openbotstack/openbotstack-core/planner"
 	"github.com/openbotstack/openbotstack-core/registry/skills"
-	rtmemory "github.com/openbotstack/openbotstack-runtime/memory"
 	"github.com/openbotstack/openbotstack-runtime/harness"
+	rtcontext "github.com/openbotstack/openbotstack-runtime/context"
+	rtmemory "github.com/openbotstack/openbotstack-runtime/memory"
 )
 
 // skillLister is a minimal interface for listing and getting skills.
@@ -43,11 +44,12 @@ type HarnessAgentConfig struct {
 	SkillDisabled func(id string) bool
 
 	// Session state (optional — nil = feature disabled)
-	ConversationStore  coreagent.ConversationStore
-	ContextAssembler   corecontext.ContextAssembler
-	MemoryManager      abstraction.MemoryManager
-	ReasoningStore     harness.ReasoningStorer
-	MaxHistoryMessages int // defaults to 50 if zero
+	ConversationStore   coreagent.ConversationStore
+	ContextAssembler    corecontext.ContextAssembler
+	MemoryManager       abstraction.MemoryManager
+	ConversationMgr     *rtmemory.ConversationManager
+	ReasoningStore      harness.ReasoningStorer
+	MaxHistoryMessages  int // defaults to 50 if zero
 
 	// Permission grants for builtin tools (read_file, write_file, web_fetch).
 	GrantedPermissions []string
@@ -67,6 +69,7 @@ type HarnessAgent struct {
 	conversationStore  coreagent.ConversationStore
 	contextAssembler   corecontext.ContextAssembler
 	memoryManager      abstraction.MemoryManager
+	conversationMgr    *rtmemory.ConversationManager
 	reasoningStore     harness.ReasoningStorer
 	maxHistoryMessages int
 	grantedPermissions []string
@@ -89,6 +92,7 @@ func NewHarnessAgent(cfg HarnessAgentConfig) *HarnessAgent {
 		conversationStore:  cfg.ConversationStore,
 		contextAssembler:   cfg.ContextAssembler,
 		memoryManager:      cfg.MemoryManager,
+		conversationMgr:    cfg.ConversationMgr,
 		workflowResolver:    cfg.WorkflowResolver,
 		skillDisabled:      cfg.SkillDisabled,
 		reasoningStore:     cfg.ReasoningStore,
@@ -101,16 +105,54 @@ func (a *HarnessAgent) SetConversationStore(cs coreagent.ConversationStore) { a.
 func (a *HarnessAgent) SetMaxHistoryMessages(n int)                        { a.maxHistoryMessages = n }
 func (a *HarnessAgent) SetContextAssembler(ca corecontext.ContextAssembler) { a.contextAssembler = ca }
 func (a *HarnessAgent) SetMemoryManager(mm abstraction.MemoryManager)      { a.memoryManager = mm }
+func (a *HarnessAgent) SetConversationManager(cm *rtmemory.ConversationManager) { a.conversationMgr = cm }
 
 // buildPlannerContext assembles the PlannerContext: loads history, enriches via
 // ContextAssembler, retrieves memory, and constructs the planning context.
+// When a ConversationManager is configured, it consolidates history + memory retrieval
+// into a single call to avoid duplicate RetrieveSimilar calls.
 func (a *HarnessAgent) buildPlannerContext(ctx context.Context, req coreagent.MessageRequest, skillDescs []aitypes.SkillDescriptor, capDescs []capability.CapabilityDescriptor) (*planner.PlannerContext, error) {
 	var conversationHistory []aitypes.Message
-	if a.conversationStore != nil && req.SessionID != "" {
-		conversationHistory = a.loadHistory(ctx, req)
+	var memoryEntries []abstraction.MemoryEntry
+
+	// Use ConversationManager for consolidated retrieval when available
+	if a.conversationMgr != nil && req.SessionID != "" {
+		convCtx, err := a.conversationMgr.GetConversationContext(ctx, req.SessionID, req.Message, req.TenantID, req.UserID)
+		if err != nil {
+			slog.WarnContext(ctx, "harness_agent: conversation context loading failed", "error", err)
+		} else if convCtx != nil {
+			conversationHistory = convCtx.History
+			memoryEntries = convCtx.MemoryEntries
+		}
+	} else {
+		// Fallback: load history directly when ConversationManager is not configured
+		if a.conversationStore != nil && req.SessionID != "" {
+			conversationHistory = a.loadHistory(ctx, req)
+		}
+
+		// Fallback: retrieve memories directly
+		if a.memoryManager != nil && req.Message != "" {
+			memCtx := rtmemory.ScopeWithMemory(ctx, rtmemory.MemoryScope{
+				TenantID:  req.TenantID,
+				UserID:    req.UserID,
+				SessionID: req.SessionID,
+			})
+			entries, err := a.memoryManager.RetrieveSimilar(memCtx, req.Message, defaultMemoryRetrievalLimit)
+			if err != nil {
+				slog.WarnContext(ctx, "harness_agent: memory retrieval failed", "error", err)
+			} else if len(entries) > 0 {
+				memoryEntries = entries
+			}
+		}
 	}
 
+	// Pass pre-fetched memories to context assembler to prevent duplicate retrieval
 	if a.contextAssembler != nil {
+		// If we already have memories, set them on the assembler before calling Assemble
+		if ca, ok := a.contextAssembler.(*rtcontext.RuntimeContextAssembler); ok && memoryEntries != nil {
+			ca.SetPrefetchedMemories(memoryEntries)
+		}
+
 		assembled, err := a.contextAssembler.Assemble(ctx,
 			corecontext.AssistantContext{
 				ProfileID:       a.runtime.AssistantID,
@@ -132,22 +174,12 @@ func (a *HarnessAgent) buildPlannerContext(ctx context.Context, req coreagent.Me
 	}
 
 	var memoryContext []planner.SearchResult
-	if a.memoryManager != nil && req.Message != "" {
-		memCtx := rtmemory.ScopeWithMemory(ctx, rtmemory.MemoryScope{
-			TenantID:  req.TenantID,
-			UserID:    req.UserID,
-			SessionID: req.SessionID,
-		})
-		entries, err := a.memoryManager.RetrieveSimilar(memCtx, req.Message, defaultMemoryRetrievalLimit)
-		if err != nil {
-			slog.WarnContext(ctx, "harness_agent: memory retrieval failed", "error", err)
-		} else if len(entries) > 0 {
-			memoryContext = make([]planner.SearchResult, len(entries))
-			for i, e := range entries {
-				memoryContext[i] = planner.SearchResult{
-					Content: []byte(e.Content),
-					Score:   1.0,
-				}
+	if len(memoryEntries) > 0 {
+		memoryContext = make([]planner.SearchResult, len(memoryEntries))
+		for i, e := range memoryEntries {
+			memoryContext[i] = planner.SearchResult{
+				Content: []byte(e.Content),
+				Score:   1.0,
 			}
 		}
 	}

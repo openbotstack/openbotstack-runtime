@@ -430,10 +430,16 @@ func (b *ServerBuilder) InitMemory() *ServerBuilder {
 	}
 
 	contextAssembler := contextassembler.NewRuntimeContextAssembler(b.exec, memoryBridge)
+
+	// Create ConversationManager to consolidate history + memory retrieval,
+	// preventing duplicate RetrieveSimilar calls between HarnessAgent and ContextAssembler.
+	conversationMgr := memory.NewConversationManager(convStore, memoryBridge, b.cfg.Memory.MaxHistoryMessages)
+
 	switch a := b.apiAgent.(type) {
 	case *agentpkg.HarnessAgent:
 		a.SetContextAssembler(contextAssembler)
 		a.SetMemoryManager(memoryBridge)
+		a.SetConversationManager(conversationMgr)
 	}
 	slog.Info("context assembler initialized")
 
