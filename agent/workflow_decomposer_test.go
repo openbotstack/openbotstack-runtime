@@ -4,10 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openbotstack/openbotstack-core/assistant"
+	"github.com/openbotstack/openbotstack-core/planner"
 	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
 	"github.com/openbotstack/openbotstack-core/execution"
-	"github.com/openbotstack/openbotstack-core/planner"
 )
 
 func TestDecomposeToTasks_EmptySteps(t *testing.T) {
@@ -31,7 +30,7 @@ func TestDecomposeToTasks_SingleStep(t *testing.T) {
 	}
 	baseCtx := &planner.PlannerContext{
 		AssistantID:   "asst1",
-		MemoryContext: []assistant.SearchResult{{Content: []byte("mem1"), Score: 0.9}},
+		MemoryContext: []planner.SearchResult{{Content: []byte("mem1"), Score: 0.9}},
 		Skills:        []aitypes.SkillDescriptor{{ID: "s1"}},
 		UserRequest:   "original request",
 	}
@@ -64,7 +63,7 @@ func TestDecomposeToTasks_MultipleSteps(t *testing.T) {
 	}
 	baseCtx := &planner.PlannerContext{
 		AssistantID:   "asst1",
-		MemoryContext: []assistant.SearchResult{{Content: []byte("mem1"), Score: 0.9}},
+		MemoryContext: []planner.SearchResult{{Content: []byte("mem1"), Score: 0.9}},
 	}
 
 	tasks, err := DecomposeToTasks(wf, map[string]any{}, baseCtx)
@@ -86,7 +85,7 @@ func TestDecomposeToTasks_MemoryContextIsolation(t *testing.T) {
 	}
 	baseCtx := &planner.PlannerContext{
 		AssistantID:   "asst1",
-		MemoryContext: []assistant.SearchResult{{Content: []byte("base")}},
+		MemoryContext: []planner.SearchResult{{Content: []byte("base")}},
 	}
 
 	tasks, err := DecomposeToTasks(wf, map[string]any{}, baseCtx)
@@ -95,7 +94,7 @@ func TestDecomposeToTasks_MemoryContextIsolation(t *testing.T) {
 	}
 
 	// Verify deep copy: modifying one task's MemoryContext should not affect others
-	tasks[0].PlannerContext.MemoryContext = append(tasks[0].PlannerContext.MemoryContext, assistant.SearchResult{Content: []byte("polluted")})
+	tasks[0].PlannerContext.MemoryContext = append(tasks[0].PlannerContext.MemoryContext, planner.SearchResult{Content: []byte("polluted")})
 
 	if len(tasks[1].PlannerContext.MemoryContext) != 1 {
 		t.Errorf("task 2 MemoryContext len = %d, want 1 (not polluted)", len(tasks[1].PlannerContext.MemoryContext))

@@ -6,9 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/openbotstack/openbotstack-core/assistant"
-	"github.com/openbotstack/openbotstack-core/execution"
 	"github.com/openbotstack/openbotstack-core/planner"
+	"github.com/openbotstack/openbotstack-core/execution"
 	"github.com/openbotstack/openbotstack-core/registry/skills"
 )
 
@@ -158,7 +157,7 @@ func testEC() *execution.ExecutionContext {
 func testPCtx(request string) *planner.PlannerContext {
 	return &planner.PlannerContext{
 		UserRequest:   request,
-		MemoryContext: []assistant.SearchResult{},
+		MemoryContext: []planner.SearchResult{},
 	}
 }
 

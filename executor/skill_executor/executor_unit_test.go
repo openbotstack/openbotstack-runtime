@@ -471,6 +471,60 @@ func TestExecutePlan_ContextCancellation(t *testing.T) {
 	}
 }
 
+// TestExecutePlan_UsesStepExecutor verifies that ExecutePlan dispatches through
+// harness.StepExecutor (the canonical dispatch point) rather than the removed
+// StepRunner. This test uses a tool step to confirm StepExecutor's prefix-based
+// routing is active.
+func TestExecutePlan_UsesStepExecutor_ToolStepWithRunner(t *testing.T) {
+	e := executor.NewDefaultExecutor()
+	ctx := context.Background()
+
+	// Set up a mock tool runner that records calls
+	called := false
+	mockRunner := &recordingToolRunner{fn: func(name string, args map[string]any) (*execution.StepResult, error) {
+		called = true
+		if name != "my_tool" {
+			t.Errorf("tool name = %q, want %q", name, "my_tool")
+		}
+		return &execution.StepResult{StepName: name, Output: "tool-output"}, nil
+	}}
+	e.SetToolRunner(mockRunner)
+
+	ec := execution.NewExecutionContext(ctx, "req", "", "", "t1", "u1")
+
+	plan := &execution.ExecutionPlan{
+		Steps: []execution.ExecutionStep{
+			{Name: "my_tool", Type: execution.StepTypeTool, Arguments: map[string]any{"key": "value"}},
+		},
+	}
+	_ = plan.Validate()
+
+	err := e.ExecutePlan(ctx, plan, ec)
+	if err != nil {
+		t.Fatalf("ExecutePlan failed: %v", err)
+	}
+	if !called {
+		t.Error("tool runner should have been called via StepExecutor dispatch")
+	}
+
+	results := ec.Results()
+	if len(results) != 1 {
+		t.Fatalf("Expected 1 result, got %d", len(results))
+	}
+	if results[0].StepName != "my_tool" {
+		t.Errorf("StepName = %q, want %q", results[0].StepName, "my_tool")
+	}
+}
+
+// recordingToolRunner is a tool runner that records calls for testing.
+type recordingToolRunner struct {
+	fn func(name string, args map[string]any) (*execution.StepResult, error)
+}
+
+func (m *recordingToolRunner) Execute(_ context.Context, name string, args map[string]any, _ *execution.ExecutionContext) (*execution.StepResult, error) {
+	return m.fn(name, args)
+}
+
 // ============================================================================
 // Wasm Fallback Tests
 // ============================================================================

@@ -1,30 +1,29 @@
-package adapters
+package api
 
 import (
 	"context"
 	"log/slog"
 	"time"
 
-	"github.com/openbotstack/openbotstack-core/control/agent"
-	"github.com/openbotstack/openbotstack-runtime/api"
+	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
 	"github.com/openbotstack/openbotstack-runtime/api/middleware"
 	"github.com/openbotstack/openbotstack-runtime/memory"
 )
 
-// HistoryProvider adapts memory stores to the api.HistoryProvider interface.
+// HistoryProviderImpl adapts memory stores to the HistoryProvider interface.
 // Uses SQLite (SessionStateStore) for fast session listing, Markdown for content.
-type HistoryProvider struct {
+type HistoryProviderImpl struct {
 	mdStore      *memory.MarkdownMemoryStore
 	sessionState memory.SessionStateStore
 }
 
 // NewHistoryProvider creates a new HistoryProvider adapter.
-func NewHistoryProvider(mdStore *memory.MarkdownMemoryStore, sessionState memory.SessionStateStore) *HistoryProvider {
-	return &HistoryProvider{mdStore: mdStore, sessionState: sessionState}
+func NewHistoryProvider(mdStore *memory.MarkdownMemoryStore, sessionState memory.SessionStateStore) *HistoryProviderImpl {
+	return &HistoryProviderImpl{mdStore: mdStore, sessionState: sessionState}
 }
 
 // GetSessionHistory retrieves messages for a session.
-func (p *HistoryProvider) GetSessionHistory(ctx context.Context, sessionID string) ([]agent.Message, error) {
+func (p *HistoryProviderImpl) GetSessionHistory(ctx context.Context, sessionID string) ([]aitypes.Message, error) {
 	if p.sessionState != nil {
 		si, err := p.sessionState.GetSession(ctx, sessionID)
 		if err == nil && si != nil && p.mdStore != nil {
@@ -41,18 +40,18 @@ func (p *HistoryProvider) GetSessionHistory(ctx context.Context, sessionID strin
 		}
 		return msgs, nil
 	}
-	return []agent.Message{}, nil
+	return []aitypes.Message{}, nil
 }
 
 // ListSessions returns all sessions for the current tenant.
-func (p *HistoryProvider) ListSessions(ctx context.Context) ([]api.SessionSummary, error) {
+func (p *HistoryProviderImpl) ListSessions(ctx context.Context) ([]SessionSummary, error) {
 	if p.sessionState != nil {
 		sessions, err := p.sessionState.ListSessions(ctx)
 		if err != nil {
 			return nil, err
 		}
 		if len(sessions) > 0 {
-			return convertSummaries(sessions), nil
+			return convertSessionSummaries(sessions), nil
 		}
 	}
 	if p.mdStore != nil {
@@ -64,13 +63,13 @@ func (p *HistoryProvider) ListSessions(ctx context.Context) ([]api.SessionSummar
 		if err != nil {
 			return nil, err
 		}
-		return convertSummaries(sessions), nil
+		return convertSessionSummaries(sessions), nil
 	}
-	return []api.SessionSummary{}, nil
+	return []SessionSummary{}, nil
 }
 
 // DeleteSession removes all entries for a session.
-func (p *HistoryProvider) DeleteSession(ctx context.Context, sessionID string) error {
+func (p *HistoryProviderImpl) DeleteSession(ctx context.Context, sessionID string) error {
 	if p.sessionState != nil {
 		if err := p.sessionState.DeleteSession(ctx, sessionID); err != nil {
 			slog.WarnContext(ctx, "failed to delete session from SQLite", "session_id", sessionID, "error", err)
@@ -82,10 +81,10 @@ func (p *HistoryProvider) DeleteSession(ctx context.Context, sessionID string) e
 	return nil
 }
 
-func convertSummaries(sessions []memory.SessionInfo) []api.SessionSummary {
-	result := make([]api.SessionSummary, 0, len(sessions))
+func convertSessionSummaries(sessions []memory.SessionInfo) []SessionSummary {
+	result := make([]SessionSummary, 0, len(sessions))
 	for _, s := range sessions {
-		result = append(result, api.SessionSummary{
+		result = append(result, SessionSummary{
 			SessionID:  s.SessionID,
 			TenantID:   s.TenantID,
 			LastEntry:  s.LastEntry,

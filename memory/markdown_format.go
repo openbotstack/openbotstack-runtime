@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/openbotstack/openbotstack-core/control/agent"
+	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
 )
 
 // FormatFrontmatter builds YAML frontmatter from a key-value map.
@@ -99,13 +99,13 @@ var execCommentRe = regexp.MustCompile(`^<!-- exec:(.+) -->$`)
 
 // ParseMessageBlocks extracts messages from the body section.
 // Parses "## [timestamp] role" headings followed by content.
-// Returns []agent.Message with optional ExecutionID from "<!-- exec:ID -->" comments.
-func ParseMessageBlocks(body []byte) []agent.Message {
+// Returns []aitypes.Message with optional ExecutionID from "<!-- exec:ID -->" comments.
+func ParseMessageBlocks(body []byte) []aitypes.Message {
 	if len(body) == 0 {
-		return []agent.Message{}
+		return []aitypes.Message{}
 	}
 
-	var messages []agent.Message
+	var messages []aitypes.Message
 	scanner := bufio.NewScanner(bytes.NewReader(body))
 	var (
 		currentRole    string
@@ -120,7 +120,7 @@ func ParseMessageBlocks(body []byte) []agent.Message {
 			return
 		}
 		content := strings.TrimRight(currentContent.String(), "\n")
-		messages = append(messages, agent.Message{
+		messages = append(messages, aitypes.Message{
 			Role:        currentRole,
 			Content:     content,
 			ExecutionID: currentExecID,
@@ -163,7 +163,7 @@ func ParseMessageBlocks(body []byte) []agent.Message {
 	flush()
 
 	if messages == nil {
-		return []agent.Message{}
+		return []aitypes.Message{}
 	}
 	return messages
 }

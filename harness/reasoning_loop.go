@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openbotstack/openbotstack-core/assistant"
 	"github.com/openbotstack/openbotstack-core/execution"
 	"github.com/openbotstack/openbotstack-core/planner"
 )
@@ -278,7 +277,7 @@ func (rl *DefaultReasoningLoop) Run(ctx context.Context, step *execution.Executi
 			// from being interpreted as planner instructions.
 			if pCtx != nil && len(turnResult.Observations) > 0 {
 				obsStr := fmt.Sprintf("<observation turn=\"%d\">\n%v\n</observation>", turnsElapsed, turnResult.Observations)
-				pCtx.MemoryContext = append(pCtx.MemoryContext, assistant.SearchResult{
+				pCtx.MemoryContext = append(pCtx.MemoryContext, planner.SearchResult{
 					Content: []byte(obsStr),
 					Score:   1.0,
 				})

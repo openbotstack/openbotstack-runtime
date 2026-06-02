@@ -10,20 +10,21 @@ import (
 
 	"github.com/openbotstack/openbotstack-core/ai/providers"
 	"github.com/openbotstack/openbotstack-core/ai/types"
-	"github.com/openbotstack/openbotstack-core/control/agent"
+	coreagent "github.com/openbotstack/openbotstack-core/control/agent"
+	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
 )
 
 const summarizationTimeout = 15 * time.Second
 
 // ConversationSummarizer generates session summaries using an LLM.
 type ConversationSummarizer struct {
-	store     agent.ConversationStore
+	store     coreagent.ConversationStore
 	router    providers.ModelRouter
 	threshold int
 }
 
 // NewConversationSummarizer creates a summarizer that triggers after threshold messages.
-func NewConversationSummarizer(store agent.ConversationStore, router providers.ModelRouter, threshold int) *ConversationSummarizer {
+func NewConversationSummarizer(store coreagent.ConversationStore, router providers.ModelRouter, threshold int) *ConversationSummarizer {
 	return &ConversationSummarizer{
 		store:     store,
 		router:    router,
@@ -65,7 +66,7 @@ func (s *ConversationSummarizer) CheckAndSummarize(ctx context.Context, tenantID
 		"tenant_id", tenantID, "session_id", sessionID, "summary_length", len(summary))
 }
 
-func (s *ConversationSummarizer) generateSummary(ctx context.Context, msgs []agent.Message) (string, error) {
+func (s *ConversationSummarizer) generateSummary(ctx context.Context, msgs []aitypes.Message) (string, error) {
 	var sb strings.Builder
 	sb.WriteString("Summarize the following conversation concisely, preserving key facts, decisions, topics, and any important context. Write in third person.\n\n")
 	for _, m := range msgs {
@@ -97,7 +98,7 @@ func (s *ConversationSummarizer) generateSummary(ctx context.Context, msgs []age
 // Uses per-session dedup and a threshold counter to avoid redundant LLM calls,
 // and a bounded semaphore for the async indexer.
 type SummarizingConversationStore struct {
-	inner      agent.ConversationStore
+	inner      coreagent.ConversationStore
 	summarizer *ConversationSummarizer
 	indexer    *AsyncEmbeddingIndexer // optional: nil = vector indexing disabled
 
@@ -112,7 +113,7 @@ type SummarizingConversationStore struct {
 }
 
 // NewSummarizingConversationStore creates a decorator that auto-summarizes conversations.
-func NewSummarizingConversationStore(inner agent.ConversationStore, summarizer *ConversationSummarizer) *SummarizingConversationStore {
+func NewSummarizingConversationStore(inner coreagent.ConversationStore, summarizer *ConversationSummarizer) *SummarizingConversationStore {
 	return &SummarizingConversationStore{
 		inner:      inner,
 		summarizer: summarizer,
@@ -128,7 +129,7 @@ func (s *SummarizingConversationStore) SetIndexer(indexer *AsyncEmbeddingIndexer
 	s.indexer = indexer
 }
 
-func (s *SummarizingConversationStore) AppendMessage(ctx context.Context, msg agent.SessionMessage) error {
+func (s *SummarizingConversationStore) AppendMessage(ctx context.Context, msg coreagent.SessionMessage) error {
 	if err := s.inner.AppendMessage(ctx, msg); err != nil {
 		return err
 	}
@@ -193,7 +194,7 @@ func (s *SummarizingConversationStore) clearPending(sessionID string) {
 	delete(s.pending, sessionID)
 }
 
-func (s *SummarizingConversationStore) GetHistory(ctx context.Context, tenantID, userID, sessionID string, maxMessages int) ([]agent.Message, error) {
+func (s *SummarizingConversationStore) GetHistory(ctx context.Context, tenantID, userID, sessionID string, maxMessages int) ([]aitypes.Message, error) {
 	return s.inner.GetHistory(ctx, tenantID, userID, sessionID, maxMessages)
 }
 

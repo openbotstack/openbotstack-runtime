@@ -10,6 +10,7 @@ import (
 	
 
 	"github.com/openbotstack/openbotstack-core/control/agent"
+	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
 	"github.com/openbotstack/openbotstack-runtime/api/middleware"
 	"github.com/openbotstack/openbotstack-runtime/harness"
 	"github.com/openbotstack/openbotstack-runtime/harness/reasoning"
@@ -33,14 +34,14 @@ type ChatResponse struct {
 
 // HistoryResponse contains conversation history.
 type HistoryResponse struct {
-	SessionID string          `json:"session_id"`
-	Messages  []agent.Message `json:"messages"`
+	SessionID string           `json:"session_id"`
+	Messages  []aitypes.Message `json:"messages"`
 }
 
 // HistoryProvider gives access to conversation history.
 type HistoryProvider interface {
 	// GetSessionHistory retrieves messages for a session.
-	GetSessionHistory(ctx context.Context, sessionID string) ([]agent.Message, error)
+	GetSessionHistory(ctx context.Context, sessionID string) ([]aitypes.Message, error)
 	// ListSessions returns all sessions for the current tenant.
 	ListSessions(ctx context.Context) ([]SessionSummary, error)
 	// DeleteSession removes all entries for a session.
@@ -371,7 +372,7 @@ func (r *Router) handleSessions(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	messages := []agent.Message{}
+	messages := []aitypes.Message{}
 	if r.history != nil {
 		var err error
 		messages, err = r.history.GetSessionHistory(req.Context(), sessionID)

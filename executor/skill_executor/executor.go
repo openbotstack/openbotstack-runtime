@@ -16,6 +16,7 @@ import (
 	"github.com/openbotstack/openbotstack-core/execution"
 	"github.com/openbotstack/openbotstack-core/registry/skills"
 	"github.com/openbotstack/openbotstack-core/validation"
+	"github.com/openbotstack/openbotstack-runtime/harness"
 	"github.com/openbotstack/openbotstack-runtime/logging/execution_logs"
 	"github.com/openbotstack/openbotstack-runtime/observability"
 	"github.com/openbotstack/openbotstack-runtime/sandbox/wasm"
@@ -509,12 +510,20 @@ func (e *DefaultExecutor) ExecutePlan(ctx context.Context, plan *execution.Execu
 	if plan == nil {
 		return ErrNilExecutionPlan
 	}
-	runner := NewStepRunner(e, e.tools)
+	// Use harness.StepExecutor as the canonical dispatch point.
+	// This consolidates step execution from 4 sites (StepRunner, StepExecutor,
+	// ReasoningLoop, harness.dispatchStep) to 1 canonical path.
+	stepExec := harness.NewStepExecutor(e.tools, e, harness.StepExecutorDeps{})
 	for _, step := range plan.Steps {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if _, err := runner.RunStep(ctx, ec, step); err != nil {
+		s := step // capture for pointer
+		result, err := stepExec.Execute(ctx, &s, ec, nil, 0)
+		if result != nil {
+			ec.AddResult(*result)
+		}
+		if err != nil {
 			return fmt.Errorf("step %s failed: %w", step.Name, err)
 		}
 	}

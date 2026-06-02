@@ -9,24 +9,29 @@ import (
 	"strings"
 
 	corecontext "github.com/openbotstack/openbotstack-core/context"
-	"github.com/openbotstack/openbotstack-core/control/agent"
-	"github.com/openbotstack/openbotstack-core/ai/types"
+	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
 	"github.com/openbotstack/openbotstack-core/memory/abstraction"
+	"github.com/openbotstack/openbotstack-core/registry/skills"
 )
 
 // Compile-time interface compliance check.
 var _ corecontext.ContextAssembler = (*RuntimeContextAssembler)(nil)
 
+// skillGetter is a minimal interface for resolving skills by ID.
+type skillGetter interface {
+	Get(id string) (skills.Skill, error)
+}
+
 // RuntimeContextAssembler implements corecontext.ContextAssembler.
 // It combines persona, memory, and skills into a complete LLM context.
 type RuntimeContextAssembler struct {
-	registry      agent.SkillRegistry
+	registry      skillGetter
 	memoryManager abstraction.MemoryManager
 }
 
 // NewRuntimeContextAssembler creates a new context assembler.
 // registry and memoryManager may be nil; missing components are skipped gracefully.
-func NewRuntimeContextAssembler(registry agent.SkillRegistry, memoryManager abstraction.MemoryManager) *RuntimeContextAssembler {
+func NewRuntimeContextAssembler(registry skillGetter, memoryManager abstraction.MemoryManager) *RuntimeContextAssembler {
 	return &RuntimeContextAssembler{
 		registry:      registry,
 		memoryManager: memoryManager,
@@ -38,7 +43,7 @@ func (a *RuntimeContextAssembler) Assemble(
 	ctx context.Context,
 	assistant corecontext.AssistantContext,
 	request corecontext.UserRequest,
-	conversationHistory []types.Message,
+	conversationHistory []aitypes.Message,
 ) (*corecontext.AssembledContext, error) {
 	// 1. Build system prompt from persona + base prompt
 	systemPrompt := buildPersonaSystemPrompt(assistant.Persona, assistant.BaseSystemPrompt)
@@ -56,7 +61,7 @@ func (a *RuntimeContextAssembler) Assemble(
 	}
 
 	// 3. Build messages array
-	var messages []types.Message
+	var messages []aitypes.Message
 
 	// Inject memory context as system message if found
 	if len(relevantMemories) > 0 {
@@ -64,7 +69,7 @@ func (a *RuntimeContextAssembler) Assemble(
 		for _, m := range relevantMemories {
 			memParts = append(memParts, "- "+m.Content)
 		}
-		messages = append(messages, types.Message{
+		messages = append(messages, aitypes.Message{
 			Role:    "system",
 			Content: "Relevant context from memory:\n" + strings.Join(memParts, "\n"),
 		})
@@ -74,7 +79,7 @@ func (a *RuntimeContextAssembler) Assemble(
 	messages = append(messages, conversationHistory...)
 
 	// 4. Build available tools from enabled skills
-	var availableTools []types.ToolDefinition
+	var availableTools []aitypes.ToolDefinition
 	if a.registry != nil && len(assistant.EnabledSkillIDs) > 0 {
 		seen := make(map[string]bool, len(assistant.EnabledSkillIDs))
 		for _, id := range assistant.EnabledSkillIDs {
@@ -88,7 +93,7 @@ func (a *RuntimeContextAssembler) Assemble(
 					"skill_id", id, "profile_id", assistant.ProfileID)
 				continue
 			}
-			availableTools = append(availableTools, types.ToolDefinition{
+			availableTools = append(availableTools, aitypes.ToolDefinition{
 				Name:        s.ID(),
 				Description: s.Description(),
 				Parameters:  s.InputSchema(),
@@ -100,7 +105,7 @@ func (a *RuntimeContextAssembler) Assemble(
 		SystemPrompt:    systemPrompt,
 		Messages:        messages,
 		AvailableTools:  availableTools,
-		Constraints:     types.ModelConstraints{}, // caller is responsible for setting limits
+		Constraints:     aitypes.ModelConstraints{}, // caller is responsible for setting limits
 		RelevantMemories: relevantMemories,
 	}, nil
 }

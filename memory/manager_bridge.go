@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openbotstack/openbotstack-core/control/agent"
+	coreagent "github.com/openbotstack/openbotstack-core/control/agent"
 	"github.com/openbotstack/openbotstack-core/memory/abstraction"
 )
 
@@ -84,7 +84,7 @@ func (b *MarkdownMemoryBridge) StoreShortTerm(ctx context.Context, entry abstrac
 		ts = time.Now().UTC().Format(time.RFC3339Nano)
 	}
 
-	return b.store.AppendMessage(ctx, agent.SessionMessage{
+	return b.store.AppendMessage(ctx, coreagent.SessionMessage{
 		TenantID:  tenantID,
 		UserID:    userID,
 		SessionID: sessionID,

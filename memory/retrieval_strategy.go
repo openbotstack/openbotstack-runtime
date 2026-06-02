@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"sort"
 
-	"github.com/openbotstack/openbotstack-core/control/agent"
+	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
 	"github.com/openbotstack/openbotstack-core/memory/abstraction"
 )
 
@@ -44,7 +44,7 @@ func (s *KeywordStrategy) Search(ctx context.Context, scope MemoryScope, query s
 	}
 
 	type scored struct {
-		msg   agent.Message
+		msg   aitypes.Message
 		score int
 	}
 	var candidates []scored

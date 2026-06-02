@@ -33,7 +33,6 @@ import (
 	rtAudit "github.com/openbotstack/openbotstack-runtime/audit"
 	executor "github.com/openbotstack/openbotstack-runtime/executor/skill_executor"
 	reasoningpkg "github.com/openbotstack/openbotstack-runtime/harness/reasoning"
-	"github.com/openbotstack/openbotstack-runtime/internal/adapters"
 	"github.com/openbotstack/openbotstack-runtime/internal/crypto"
 	audit "github.com/openbotstack/openbotstack-runtime/logging/execution_logs"
 	"github.com/openbotstack/openbotstack-runtime/memory"
@@ -73,6 +72,9 @@ func main() {
 
 	deps := builder.Build()
 	skillAdmin := builder.SkillAdmin()
+	if deps.SkillWatcher != nil {
+		skillAdmin.SetReloader(deps.SkillWatcher)
+	}
 	server := NewServer(deps, skillAdmin, builder.Config())
 	server.ListenAndServe()
 }
@@ -89,7 +91,7 @@ type ServerDeps struct {
 	RateLimiter         *ratelimit.SQLiteRateLimiter
 	AuditLogger         *audit.SQLiteAuditLogger
 	ComplianceGenerator *rtAudit.ComplianceReportGenerator
-	RetentionManager    api.RetentionManager
+	RetentionPolicy     *rtAudit.RetentionPolicy
 	ApprovalGateway     coreExecution.ApprovalGateway
 	ReasoningStore      *reasoningpkg.InMemoryStore
 	Telemetry           *api.TelemetryHandler
@@ -105,12 +107,12 @@ type Server struct {
 }
 
 // NewServer wires all HTTP routes, middleware, and API handlers.
-func NewServer(deps ServerDeps, skillAdmin *adapters.SkillAdminAdapter, cfg *config.Config) *Server {
+func NewServer(deps ServerDeps, skillAdmin *api.SkillAdminService, cfg *config.Config) *Server {
 	mux := http.NewServeMux()
 
 	var capLister api.CapabilityLister
 	if deps.CapRegistry != nil {
-		capLister = adapters.NewCapabilityLister(deps.CapRegistry)
+		capLister = api.CapabilityListerFunc{Registry: deps.CapRegistry}
 	}
 
 	// Composite auth: API Key first, then JWT fallback
@@ -143,7 +145,7 @@ func NewServer(deps ServerDeps, skillAdmin *adapters.SkillAdminAdapter, cfg *con
 		Skills:           deps.Exec,
 		SkillDisabled:    skillAdmin.IsDisabled,
 		ExecStore:        api.NewAuditExecutionStore(deps.AuditLogger),
-		History:          adapters.NewHistoryProvider(deps.MarkdownStore, deps.SessionStore),
+		History:          api.NewHistoryProvider(deps.MarkdownStore, deps.SessionStore),
 		ReasoningStore:   deps.ReasoningStore,
 		TelemetryHandler: deps.Telemetry,
 		BuildInfo: api.BuildInfo{
@@ -173,15 +175,15 @@ func NewServer(deps ServerDeps, skillAdmin *adapters.SkillAdminAdapter, cfg *con
 
 	adminRouter := api.NewAdminRouter(api.AdminRouterConfig{
 		DB:               deps.DB.DB,
-		ProviderLister:   &adapters.ModelRouterLister{Router: deps.ModelRouter},
-		ProviderReloader: &adapters.ProviderReloader{Router: deps.ModelRouter, Factory: deps.ProviderFactory},
+		ProviderLister:   &api.RouterProviderLister{Router: deps.ModelRouter},
+		ProviderReloader: &api.RouterProviderReloader{Router: deps.ModelRouter, Factory: deps.ProviderFactory},
 		SkillAdmin:       skillAdmin,
 		MCPAdmin:         deps.MCPAdmin,
 		TelemetryHandler: deps.Telemetry,
 		CapabilityLister: capLister,
 		AuditQuerier:         deps.AuditLogger,
 		ComplianceGenerator: deps.ComplianceGenerator,
-		RetentionManager:    deps.RetentionManager,
+		RetentionPolicy:      deps.RetentionPolicy,
 		ApprovalGateway:     deps.ApprovalGateway,
 	})
 	mux.Handle("/v1/admin/", authMW(adminRouter.Handler()))

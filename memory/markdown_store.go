@@ -11,10 +11,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/openbotstack/openbotstack-core/control/agent"
+	coreagent "github.com/openbotstack/openbotstack-core/control/agent"
+	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
 )
 
-// MarkdownMemoryStore implements agent.ConversationStore using filesystem markdown files.
+// MarkdownMemoryStore implements coreagent.ConversationStore using filesystem markdown files.
 //
 // Directory structure follows the 3+1 layered model (System → Tenant → User → Session):
 //
@@ -38,7 +39,7 @@ func NewMarkdownMemoryStore(dataDir string) (*MarkdownMemoryStore, error) {
 }
 
 // AppendMessage adds a message to a session's conversation file.
-func (s *MarkdownMemoryStore) AppendMessage(ctx context.Context, msg agent.SessionMessage) error {
+func (s *MarkdownMemoryStore) AppendMessage(ctx context.Context, msg coreagent.SessionMessage) error {
 	if err := validateID(msg.TenantID, "tenant"); err != nil {
 		return err
 	}
@@ -119,7 +120,7 @@ func (s *MarkdownMemoryStore) AppendMessage(ctx context.Context, msg agent.Sessi
 }
 
 // GetHistory retrieves messages for a session in chronological order.
-func (s *MarkdownMemoryStore) GetHistory(ctx context.Context, tenantID, userID, sessionID string, maxMessages int) ([]agent.Message, error) {
+func (s *MarkdownMemoryStore) GetHistory(ctx context.Context, tenantID, userID, sessionID string, maxMessages int) ([]aitypes.Message, error) {
 	if err := validateID(tenantID, "tenant"); err != nil {
 		return nil, err
 	}
@@ -137,7 +138,7 @@ func (s *MarkdownMemoryStore) GetHistory(ctx context.Context, tenantID, userID, 
 
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return []agent.Message{}, nil
+		return []aitypes.Message{}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("memory: failed to read session file: %w", err)
@@ -400,13 +401,13 @@ func (s *MarkdownMemoryStore) DeleteSessionBySessionID(ctx context.Context, sess
 // GetHistoryBySessionID retrieves messages for a session by scanning the filesystem
 // to find the session file. Unlike GetHistory which requires tenantID and userID,
 // this method locates the file by session ID alone.
-func (s *MarkdownMemoryStore) GetHistoryBySessionID(ctx context.Context, sessionID string) ([]agent.Message, error) {
+func (s *MarkdownMemoryStore) GetHistoryBySessionID(ctx context.Context, sessionID string) ([]aitypes.Message, error) {
 	memoryDir := filepath.Join(s.dataDir, "memory")
 
 	tenantEntries, err := os.ReadDir(memoryDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return []agent.Message{}, nil
+			return []aitypes.Message{}, nil
 		}
 		return nil, fmt.Errorf("memory: failed to read memory dir: %w", err)
 	}
@@ -439,7 +440,7 @@ func (s *MarkdownMemoryStore) GetHistoryBySessionID(ctx context.Context, session
 		}
 	}
 
-	return []agent.Message{}, nil
+	return []aitypes.Message{}, nil
 }
 
 // --- internal helpers (3+1 layered paths) ---

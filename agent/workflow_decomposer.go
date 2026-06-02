@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/openbotstack/openbotstack-core/assistant"
 	"github.com/openbotstack/openbotstack-core/execution"
 	"github.com/openbotstack/openbotstack-core/planner"
 	"github.com/openbotstack/openbotstack-runtime/harness"
@@ -52,7 +51,7 @@ func DecomposeToTasks(w Workflow, input map[string]any, baseCtx *planner.Planner
 // MemoryContext is deep-copied to prevent cross-task pollution when inner loops
 // append observations.
 func deepCopyPlannerContext(base *planner.PlannerContext, step execution.ExecutionStep) *planner.PlannerContext {
-	memCopy := make([]assistant.SearchResult, len(base.MemoryContext))
+	memCopy := make([]planner.SearchResult, len(base.MemoryContext))
 	copy(memCopy, base.MemoryContext)
 
 	return &planner.PlannerContext{

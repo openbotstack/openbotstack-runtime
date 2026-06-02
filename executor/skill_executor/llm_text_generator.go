@@ -1,4 +1,4 @@
-package adapters
+package skill_executor
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	"github.com/openbotstack/openbotstack-core/ai/types"
 )
 
-// LLMTextGenerator adapts a ModelRouter to the executor.TextGenerator interface.
+// LLMTextGenerator adapts a ModelRouter to the TextGenerator/StreamingTextGenerator interfaces.
 type LLMTextGenerator struct {
 	Router providers.ModelRouter
 }
@@ -72,18 +72,4 @@ func (g *LLMTextGenerator) GenerateStreamText(ctx context.Context, prompt string
 		tokenFn(resp.Content)
 	}
 	return resp.Content, nil
-}
-
-// ParseLogLevel converts a log level string to slog.Level value.
-func ParseLogLevel(s string) int {
-	switch strings.ToLower(s) {
-	case "debug":
-		return -4
-	case "warn":
-		return 4
-	case "error":
-		return 8
-	default:
-		return 0
-	}
 }

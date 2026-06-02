@@ -6,24 +6,25 @@ import (
 	"log/slog"
 	"time"
 
-	agent "github.com/openbotstack/openbotstack-core/control/agent"
+	coreagent "github.com/openbotstack/openbotstack-core/control/agent"
+	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
 )
 
 // DualWriteConversationStore decorates a ConversationStore to also update
 // SQLite session metadata on every AppendMessage. Markdown remains the
 // canonical content store; SQLite holds metadata for fast listing/filtering.
 type DualWriteConversationStore struct {
-	inner        agent.ConversationStore
+	inner        coreagent.ConversationStore
 	sessionState SessionStateStore
 }
 
 // NewDualWriteConversationStore creates a dual-write decorator.
-func NewDualWriteConversationStore(inner agent.ConversationStore, sessionState SessionStateStore) *DualWriteConversationStore {
+func NewDualWriteConversationStore(inner coreagent.ConversationStore, sessionState SessionStateStore) *DualWriteConversationStore {
 	return &DualWriteConversationStore{inner: inner, sessionState: sessionState}
 }
 
 // AppendMessage writes to Markdown (primary) then updates SQLite metadata (best-effort).
-func (d *DualWriteConversationStore) AppendMessage(ctx context.Context, msg agent.SessionMessage) error {
+func (d *DualWriteConversationStore) AppendMessage(ctx context.Context, msg coreagent.SessionMessage) error {
 	if err := d.inner.AppendMessage(ctx, msg); err != nil {
 		return err
 	}
@@ -58,7 +59,7 @@ func (d *DualWriteConversationStore) AppendMessage(ctx context.Context, msg agen
 }
 
 // GetHistory delegates to the inner Markdown store.
-func (d *DualWriteConversationStore) GetHistory(ctx context.Context, tenantID, userID, sessionID string, maxMessages int) ([]agent.Message, error) {
+func (d *DualWriteConversationStore) GetHistory(ctx context.Context, tenantID, userID, sessionID string, maxMessages int) ([]aitypes.Message, error) {
 	return d.inner.GetHistory(ctx, tenantID, userID, sessionID, maxMessages)
 }
 

@@ -9,10 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openbotstack/openbotstack-core/assistant"
+	"github.com/openbotstack/openbotstack-core/planner"
 	"github.com/openbotstack/openbotstack-core/audit"
 	"github.com/openbotstack/openbotstack-core/execution"
-	"github.com/openbotstack/openbotstack-core/planner"
 )
 
 // ========================================================================
@@ -69,7 +68,7 @@ func TestE2EBlackbox_R2_PatientRiskDetection_ReasoningLoop(t *testing.T) {
 
 	pCtx := &planner.PlannerContext{
 		UserRequest:   "Which patients are high risk?",
-		MemoryContext: []assistant.SearchResult{},
+		MemoryContext: []planner.SearchResult{},
 	}
 
 	result, err := rl.Run(context.Background(), &execution.ExecutionStep{Name: "risk-detect", Type: execution.StepTypeLLM}, pCtx, testEC())
@@ -541,7 +540,7 @@ func TestE2EBlackbox_R2_SoulInjection_PlannerContext(t *testing.T) {
 	se := NewStepExecutor(tr, nil, StepExecutorDeps{})
 	rl := NewDefaultReasoningLoop(cfg, mp, se, nil)
 
-	soul := assistant.AssistantSoul{
+	soul := planner.AssistantSoul{
 		SystemPrompt:  "You are an ICU clinical assistant.",
 		Personality:   "Professional, compassionate, detail-oriented.",
 		Instructions:  "Always prioritize patient safety. Use SBAR format.",
@@ -552,7 +551,7 @@ func TestE2EBlackbox_R2_SoulInjection_PlannerContext(t *testing.T) {
 	pCtx := &planner.PlannerContext{
 		UserRequest:   "Assess patient P001",
 		Soul:          soul,
-		MemoryContext: []assistant.SearchResult{},
+		MemoryContext: []planner.SearchResult{},
 	}
 
 	result, err := rl.Run(context.Background(), &execution.ExecutionStep{Name: "reason", Type: execution.StepTypeLLM}, pCtx, testEC())
@@ -581,14 +580,14 @@ func TestE2EBlackbox_R2_SoulInjection_PlannerContext(t *testing.T) {
 func TestE2EBlackbox_R2_SoulInjection_RunFromTask(t *testing.T) {
 	cfg := DefaultHarnessConfig()
 
-	var capturedSoul assistant.AssistantSoul
+	var capturedSoul planner.AssistantSoul
 	mp := &soulCapturingPlanner{fn: func(pCtx *planner.PlannerContext) {
 		capturedSoul = pCtx.Soul
 	}}
 	tr := newMockToolRunner()
 	h := NewExecutionHarness(cfg, tr, nil, HarnessDeps{})
 
-	soul := assistant.AssistantSoul{
+	soul := planner.AssistantSoul{
 		SystemPrompt: "You are a risk assessment specialist.",
 	}
 	pCtx := &planner.PlannerContext{
@@ -629,7 +628,7 @@ func TestE2EBlackbox_R2_MemoryRetrieval_PriorContext(t *testing.T) {
 	rl := NewDefaultReasoningLoop(cfg, mp, se, nil)
 
 	// Simulate prior conversation memory
-	priorMemory := []assistant.SearchResult{
+	priorMemory := []planner.SearchResult{
 		{Content: []byte("Patient P001 was admitted for Sepsis on 2026-03-15"), Score: 0.95},
 		{Content: []byte("Patient P001 is allergic to penicillin"), Score: 0.90},
 		{Content: []byte("Previous shift noted worsening vitals for P001"), Score: 0.85},
@@ -687,7 +686,7 @@ func TestE2EBlackbox_R2_MemoryRetrieval_CrossTurnPropagation(t *testing.T) {
 
 	pCtx := &planner.PlannerContext{
 		UserRequest:   "analyze trends",
-		MemoryContext: []assistant.SearchResult{},
+		MemoryContext: []planner.SearchResult{},
 	}
 
 	result, err := rl.Run(context.Background(), &execution.ExecutionStep{Name: "reason", Type: execution.StepTypeLLM}, pCtx, testEC())

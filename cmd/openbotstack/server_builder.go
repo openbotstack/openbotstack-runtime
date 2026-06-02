@@ -26,7 +26,6 @@ import (
 	executor "github.com/openbotstack/openbotstack-runtime/executor/skill_executor"
 	harnesspkg "github.com/openbotstack/openbotstack-runtime/harness"
 	reasoningpkg "github.com/openbotstack/openbotstack-runtime/harness/reasoning"
-	"github.com/openbotstack/openbotstack-runtime/internal/adapters"
 	audit "github.com/openbotstack/openbotstack-runtime/logging/execution_logs"
 	mcppkg "github.com/openbotstack/openbotstack-runtime/mcp"
 	"github.com/openbotstack/openbotstack-runtime/memory"
@@ -240,7 +239,7 @@ func (b *ServerBuilder) InitExecution() *ServerBuilder {
 	}
 
 	exec := executor.NewDefaultExecutorWithRuntime(wasmRuntime, nil)
-	exec.SetTextGenerator(&adapters.LLMTextGenerator{Router: b.modelRouter})
+	exec.SetTextGenerator(&executor.LLMTextGenerator{Router: b.modelRouter})
 
 	if err := wasmRuntime.RegisterHostFunctions(context.Background(), hostFuncs); err != nil {
 		slog.Error("failed to register host functions", "error", err)
@@ -489,11 +488,10 @@ func (b *ServerBuilder) Build() ServerDeps {
 		slog.Info("audit chain signing enabled")
 	}
 	complianceGen := rtAudit.NewComplianceReportGenerator(b.auditLogger, []byte(complianceSigningKey))
-	auditPurger := &adapters.AuditPurger{PurgerFunc: func(cutoff time.Time, tenantID string) (int64, error) {
+	auditPurger := &auditPurgerFunc{fn: func(cutoff time.Time, tenantID string) (int64, error) {
 		return b.auditLogger.PurgeBefore(context.Background(), cutoff, tenantID)
 	}}
 	retentionPolicy := rtAudit.NewRetentionPolicy(rtAudit.DefaultRetentionConfig(), auditPurger)
-	retentionMgr := &adapters.RetentionManagerAdapter{Policy: retentionPolicy}
 	approvalStore := harnesspkg.NewInMemoryApprovalStore(30 * time.Minute)
 	slog.Info("compliance modules initialized", "retention_enabled", retentionPolicy.Config().Enabled)
 
@@ -515,7 +513,7 @@ func (b *ServerBuilder) Build() ServerDeps {
 		RateLimiter:         rateLimiter,
 		AuditLogger:         b.auditLogger,
 		ComplianceGenerator: complianceGen,
-		RetentionManager:    retentionMgr,
+		RetentionPolicy:     retentionPolicy,
 		ApprovalGateway:     approvalStore,
 		ReasoningStore:      b.reasoningStore,
 		Telemetry:           b.telemetry,
@@ -525,9 +523,18 @@ func (b *ServerBuilder) Build() ServerDeps {
 	}
 }
 
-// SkillAdmin returns a SkillAdminAdapter for the admin API.
-func (b *ServerBuilder) SkillAdmin() *adapters.SkillAdminAdapter {
-	return adapters.NewSkillAdminAdapter(b.exec)
+// SkillAdmin returns a SkillAdminService for the admin API.
+func (b *ServerBuilder) SkillAdmin() *api.SkillAdminService {
+	return api.NewSkillAdminService(b.exec)
+}
+
+// auditPurgerFunc adapts a function to the audit.Purger interface.
+type auditPurgerFunc struct {
+	fn func(cutoff time.Time, tenantID string) (int64, error)
+}
+
+func (a *auditPurgerFunc) PurgeBefore(cutoff time.Time, tenantID string) (int64, error) {
+	return a.fn(cutoff, tenantID)
 }
 
 // initVectorSearch initializes optional PostgreSQL + pgvector for semantic search.

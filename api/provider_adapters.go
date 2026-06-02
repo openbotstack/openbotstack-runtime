@@ -1,4 +1,4 @@
-package adapters
+package api
 
 import (
 	"log/slog"
@@ -6,17 +6,16 @@ import (
 	"github.com/openbotstack/openbotstack-core/ai/providers"
 	"github.com/openbotstack/openbotstack-core/ai/router"
 	"github.com/openbotstack/openbotstack-core/ai/types"
-	"github.com/openbotstack/openbotstack-runtime/api"
 )
 
-// ModelRouterLister adapts a ModelRouter to the api.ProviderLister interface.
-type ModelRouterLister struct {
+// RouterProviderLister adapts a ModelRouter to the ProviderLister interface.
+type RouterProviderLister struct {
 	Router *router.DefaultRouter
 }
 
-func (m *ModelRouterLister) ListProviders() []api.ProviderInfo {
+func (m *RouterProviderLister) ListProviders() []ProviderInfo {
 	ids := m.Router.List()
-	result := make([]api.ProviderInfo, 0, len(ids))
+	result := make([]ProviderInfo, 0, len(ids))
 	for _, id := range ids {
 		provider, err := m.Router.Route(nil, types.ModelConstraints{})
 		caps := []string{}
@@ -25,7 +24,7 @@ func (m *ModelRouterLister) ListProviders() []api.ProviderInfo {
 				caps = append(caps, string(c))
 			}
 		}
-		result = append(result, api.ProviderInfo{
+		result = append(result, ProviderInfo{
 			ID:           id,
 			Capabilities: caps,
 		})
@@ -33,13 +32,13 @@ func (m *ModelRouterLister) ListProviders() []api.ProviderInfo {
 	return result
 }
 
-// ProviderReloader adapts a DefaultRouter to the api.ProviderReloader interface.
-type ProviderReloader struct {
+// RouterProviderReloader adapts a DefaultRouter + ProviderFactory to the ProviderReloader interface.
+type RouterProviderReloader struct {
 	Router  *router.DefaultRouter
 	Factory *providers.ProviderFactory
 }
 
-func (p *ProviderReloader) ReloadProvider(providerName, baseURL, apiKey, model string) error {
+func (p *RouterProviderReloader) ReloadProvider(providerName, baseURL, apiKey, model string) error {
 	newProvider := p.Factory.Create(providerName, baseURL, apiKey, model)
 	// Remove any existing provider of the same driver so only this one routes.
 	p.Router.Unregister(providerName)

@@ -6,11 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openbotstack/openbotstack-core/assistant"
+	"github.com/openbotstack/openbotstack-core/planner"
 	"github.com/openbotstack/openbotstack-core/audit"
 	"github.com/openbotstack/openbotstack-core/control/policy"
 	"github.com/openbotstack/openbotstack-core/execution"
-	"github.com/openbotstack/openbotstack-core/planner"
 )
 
 // ========================================================================
@@ -383,7 +382,7 @@ func TestReasoningLoop_CompactionThenContinue(t *testing.T) {
 	rl := NewDefaultReasoningLoop(cfg, mp, se, compactor)
 	pCtx := &planner.PlannerContext{
 		UserRequest:   "test",
-		MemoryContext: []assistant.SearchResult{},
+		MemoryContext: []planner.SearchResult{},
 	}
 
 	result, err := rl.Run(context.Background(), &execution.ExecutionStep{Name: "reason", Type: execution.StepTypeLLM}, pCtx, testEC())

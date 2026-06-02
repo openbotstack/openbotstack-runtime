@@ -11,6 +11,7 @@ import (
 
 	"github.com/openbotstack/openbotstack-core/access/auth"
 	"github.com/openbotstack/openbotstack-core/control/agent"
+	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
 	"github.com/openbotstack/openbotstack-runtime/api"
 	"github.com/openbotstack/openbotstack-runtime/api/middleware"
 )
@@ -233,12 +234,12 @@ func TestChatEndpointUsesAuthenticatedIdentity(t *testing.T) {
 // mockHistoryProvider implements api.HistoryProvider for testing.
 type mockHistoryProvider struct {
 	sessions    []api.SessionSummary
-	history     []agent.Message
+	history     []aitypes.Message
 	deleteErr   error
 	deletedID   string
 }
 
-func (m *mockHistoryProvider) GetSessionHistory(ctx context.Context, sessionID string) ([]agent.Message, error) {
+func (m *mockHistoryProvider) GetSessionHistory(ctx context.Context, sessionID string) ([]aitypes.Message, error) {
 	return m.history, nil
 }
 
@@ -353,7 +354,7 @@ func TestSessionHistoryEndpointWithProvider(t *testing.T) {
 	handler := api.NewRouter(api.RouterConfig{
 		Agent: &mockAgent{},
 		History: &mockHistoryProvider{
-			history: []agent.Message{
+			history: []aitypes.Message{
 				{Role: "user", Content: "Hello"},
 				{Role: "assistant", Content: "Hi there!"},
 			},

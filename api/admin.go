@@ -8,9 +8,10 @@ import (
 
 	"github.com/openbotstack/openbotstack-core/audit"
 	mcpcore "github.com/openbotstack/openbotstack-core/mcp"
+	"github.com/openbotstack/openbotstack-core/capability"
 	"github.com/openbotstack/openbotstack-core/execution"
-	"github.com/openbotstack/openbotstack-runtime/api/middleware"
 	rtAudit "github.com/openbotstack/openbotstack-runtime/audit"
+	"github.com/openbotstack/openbotstack-runtime/api/middleware"
 	"github.com/openbotstack/openbotstack-runtime/mcp"
 )
 
@@ -75,7 +76,6 @@ type CapabilityLister interface {
 	List() []CapabilityDescriptor
 }
 
-
 // CapabilityDescriptor mirrors core/capability.CapabilityDescriptor for JSON transport.
 type CapabilityDescriptor struct {
 	ID          string `json:"id"`
@@ -83,6 +83,31 @@ type CapabilityDescriptor struct {
 	Description string `json:"description"`
 	Kind        string `json:"kind"`
 	SourceID    string `json:"source_id"`
+}
+
+// CapabilityListerFunc wraps a capability.CapabilityRegistry to satisfy CapabilityLister.
+// Converts domain CapabilityDescriptor to API CapabilityDescriptor at the response boundary.
+type CapabilityListerFunc struct {
+	Registry capability.CapabilityRegistry
+}
+
+// List returns all capabilities as API descriptors.
+func (c CapabilityListerFunc) List() []CapabilityDescriptor {
+	if c.Registry == nil {
+		return nil
+	}
+	descs := c.Registry.List()
+	result := make([]CapabilityDescriptor, len(descs))
+	for i, d := range descs {
+		result[i] = CapabilityDescriptor{
+			ID:          d.ID,
+			Name:        d.Name,
+			Description: d.Description,
+			Kind:        d.Kind,
+			SourceID:    d.SourceID,
+		}
+	}
+	return result
 }
 
 // AdminRouterConfig holds all dependencies for constructing an AdminRouter.
@@ -98,7 +123,7 @@ type AdminRouterConfig struct {
 	CapabilityLister     CapabilityLister
 	AuditQuerier         AuditQuerier
 	ModelRegistry        ModelRegistryAdmin
-	RetentionManager     RetentionManager
+	RetentionPolicy      *rtAudit.RetentionPolicy
 	ComplianceGenerator  *rtAudit.ComplianceReportGenerator
 	ApprovalGateway      execution.ApprovalGateway
 	EventMappers         map[string]audit.AuditEventMapper
@@ -126,19 +151,20 @@ type ModelUsageInfo struct {
 	UsedAt      string `json:"used_at"`
 }
 
-// RetentionManager provides audit retention policy management for the admin API.
-type RetentionManager interface {
-	RetentionConfig() RetentionConfigSnapshot
-	SetTenantOverride(tenantID string, days int)
-	RemoveTenantOverride(tenantID string)
-	PurgeExpired() (int64, error)
-}
-
 // RetentionConfigSnapshot is the JSON-serializable retention config.
 type RetentionConfigSnapshot struct {
 	Enabled         bool           `json:"enabled"`
 	DefaultDays     int            `json:"default_days"`
 	TenantOverrides map[string]int `json:"tenant_overrides"`
+}
+
+// retentionConfigFromPolicy converts domain RetentionConfig to API RetentionConfigSnapshot.
+func retentionConfigFromPolicy(cfg rtAudit.RetentionConfig) RetentionConfigSnapshot {
+	return RetentionConfigSnapshot{
+		Enabled:         cfg.Enabled,
+		DefaultDays:     cfg.DefaultDays,
+		TenantOverrides: cfg.TenantOverrides,
+	}
 }
 
 // AdminRouter handles admin CRUD endpoints.
@@ -153,7 +179,7 @@ type AdminRouter struct {
 	capabilityLister    CapabilityLister
 	auditQuerier        AuditQuerier
 	modelRegistry       ModelRegistryAdmin
-	retentionManager    RetentionManager
+	retentionPolicy     *rtAudit.RetentionPolicy
 	complianceGenerator *rtAudit.ComplianceReportGenerator
 	approvalGateway     execution.ApprovalGateway
 	eventMappers        map[string]audit.AuditEventMapper
@@ -172,7 +198,7 @@ func NewAdminRouter(cfg AdminRouterConfig) *AdminRouter {
 		capabilityLister:    cfg.CapabilityLister,
 		auditQuerier:        cfg.AuditQuerier,
 		modelRegistry:       cfg.ModelRegistry,
-		retentionManager:    cfg.RetentionManager,
+		retentionPolicy:     cfg.RetentionPolicy,
 		complianceGenerator: cfg.ComplianceGenerator,
 		approvalGateway:     cfg.ApprovalGateway,
 		eventMappers:        cfg.EventMappers,

@@ -15,9 +15,21 @@ import (
 	"github.com/openbotstack/openbotstack-core/ai/router"
 	"github.com/openbotstack/openbotstack-runtime/api"
 	"github.com/openbotstack/openbotstack-runtime/api/middleware"
-	"github.com/openbotstack/openbotstack-runtime/internal/adapters"
 	"github.com/openbotstack/openbotstack-runtime/persistence"
 )
+
+// testProviderReloader is a minimal ProviderReloader for integration tests.
+type testProviderReloader struct {
+	Router  *router.DefaultRouter
+	Factory *providers.ProviderFactory
+}
+
+func (p *testProviderReloader) ReloadProvider(providerName, baseURL, apiKey, model string) error {
+	newProvider := p.Factory.Create(providerName, baseURL, apiKey, model)
+	p.Router.Unregister(providerName)
+	p.Router.Replace(newProvider)
+	return nil
+}
 
 func TestProviderHotReload_PreservesURL(t *testing.T) {
 	db, err := persistence.Open(":memory:")
@@ -47,7 +59,7 @@ func TestProviderHotReload_PreservesURL(t *testing.T) {
 	modelRouter := router.NewDefaultRouter()
 	factory := providers.NewProviderFactory()
 	adminRouter := api.NewAdminRouter(api.AdminRouterConfig{DB: db.DB})
-	adminRouter.SetProviderReloader(&adapters.ProviderReloader{Router: modelRouter, Factory: factory})
+	adminRouter.SetProviderReloader(&testProviderReloader{Router: modelRouter, Factory: factory})
 
 	apiKeyMW := middleware.APIKeyMiddleware(middleware.APIKeyMiddlewareConfig{DB: db.DB, Strict: false})
 	mux := http.NewServeMux()
@@ -110,7 +122,7 @@ func TestProviderHotReload_ExplicitURLOverrides(t *testing.T) {
 	modelRouter := router.NewDefaultRouter()
 	factory := providers.NewProviderFactory()
 	adminRouter := api.NewAdminRouter(api.AdminRouterConfig{DB: db.DB})
-	adminRouter.SetProviderReloader(&adapters.ProviderReloader{Router: modelRouter, Factory: factory})
+	adminRouter.SetProviderReloader(&testProviderReloader{Router: modelRouter, Factory: factory})
 
 	apiKeyMW := middleware.APIKeyMiddleware(middleware.APIKeyMiddlewareConfig{DB: db.DB, Strict: false})
 	mux := http.NewServeMux()

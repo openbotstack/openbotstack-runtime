@@ -6,15 +6,15 @@ import (
 )
 
 func (ar *AdminRouter) handleAuditRetention(w http.ResponseWriter, r *http.Request) {
-	if ar.retentionManager == nil {
+	if ar.retentionPolicy == nil {
 		writeAPIError(w, http.StatusServiceUnavailable, ErrUnavailable, "retention not configured")
 		return
 	}
 
 	switch r.Method {
 	case http.MethodGet:
-		cfg := ar.retentionManager.RetentionConfig()
-		writeJSON(w, http.StatusOK, cfg)
+		cfg := ar.retentionPolicy.Config()
+		writeJSON(w, http.StatusOK, retentionConfigFromPolicy(cfg))
 
 	case http.MethodPut:
 		var req struct {
@@ -33,21 +33,21 @@ func (ar *AdminRouter) handleAuditRetention(w http.ResponseWriter, r *http.Reque
 		}
 
 		if req.Remove {
-			ar.retentionManager.RemoveTenantOverride(req.TenantID)
+			ar.retentionPolicy.RemoveTenantOverride(req.TenantID)
 		} else {
 			if req.Days < 1 {
 				writeAPIError(w, http.StatusBadRequest, ErrInvalidRequest, "days must be >= 1")
 				return
 			}
-			ar.retentionManager.SetTenantOverride(req.TenantID, req.Days)
+			ar.retentionPolicy.SetTenantOverride(req.TenantID, req.Days)
 		}
 
-		cfg := ar.retentionManager.RetentionConfig()
-		writeJSON(w, http.StatusOK, cfg)
+		cfg := ar.retentionPolicy.Config()
+		writeJSON(w, http.StatusOK, retentionConfigFromPolicy(cfg))
 
 	case http.MethodPost:
 		// Trigger manual purge
-		total, err := ar.retentionManager.PurgeExpired()
+		total, err := ar.retentionPolicy.PurgeExpired()
 		if err != nil {
 			writeAPIError(w, http.StatusInternalServerError, ErrInternal, "purge failed")
 			return

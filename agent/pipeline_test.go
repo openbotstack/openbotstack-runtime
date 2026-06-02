@@ -2,12 +2,19 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"testing"
+	"time"
 
-	agent "github.com/openbotstack/openbotstack-core/control/agent"
+	coreagent "github.com/openbotstack/openbotstack-core/control/agent"
 	"github.com/openbotstack/openbotstack-core/assistant"
 	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
+	"github.com/openbotstack/openbotstack-core/audit"
+	"github.com/openbotstack/openbotstack-core/capability"
+	"github.com/openbotstack/openbotstack-core/execution"
 	"github.com/openbotstack/openbotstack-core/planner"
+	"github.com/openbotstack/openbotstack-core/registry/skills"
+	"github.com/openbotstack/openbotstack-runtime/harness"
 )
 
 // mockConvStore implements agent.ConversationStore for testing.
@@ -15,8 +22,8 @@ type mockConvStore struct {
 	summary string
 }
 
-func (m *mockConvStore) AppendMessage(ctx context.Context, msg agent.SessionMessage) error { return nil }
-func (m *mockConvStore) GetHistory(ctx context.Context, tenantID, userID, sessionID string, limit int) ([]agent.Message, error) {
+func (m *mockConvStore) AppendMessage(ctx context.Context, msg coreagent.SessionMessage) error { return nil }
+func (m *mockConvStore) GetHistory(ctx context.Context, tenantID, userID, sessionID string, limit int) ([]aitypes.Message, error) {
 	return nil, nil
 }
 func (m *mockConvStore) GetSummary(ctx context.Context, tenantID, userID, sessionID string) (string, error) {
@@ -34,7 +41,7 @@ func TestBuildPlannerContext_SetsAssistantIdentity(t *testing.T) {
 		maxHistoryMessages: 50,
 	}
 
-	req := agent.MessageRequest{
+	req := coreagent.MessageRequest{
 		TenantID: "t1", UserID: "u1", SessionID: "s1", Message: "hello",
 	}
 	skillDescs := []aitypes.SkillDescriptor{
@@ -63,7 +70,7 @@ func TestBuildPlannerContext_WithConversationStore(t *testing.T) {
 		maxHistoryMessages: 50,
 	}
 
-	req := agent.MessageRequest{
+	req := coreagent.MessageRequest{
 		TenantID: "t1", UserID: "u1", SessionID: "s1", Message: "continue",
 	}
 
@@ -83,7 +90,7 @@ func TestBuildPlannerContext_NoMemoryManager_NoPanic(t *testing.T) {
 		maxHistoryMessages: 10,
 	}
 
-	req := agent.MessageRequest{
+	req := coreagent.MessageRequest{
 		TenantID: "t1", UserID: "u1", SessionID: "s1", Message: "test",
 	}
 
@@ -99,7 +106,7 @@ func TestBuildPlannerContext_NoMemoryManager_NoPanic(t *testing.T) {
 func TestResolveTasks_NoWorkflowResolver_SingleTask(t *testing.T) {
 	a := &HarnessAgent{}
 	pCtx := &planner.PlannerContext{UserRequest: "do something"}
-	req := agent.MessageRequest{Message: "do something"}
+	req := coreagent.MessageRequest{Message: "do something"}
 
 	tasks := a.resolveTasks(context.Background(), req, pCtx)
 	if len(tasks) != 1 {
@@ -111,4 +118,352 @@ func TestResolveTasks_NoWorkflowResolver_SingleTask(t *testing.T) {
 	if tasks[0].PlannerContext != pCtx {
 		t.Error("PlannerContext should be the same pCtx")
 	}
+}
+
+// --- Pipeline Phase Tests ---
+
+func TestPhaseGatherSkillDescriptors_WithCapRegistry(t *testing.T) {
+	a := &HarnessAgent{
+		capRegistry: &mockCapRegistry{descs: []capability.CapabilityDescriptor{
+			{ID: "cap-1", Name: "Cap1", Description: "Test capability"},
+			{ID: "cap-2", Name: "Cap2", Description: "Another capability"},
+		}},
+	}
+	skillDescs, capDescs, err := a.gatherSkillDescriptors()
+	if err != nil {
+		t.Fatalf("gatherSkillDescriptors failed: %v", err)
+	}
+	if len(skillDescs) != 2 {
+		t.Errorf("skillDescs len = %d, want 2", len(skillDescs))
+	}
+	if len(capDescs) != 2 {
+		t.Errorf("capDescs len = %d, want 2", len(capDescs))
+	}
+}
+
+func TestPhaseGatherSkillDescriptors_WithSkillDisabled(t *testing.T) {
+	a := &HarnessAgent{
+		capRegistry: &mockCapRegistry{descs: []capability.CapabilityDescriptor{
+			{ID: "enabled", Name: "Enabled", Description: "Active"},
+			{ID: "disabled", Name: "Disabled", Description: "Inactive"},
+		}},
+		skillDisabled: func(id string) bool { return id == "disabled" },
+	}
+	skillDescs, capDescs, err := a.gatherSkillDescriptors()
+	if err != nil {
+		t.Fatalf("gatherSkillDescriptors failed: %v", err)
+	}
+	if len(skillDescs) != 1 || skillDescs[0].ID != "enabled" {
+		t.Errorf("skillDescs = %v, want only [enabled]", skillDescs)
+	}
+	if len(capDescs) != 1 {
+		t.Errorf("capDescs len = %d, want 1", len(capDescs))
+	}
+}
+
+func TestPhaseGatherSkillDescriptors_FallbackSkillRegistry(t *testing.T) {
+	a := &HarnessAgent{
+		skillRegistry: &mockSkillRegistry{skills: map[string]mockSkillEntry{
+			"skill-a": {id: "skill-a", name: "A", desc: "Skill A"},
+		}},
+	}
+	skillDescs, capDescs, err := a.gatherSkillDescriptors()
+	if err != nil {
+		t.Fatalf("gatherSkillDescriptors failed: %v", err)
+	}
+	if len(skillDescs) != 1 || skillDescs[0].ID != "skill-a" {
+		t.Errorf("skillDescs = %v, want [{ID:skill-a}]", skillDescs)
+	}
+	if capDescs != nil {
+		t.Errorf("capDescs = %v, want nil (no cap registry)", capDescs)
+	}
+}
+
+func TestPhasePrepareExecutionContext(t *testing.T) {
+	a := &HarnessAgent{
+		runtime:            &assistant.AssistantRuntime{AssistantID: "asst-1"},
+		grantedPermissions: []string{"file.read", "http.fetch"},
+	}
+	req := coreagent.MessageRequest{
+		TenantID:  "t1",
+		UserID:    "u1",
+		SessionID: "s1",
+	}
+	ec := a.prepareExecutionContext(context.Background(), "exec-123", req)
+	if ec.RequestID != "exec-123" {
+		t.Errorf("RequestID = %q, want %q", ec.RequestID, "exec-123")
+	}
+	if ec.AssistantID != "asst-1" {
+		t.Errorf("AssistantID = %q, want %q", ec.AssistantID, "asst-1")
+	}
+	if ec.LoopMode != "harness" {
+		t.Errorf("LoopMode = %q, want %q", ec.LoopMode, "harness")
+	}
+	if len(ec.GrantedPermissions) != 2 {
+		t.Errorf("GrantedPermissions len = %d, want 2", len(ec.GrantedPermissions))
+	}
+}
+
+func TestPhasePrepareExecutionContext_WithProgressCallback(t *testing.T) {
+	called := false
+	a := &HarnessAgent{
+		runtime: &assistant.AssistantRuntime{AssistantID: "asst-1"},
+	}
+	req := coreagent.MessageRequest{
+		ProgressCallback: func(eventType, content string, turn int, tool string) {
+			called = true
+		},
+	}
+	ec := a.prepareExecutionContext(context.Background(), "exec-456", req)
+	if ec.ProgressFn == nil {
+		t.Error("ProgressFn should be set")
+	}
+	ec.ProgressFn("test", "msg", 0, "")
+	if !called {
+		t.Error("ProgressFn should invoke the callback")
+	}
+}
+
+func TestPhaseFinalize_StoresTraceAndMessages(t *testing.T) {
+	store := &mockReasoningStore{traces: map[string]any{}}
+	a := &HarnessAgent{
+		reasoningStore:    store,
+		conversationStore: &mockConvStore{},
+	}
+	result := &harness.HarnessResult{
+		StepResults: []execution.StepResult{
+			{StepID: "s1", StepName: "test-step", Type: "tool", Output: "done"},
+		},
+	}
+	resp := &coreagent.MessageResponse{
+		SessionID:   "s1",
+		Message:     "completed",
+		ExecutionID: "exec-789",
+	}
+	req := coreagent.MessageRequest{
+		TenantID: "t1", UserID: "u1", SessionID: "s1", Message: "hello",
+	}
+	a.finalize(context.Background(), "exec-789", req.TenantID, result, req, resp)
+	if _, ok := store.traces["exec-789"]; !ok {
+		t.Error("finalize should store execution trace")
+	}
+}
+
+func TestPhaseFinalize_NilResult_NoPanic(t *testing.T) {
+	store := &mockReasoningStore{traces: map[string]any{}}
+	a := &HarnessAgent{
+		reasoningStore:    store,
+		conversationStore: &mockConvStore{},
+	}
+	resp := &coreagent.MessageResponse{
+		SessionID:   "s1",
+		Message:     "done",
+		ExecutionID: "exec-000",
+	}
+	req := coreagent.MessageRequest{
+		TenantID: "t1", UserID: "u1", SessionID: "s1", Message: "hi",
+	}
+	a.finalize(context.Background(), "exec-000", req.TenantID, nil, req, resp)
+	// Should not panic and should not store trace for nil result
+	if _, ok := store.traces["exec-000"]; ok {
+		t.Error("finalize should not store trace for nil result")
+	}
+}
+
+func TestPhaseFinalize_NilReasoningStore_NoPanic(t *testing.T) {
+	a := &HarnessAgent{
+		conversationStore: &mockConvStore{},
+	}
+	result := &harness.HarnessResult{
+		StepResults: []execution.StepResult{
+			{StepID: "s1", StepName: "test", Type: "tool", Output: "x"},
+		},
+	}
+	resp := &coreagent.MessageResponse{SessionID: "s1", Message: "ok", ExecutionID: "exec-111"}
+	req := coreagent.MessageRequest{TenantID: "t1", UserID: "u1", SessionID: "s1", Message: "hi"}
+	// Should not panic
+	a.finalize(context.Background(), "exec-111", req.TenantID, result, req, resp)
+}
+
+func TestPhaseExecuteTasks_SingleTask(t *testing.T) {
+	plannerMock := &mockPlanner{
+		plan: &execution.ExecutionPlan{
+			Steps: []execution.ExecutionStep{
+				{Name: "respond", Type: execution.StepTypeLLM},
+			},
+		},
+	}
+	h := harness.NewExecutionHarness(
+		harness.DefaultHarnessConfig(),
+		nil,  // no tool runner
+		nil,  // no skill executor
+		harness.HarnessDeps{
+			LLMGenerator: func(ctx context.Context, systemPrompt, userMessage string) (string, error) {
+				return "response text", nil
+			},
+		},
+	)
+
+	a := &HarnessAgent{
+		planner: plannerMock,
+		harness: h,
+		runtime: &assistant.AssistantRuntime{AssistantID: "test"},
+	}
+
+	ec := execution.NewExecutionContext(context.Background(), "exec-1", "asst-1", "sess-1", "t1", "u1")
+	tasks := []harness.TaskInput{
+		{TaskDescription: "test task", PlannerContext: &planner.PlannerContext{UserRequest: "test"}},
+	}
+
+	lastResult, message, skillUsed, err := a.executeTasks(context.Background(), tasks, ec)
+	if err != nil {
+		t.Fatalf("executeTasks failed: %v", err)
+	}
+	if lastResult == nil {
+		t.Fatal("lastResult should not be nil")
+	}
+	if message == "" {
+		t.Error("message should not be empty")
+	}
+	if skillUsed != "respond" {
+		t.Errorf("skillUsed = %q, want %q", skillUsed, "respond")
+	}
+}
+
+func TestPhaseExecuteTasks_MultipleTasks(t *testing.T) {
+	callCount := 0
+	plannerMock := &mockPlanner{
+		plan: &execution.ExecutionPlan{
+			Steps: []execution.ExecutionStep{
+				{Name: "respond", Type: execution.StepTypeLLM},
+			},
+		},
+	}
+	h := harness.NewExecutionHarness(
+		harness.DefaultHarnessConfig(),
+		nil, nil,
+		harness.HarnessDeps{
+			LLMGenerator: func(ctx context.Context, systemPrompt, userMessage string) (string, error) {
+				callCount++
+				return fmt.Sprintf("response %d", callCount), nil
+			},
+		},
+	)
+
+	a := &HarnessAgent{
+		planner: plannerMock,
+		harness: h,
+		runtime: &assistant.AssistantRuntime{AssistantID: "test"},
+	}
+
+	ec := execution.NewExecutionContext(context.Background(), "exec-2", "asst-1", "sess-2", "t1", "u1")
+	tasks := []harness.TaskInput{
+		{TaskDescription: "task 1", PlannerContext: &planner.PlannerContext{UserRequest: "task 1"}},
+		{TaskDescription: "task 2", PlannerContext: &planner.PlannerContext{UserRequest: "task 2"}},
+	}
+
+	lastResult, message, _, err := a.executeTasks(context.Background(), tasks, ec)
+	if err != nil {
+		t.Fatalf("executeTasks failed: %v", err)
+	}
+	if lastResult == nil {
+		t.Fatal("lastResult should not be nil")
+	}
+	if !containsSubstring(message, "Task") {
+		t.Errorf("message should contain 'Task', got: %s", message)
+	}
+}
+
+// --- Mock types for pipeline tests ---
+
+type mockCapRegistry struct {
+	descs []capability.CapabilityDescriptor
+}
+
+func (m *mockCapRegistry) Register(_ context.Context, _ capability.Capability) error {
+	return nil
+}
+func (m *mockCapRegistry) Unregister(_ context.Context, _ string) error { return nil }
+func (m *mockCapRegistry) Get(_ string) (capability.Capability, error)  { return nil, nil }
+func (m *mockCapRegistry) List() []capability.CapabilityDescriptor {
+	return m.descs
+}
+func (m *mockCapRegistry) ListByKind(_ capability.CapabilityKind) []capability.CapabilityDescriptor {
+	return m.descs
+}
+
+type mockSkillEntry struct {
+	id, name, desc string
+}
+
+type mockSkillRegistry struct {
+	skills map[string]mockSkillEntry
+}
+
+func (m *mockSkillRegistry) List() []string {
+	ids := make([]string, 0, len(m.skills))
+	for id := range m.skills {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func (m *mockSkillRegistry) Get(id string) (skills.Skill, error) {
+	entry, ok := m.skills[id]
+	if !ok {
+		return nil, fmt.Errorf("not found: %s", id)
+	}
+	return &mockSkillForPipeline{entry}, nil
+}
+
+type mockSkillForPipeline struct {
+	data mockSkillEntry
+}
+
+func (m *mockSkillForPipeline) ID() string          { return m.data.id }
+func (m *mockSkillForPipeline) Name() string        { return m.data.name }
+func (m *mockSkillForPipeline) Description() string { return m.data.desc }
+func (m *mockSkillForPipeline) InputSchema() *aitypes.JSONSchema {
+	return &aitypes.JSONSchema{Type: "object"}
+}
+func (m *mockSkillForPipeline) OutputSchema() *aitypes.JSONSchema { return nil }
+func (m *mockSkillForPipeline) RequiredPermissions() []string     { return nil }
+func (m *mockSkillForPipeline) Timeout() time.Duration            { return 0 }
+func (m *mockSkillForPipeline) Validate() error                   { return nil }
+
+type mockReasoningStore struct {
+	traces map[string]any
+}
+
+func (m *mockReasoningStore) StoreTrail(executionID string, entries []audit.AuditEvent) {}
+func (m *mockReasoningStore) StoreTrace(executionID string, trace any) {
+	m.traces[executionID] = trace
+}
+
+type mockPlanner struct {
+	plan *execution.ExecutionPlan
+	err  error
+}
+
+func (m *mockPlanner) Plan(_ context.Context, _ *planner.PlannerContext) (*execution.ExecutionPlan, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	// Return a fresh copy each time so PlanAndRun can freeze it independently
+	steps := make([]execution.ExecutionStep, len(m.plan.Steps))
+	copy(steps, m.plan.Steps)
+	return &execution.ExecutionPlan{Steps: steps}, nil
+}
+
+func containsSubstring(s, sub string) bool {
+	return len(s) >= len(sub) && (s == sub || len(s) > 0 && containsStr(s, sub))
+}
+
+func containsStr(s, sub string) bool {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
 }

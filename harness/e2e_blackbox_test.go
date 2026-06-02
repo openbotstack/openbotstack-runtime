@@ -9,10 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openbotstack/openbotstack-core/assistant"
+	"github.com/openbotstack/openbotstack-core/planner"
 	"github.com/openbotstack/openbotstack-core/audit"
 	"github.com/openbotstack/openbotstack-core/execution"
-	"github.com/openbotstack/openbotstack-core/planner"
 )
 
 // ========================================================================
@@ -267,7 +266,7 @@ func TestE2EBlackbox_MultiStepReasoning_ClinicalChain(t *testing.T) {
 
 	pCtx := &planner.PlannerContext{
 		UserRequest:   "Assess patient P001",
-		MemoryContext: []assistant.SearchResult{},
+		MemoryContext: []planner.SearchResult{},
 	}
 
 	result, err := rl.Run(context.Background(), &execution.ExecutionStep{Name: "clinical-assess", Type: execution.StepTypeLLM}, pCtx, testEC())
@@ -916,7 +915,7 @@ func TestE2EBlackbox_Memory_ObservationsAccumulate(t *testing.T) {
 
 	pCtx := &planner.PlannerContext{
 		UserRequest:   "analyze data over time",
-		MemoryContext: []assistant.SearchResult{},
+		MemoryContext: []planner.SearchResult{},
 	}
 
 	result, err := rl.Run(context.Background(), &execution.ExecutionStep{Name: "reason", Type: execution.StepTypeLLM}, pCtx, testEC())
@@ -1007,7 +1006,7 @@ func TestE2EBlackbox_Memory_LinearGrowth(t *testing.T) {
 
 	pCtx := &planner.PlannerContext{
 		UserRequest:   "test",
-		MemoryContext: []assistant.SearchResult{},
+		MemoryContext: []planner.SearchResult{},
 	}
 
 	result, err := rl.Run(context.Background(), &execution.ExecutionStep{Name: "reason", Type: execution.StepTypeLLM}, pCtx, testEC())

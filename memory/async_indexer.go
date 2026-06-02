@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/openbotstack/openbotstack-core/control/agent"
+	coreagent "github.com/openbotstack/openbotstack-core/control/agent"
 )
 
 const embeddingTimeout = 30 * time.Second
@@ -31,7 +31,7 @@ func NewAsyncEmbeddingIndexer(embeddingSvc *EmbeddingService, vectorStore Vector
 
 // OnMessage triggers async embedding generation and storage after a message is appended.
 // This is fire-and-forget: errors are logged but never block the caller.
-func (idx *AsyncEmbeddingIndexer) OnMessage(ctx context.Context, msg agent.SessionMessage) {
+func (idx *AsyncEmbeddingIndexer) OnMessage(ctx context.Context, msg coreagent.SessionMessage) {
 	if !idx.enabled {
 		return
 	}
@@ -44,7 +44,7 @@ func (idx *AsyncEmbeddingIndexer) OnMessage(ctx context.Context, msg agent.Sessi
 }
 
 // indexMessage generates an embedding and stores it in the vector database.
-func (idx *AsyncEmbeddingIndexer) indexMessage(ctx context.Context, msg agent.SessionMessage) {
+func (idx *AsyncEmbeddingIndexer) indexMessage(ctx context.Context, msg coreagent.SessionMessage) {
 	embedding, err := idx.embeddingSvc.Embed(ctx, msg.Content)
 	if err != nil {
 		slog.Warn("async indexer: embedding generation failed",

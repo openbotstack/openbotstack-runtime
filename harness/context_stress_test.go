@@ -5,9 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/openbotstack/openbotstack-core/assistant"
-	"github.com/openbotstack/openbotstack-core/execution"
 	"github.com/openbotstack/openbotstack-core/planner"
+	"github.com/openbotstack/openbotstack-core/execution"
 )
 
 // --- Phase 5: Context Stress Test ---
@@ -31,7 +30,7 @@ func TestStress_35TurnReasoningLoop(t *testing.T) {
 
 	pCtx := &planner.PlannerContext{
 		UserRequest:   "stress test",
-		MemoryContext: []assistant.SearchResult{},
+		MemoryContext: []planner.SearchResult{},
 	}
 	ec := testEC()
 
@@ -119,7 +118,7 @@ func TestStress_MemoryConsistencyAcrossTurns(t *testing.T) {
 
 	pCtx := &planner.PlannerContext{
 		UserRequest:   "test",
-		MemoryContext: []assistant.SearchResult{},
+		MemoryContext: []planner.SearchResult{},
 	}
 	rl := NewDefaultReasoningLoop(cfg, mp, se, nil)
 
@@ -168,7 +167,7 @@ func TestStress_ObservationGrowthLinear(t *testing.T) {
 
 	pCtx := &planner.PlannerContext{
 		UserRequest:   "test",
-		MemoryContext: []assistant.SearchResult{},
+		MemoryContext: []planner.SearchResult{},
 	}
 	rl := NewDefaultReasoningLoop(cfg, mp, se, nil)
 
