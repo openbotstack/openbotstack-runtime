@@ -223,8 +223,7 @@ func (ar *AdminRouter) registerRoutes() {
 }
 
 func (ar *AdminRouter) handleTelemetryHealth(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "")
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 	if ar.telemetryHandler == nil {
@@ -235,51 +234,38 @@ func (ar *AdminRouter) handleTelemetryHealth(w http.ResponseWriter, r *http.Requ
 }
 
 func (ar *AdminRouter) handleTelemetrySpans(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "")
-		return
-	}
-	if ar.telemetryHandler == nil {
-		writeJSON(w, http.StatusOK, []interface{}{})
-		return
-	}
-	ar.telemetryHandler.handleSpans(w, r)
+	ar.handleTelemetryGet(w, r, []interface{}{}, ar.telemetryHandler.handleSpans)
 }
 
 func (ar *AdminRouter) handleTelemetryEvents(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "")
-		return
-	}
-	if ar.telemetryHandler == nil {
-		writeJSON(w, http.StatusOK, []interface{}{})
-		return
-	}
-	ar.telemetryHandler.handleEvents(w, r)
+	ar.handleTelemetryGet(w, r, []interface{}{}, ar.telemetryHandler.handleEvents)
 }
 
 func (ar *AdminRouter) handleTelemetryMetrics(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "")
-		return
-	}
-	if ar.telemetryHandler == nil {
-		writeJSON(w, http.StatusOK, map[string]interface{}{})
-		return
-	}
-	ar.telemetryHandler.handleMetrics(w, r)
+	ar.handleTelemetryGet(w, r, map[string]interface{}{}, ar.telemetryHandler.handleMetrics)
 }
 
 func (ar *AdminRouter) handleTelemetryFailures(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "")
+	ar.handleTelemetryGet(w, r, map[string]int{}, ar.telemetryHandler.handleFailures)
+}
+
+// handleTelemetryGet is the shared boilerplate for GET-only telemetry endpoints
+// that forward to a telemetry handler method when configured, or return an empty
+// response when telemetry is not configured.
+func (ar *AdminRouter) handleTelemetryGet(
+	w http.ResponseWriter,
+	r *http.Request,
+	emptyResponse interface{},
+	forward func(http.ResponseWriter, *http.Request),
+) {
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 	if ar.telemetryHandler == nil {
-		writeJSON(w, http.StatusOK, map[string]int{})
+		writeJSON(w, http.StatusOK, emptyResponse)
 		return
 	}
-	ar.telemetryHandler.handleFailures(w, r)
+	forward(w, r)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {

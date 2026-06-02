@@ -9,8 +9,7 @@ import (
 )
 
 func (ar *AdminRouter) handleAdminSessions(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 
@@ -65,8 +64,7 @@ func (ar *AdminRouter) handleAdminSessions(w http.ResponseWriter, r *http.Reques
 
 // handleAdminSessionAction handles DELETE /v1/admin/sessions/{sessionID} (admin, no tenant filter)
 func (ar *AdminRouter) handleAdminSessionAction(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
+	if !requireMethod(w, r, http.MethodDelete) {
 		return
 	}
 

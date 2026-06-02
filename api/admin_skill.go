@@ -7,6 +7,10 @@ import (
 )
 
 func (ar *AdminRouter) handleAdminSkills(w http.ResponseWriter, r *http.Request) {
+	if !requireAnyMethod(w, r, http.MethodGet, http.MethodPost) {
+		return
+	}
+
 	switch r.Method {
 	case http.MethodGet:
 		if ar.skillAdmin == nil {
@@ -39,9 +43,6 @@ func (ar *AdminRouter) handleAdminSkills(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "reloaded"})
-
-	default:
-		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
 	}
 }
 
@@ -49,8 +50,7 @@ func (ar *AdminRouter) handleAdminSkills(w http.ResponseWriter, r *http.Request)
 // Actions: enable, disable, reload
 // skillID may contain slashes (e.g., "core/summarize").
 func (ar *AdminRouter) handleSkillAction(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 

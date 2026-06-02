@@ -10,8 +10,7 @@ import (
 // handleAuditReplay reconstructs an execution trace from audit events.
 // GET /v1/admin/audit/replay?execution_id=xxx
 func (ar *AdminRouter) handleAuditReplay(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 

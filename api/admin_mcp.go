@@ -105,16 +105,14 @@ func (ar *AdminRouter) handleMCPServerAction(w http.ResponseWriter, r *http.Requ
 	action := parts[1]
 	switch action {
 	case "tools":
-		if r.Method != http.MethodGet {
-			writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
-			return
-		}
+		if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
 		ar.getMCPServerTools(w, r, serverID)
 	case "reconnect":
-		if r.Method != http.MethodPost {
-			writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
-			return
-		}
+		if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
 		ar.reconnectMCPServer(w, r, serverID)
 	default:
 		writeAPIError(w, http.StatusBadRequest, ErrInvalidRequest, "unknown action")
@@ -220,8 +218,7 @@ func (ar *AdminRouter) reconnectMCPServer(w http.ResponseWriter, r *http.Request
 
 // handleCapabilities returns all registered capabilities (skills + MCP tools).
 func (ar *AdminRouter) handleCapabilities(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 
@@ -234,8 +231,7 @@ func (ar *AdminRouter) handleCapabilities(w http.ResponseWriter, r *http.Request
 }
 
 func (ar *AdminRouter) handleMCPHealth(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 	if ar.mcpAdmin == nil {

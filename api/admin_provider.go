@@ -14,8 +14,7 @@ import (
 )
 
 func (ar *AdminRouter) handleProviders(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 
@@ -298,8 +297,7 @@ func generateProviderID() string {
 
 // handleProviderTest tests connectivity to a provider endpoint.
 func (ar *AdminRouter) handleProviderTest(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 

@@ -51,8 +51,7 @@ func parseAuditFilter(r *http.Request, defaultLimit int) execution_logs.QueryFil
 }
 
 func (ar *AdminRouter) handleAudit(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 
@@ -109,8 +108,7 @@ func (ar *AdminRouter) handleAudit(w http.ResponseWriter, r *http.Request) {
 
 // handleAuditExport streams audit events as JSON Lines.
 func (ar *AdminRouter) handleAuditExport(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 
@@ -146,8 +144,7 @@ func (ar *AdminRouter) handleAuditExport(w http.ResponseWriter, r *http.Request)
 // HandleMe returns the authenticated user's identity and role.
 // Only GET is allowed.
 func HandleMe(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 
@@ -168,8 +165,7 @@ func HandleMe(w http.ResponseWriter, r *http.Request) {
 // handleAuditCompliance generates a compliance report from audit events.
 // Registered at GET /v1/admin/audit/compliance.
 func (ar *AdminRouter) handleAuditCompliance(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 

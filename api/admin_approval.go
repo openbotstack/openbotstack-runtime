@@ -11,8 +11,7 @@ import (
 
 // handleApprovalList handles GET /v1/admin/approval — lists pending approvals.
 func (ar *AdminRouter) handleApprovalList(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 	if ar.approvalGateway == nil {
@@ -65,8 +64,7 @@ func (ar *AdminRouter) handleApprovalAction(w http.ResponseWriter, r *http.Reque
 
 // handleApprovalGet handles GET /v1/admin/approval/{id}.
 func (ar *AdminRouter) handleApprovalGet(w http.ResponseWriter, r *http.Request, id string) {
-	if r.Method != http.MethodGet {
-		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 
@@ -86,8 +84,7 @@ type approvalActionRequest struct {
 
 // handleApprovalApprove handles POST /v1/admin/approval/{id}/approve.
 func (ar *AdminRouter) handleApprovalApprove(w http.ResponseWriter, r *http.Request, id string) {
-	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 
@@ -117,8 +114,7 @@ func (ar *AdminRouter) handleApprovalApprove(w http.ResponseWriter, r *http.Requ
 
 // handleApprovalDeny handles POST /v1/admin/approval/{id}/deny.
 func (ar *AdminRouter) handleApprovalDeny(w http.ResponseWriter, r *http.Request, id string) {
-	if r.Method != http.MethodPost {
-		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 
