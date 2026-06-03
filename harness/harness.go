@@ -346,7 +346,7 @@ func (h *ExecutionHarness) executeLLMStep(ctx context.Context, step execution.Ex
 		}
 	}
 
-	// Recover the original PlannerContext (with Skills, Capabilities, Soul, etc.)
+	// Recover the original PlannerContext (with Skills, Soul, etc.)
 	// that was set on ExecutionContext via PlanAndRun.
 	var origCtx *planner.PlannerContext
 	if ec.PlannerContext() != nil {
@@ -386,7 +386,6 @@ func (h *ExecutionHarness) executeLLMStep(ctx context.Context, step execution.Ex
 		pCtx = &planner.PlannerContext{
 			UserRequest:   userRequest,
 			Skills:        origCtx.Skills,
-			Capabilities:  origCtx.Capabilities,
 			Soul:          origCtx.Soul,
 			AssistantID:   origCtx.AssistantID,
 			MemoryContext: origCtx.MemoryContext,
@@ -518,7 +517,7 @@ func PlanAndRun(ctx context.Context, pl planner.ExecutionPlanner, h *ExecutionHa
 	}
 
 	// Set PlannerContext on ExecutionContext so LLM steps can access
-	// the original Skills, Capabilities, Soul, and MemoryContext.
+	// the original Skills, Soul, and MemoryContext.
 	ec.SetPlannerContext(task.PlannerContext)
 
 	return h.Run(ctx, plan, ec)

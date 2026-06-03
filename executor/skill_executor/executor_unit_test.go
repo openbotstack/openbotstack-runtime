@@ -14,6 +14,7 @@ import (
 	"github.com/openbotstack/openbotstack-core/audit"
 	"github.com/openbotstack/openbotstack-core/execution"
 	executor "github.com/openbotstack/openbotstack-runtime/executor/skill_executor"
+	"github.com/openbotstack/openbotstack-runtime/harness"
 	"github.com/openbotstack/openbotstack-runtime/logging/execution_logs"
 	"github.com/openbotstack/openbotstack-runtime/sandbox/wasm"
 )
@@ -334,6 +335,13 @@ func TestLoadSkillWithWasm_Duplicate(t *testing.T) {
 // ExecutePlan (multi-step) Tests
 // ============================================================================
 
+
+
+// wireStepDispatcher creates a harness.StepExecutor and wires it into the executor.
+func wireStepDispatcher(e *executor.DefaultExecutor) {
+	se := harness.NewStepExecutor(nil, e, harness.StepExecutorDeps{})
+	e.SetStepDispatcher(se)
+}
 func TestExecutePlan_NilPlan(t *testing.T) {
 	e := executor.NewDefaultExecutor()
 	ctx := context.Background()
@@ -352,6 +360,7 @@ func TestExecutePlan_SingleStepSkill(t *testing.T) {
 	skill := newMockSkill("plan-step-skill", true)
 	_ = e.LoadSkill(ctx, skill)
 	e.SetTextGenerator(&mockTextGenerator{response: "step-done"})
+	wireStepDispatcher(e)
 
 	ec := execution.NewExecutionContext(ctx, "req", "", "", "t1", "u1")
 
@@ -390,6 +399,7 @@ func TestExecutePlan_MultiStep(t *testing.T) {
 	_ = e.LoadSkill(ctx, newMockSkill("step-a", true))
 	_ = e.LoadSkill(ctx, newMockSkill("step-b", true))
 	e.SetTextGenerator(&mockTextGenerator{response: "multi-step"})
+	wireStepDispatcher(e)
 
 	ec := execution.NewExecutionContext(ctx, "req", "", "", "t1", "u1")
 
@@ -420,6 +430,7 @@ func TestExecutePlan_StopsOnFirstError(t *testing.T) {
 	_ = e.LoadSkill(ctx, newMockSkill("success-step", true))
 	// LLM will fail
 	e.SetTextGenerator(&mockTextGenerator{err: errors.New("LLM down")})
+	wireStepDispatcher(e)
 
 	ec := execution.NewExecutionContext(ctx, "req", "", "", "t1", "u1")
 
@@ -452,6 +463,7 @@ func TestExecutePlan_ContextCancellation(t *testing.T) {
 
 	_ = e.LoadSkill(ctx, newMockSkill("cancel-step", true))
 	e.SetTextGenerator(&mockTextGenerator{response: "ok"})
+	wireStepDispatcher(e)
 
 	ec := execution.NewExecutionContext(ctx, "req", "", "", "t1", "u1")
 
@@ -489,6 +501,8 @@ func TestExecutePlan_UsesStepExecutor_ToolStepWithRunner(t *testing.T) {
 		return &execution.StepResult{StepName: name, Output: "tool-output"}, nil
 	}}
 	e.SetToolRunner(mockRunner)
+	se := harness.NewStepExecutor(mockRunner, e, harness.StepExecutorDeps{})
+	e.SetStepDispatcher(se)
 
 	ec := execution.NewExecutionContext(ctx, "req", "", "", "t1", "u1")
 

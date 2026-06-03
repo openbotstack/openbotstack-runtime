@@ -16,7 +16,6 @@ import (
 	"github.com/openbotstack/openbotstack-core/execution"
 	"github.com/openbotstack/openbotstack-core/registry/skills"
 	"github.com/openbotstack/openbotstack-core/validation"
-	"github.com/openbotstack/openbotstack-runtime/harness"
 	"github.com/openbotstack/openbotstack-runtime/logging/execution_logs"
 	"github.com/openbotstack/openbotstack-runtime/observability"
 	"github.com/openbotstack/openbotstack-runtime/sandbox/wasm"
@@ -50,13 +49,14 @@ type StreamingTextGenerator interface {
 
 // DefaultExecutor implements SkillExecutor with real Wasm execution.
 type DefaultExecutor struct {
-	mu            sync.RWMutex
-	skills        map[string]skills.Skill
-	wasm          map[string][]byte
-	runtime       *wasm.Runtime
-	tools         toolrunner.ToolRunner
-	auditLogger   execution_logs.AuditLogger
-	textGenerator TextGenerator
+	mu             sync.RWMutex
+	skills         map[string]skills.Skill
+	wasm           map[string][]byte
+	runtime        *wasm.Runtime
+	tools          toolrunner.ToolRunner
+	auditLogger    execution_logs.AuditLogger
+	textGenerator  TextGenerator
+	stepDispatcher toolrunner.StepDispatcher
 }
 
 func NewDefaultExecutor() *DefaultExecutor {
@@ -79,6 +79,15 @@ func (e *DefaultExecutor) SetToolRunner(tools toolrunner.ToolRunner) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.tools = tools
+}
+
+// SetStepDispatcher sets the dispatcher used by ExecutePlan.
+// When set, ExecutePlan delegates step execution to the dispatcher
+// instead of creating a harness.StepExecutor directly.
+func (e *DefaultExecutor) SetStepDispatcher(d toolrunner.StepDispatcher) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.stepDispatcher = d
 }
 
 func (e *DefaultExecutor) SetAuditLogger(l execution_logs.AuditLogger) {
@@ -510,16 +519,22 @@ func (e *DefaultExecutor) ExecutePlan(ctx context.Context, plan *execution.Execu
 	if plan == nil {
 		return ErrNilExecutionPlan
 	}
-	// Use harness.StepExecutor as the canonical dispatch point.
-	// This consolidates step execution from 4 sites (StepRunner, StepExecutor,
-	// ReasoningLoop, harness.dispatchStep) to 1 canonical path.
-	stepExec := harness.NewStepExecutor(e.tools, e, harness.StepExecutorDeps{})
+	// Use the injected StepDispatcher. This decouples the executor from
+	// the harness package -- the dispatcher is injected by the caller
+	// (typically server setup in cmd/openbotstack).
+	e.mu.RLock()
+	dispatcher := e.stepDispatcher
+	e.mu.RUnlock()
+
+	if dispatcher == nil {
+		return fmt.Errorf("executor: StepDispatcher not configured -- call SetStepDispatcher before ExecutePlan")
+	}
 	for _, step := range plan.Steps {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		s := step // capture for pointer
-		result, err := stepExec.Execute(ctx, &s, ec, nil, 0)
+		result, err := dispatcher.Dispatch(ctx, &s, ec, nil, 0)
 		if result != nil {
 			ec.AddResult(*result)
 		}

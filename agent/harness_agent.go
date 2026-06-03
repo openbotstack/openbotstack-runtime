@@ -21,7 +21,7 @@ import (
 	"github.com/openbotstack/openbotstack-core/planner"
 	"github.com/openbotstack/openbotstack-core/registry/skills"
 	"github.com/openbotstack/openbotstack-runtime/harness"
-	rtcontext "github.com/openbotstack/openbotstack-runtime/context"
+
 	rtmemory "github.com/openbotstack/openbotstack-runtime/memory"
 )
 
@@ -111,7 +111,7 @@ func (a *HarnessAgent) SetConversationManager(cm *rtmemory.ConversationManager) 
 // ContextAssembler, retrieves memory, and constructs the planning context.
 // When a ConversationManager is configured, it consolidates history + memory retrieval
 // into a single call to avoid duplicate RetrieveSimilar calls.
-func (a *HarnessAgent) buildPlannerContext(ctx context.Context, req coreagent.MessageRequest, skillDescs []aitypes.SkillDescriptor, capDescs []capability.CapabilityDescriptor) (*planner.PlannerContext, error) {
+func (a *HarnessAgent) buildPlannerContext(ctx context.Context, req coreagent.MessageRequest, descs []aitypes.SkillDescriptor) (*planner.PlannerContext, error) {
 	var conversationHistory []aitypes.Message
 	var memoryEntries []abstraction.MemoryEntry
 
@@ -152,7 +152,7 @@ func (a *HarnessAgent) buildPlannerContext(ctx context.Context, req coreagent.Me
 		var err error
 		assistantCtx := corecontext.AssistantContext{
 			ProfileID:       a.runtime.AssistantID,
-			EnabledSkillIDs: skillIDsFromDescriptors(skillDescs),
+			EnabledSkillIDs: skillIDsFromDescriptors(descs),
 		}
 		userReq := corecontext.UserRequest{
 			Message:        req.Message,
@@ -160,8 +160,8 @@ func (a *HarnessAgent) buildPlannerContext(ctx context.Context, req coreagent.Me
 			TenantID:       req.TenantID,
 			UserID:         req.UserID,
 		}
-		if ca, ok := a.contextAssembler.(*rtcontext.RuntimeContextAssembler); ok && memoryEntries != nil {
-			assembled, err = ca.AssembleWithMemories(ctx, assistantCtx, userReq, conversationHistory, memoryEntries)
+		if memoryEntries != nil {
+			assembled, err = a.contextAssembler.AssembleWithMemories(ctx, assistantCtx, userReq, conversationHistory, memoryEntries)
 		} else {
 			assembled, err = a.contextAssembler.Assemble(ctx, assistantCtx, userReq, conversationHistory)
 		}
@@ -187,8 +187,7 @@ func (a *HarnessAgent) buildPlannerContext(ctx context.Context, req coreagent.Me
 		AssistantID:   a.runtime.AssistantID,
 		Soul:          a.runtime.Soul,
 		MemoryContext: memoryContext,
-		Skills:        skillDescs,
-		Capabilities:  capDescs,
+		Skills:        descs,
 		UserRequest:   req.Message,
 	}, nil
 }
@@ -236,16 +235,16 @@ func (a *HarnessAgent) HandleMessage(ctx context.Context, req coreagent.MessageR
 	emit("loading_context", "正在加载上下文...")
 
 	// Phase 1: Gather skills
-	skillDescriptors, capDescriptors, err := a.gatherSkillDescriptors()
+	descriptors, err := a.gatherSkillDescriptors()
 	if err != nil {
 		return nil, fmt.Errorf("harness_agent: failed to gather skills: %w", err)
 	}
-	if len(skillDescriptors) == 0 && len(capDescriptors) == 0 {
+	if len(descriptors) == 0 {
 		return nil, planner.ErrNoSkillsAvailable
 	}
 
 	// Phase 2: Assemble planner context
-	pCtx, err := a.buildPlannerContext(ctx, req, skillDescriptors, capDescriptors)
+	pCtx, err := a.buildPlannerContext(ctx, req, descriptors)
 	if err != nil {
 		return nil, fmt.Errorf("harness_agent: failed to build context: %w", err)
 	}
@@ -445,26 +444,17 @@ func stepResultsToAuditTrail(results []execution.StepResult, traceID string) []a
 	return entries
 }
 
-func (a *HarnessAgent) gatherSkillDescriptors() ([]aitypes.SkillDescriptor, []capability.CapabilityDescriptor, error) {
+func (a *HarnessAgent) gatherSkillDescriptors() ([]aitypes.SkillDescriptor, error) {
 	if a.capRegistry != nil {
 		caps := a.capRegistry.List()
 		descs := make([]aitypes.SkillDescriptor, 0, len(caps))
-		capDescs := make([]capability.CapabilityDescriptor, 0, len(caps))
 		for _, c := range caps {
 			if a.skillDisabled != nil && a.skillDisabled(c.ID) {
 				continue
 			}
-			descs = append(descs, aitypes.SkillDescriptor{
-				ID:          c.ID,
-				Name:        c.Name,
-				Description: c.Description,
-				InputSchema: c.InputSchema,
-				Kind:        c.Kind,
-				SourceID:    c.SourceID,
-			})
-			capDescs = append(capDescs, c)
+			descs = append(descs, aitypes.SkillDescriptor(c))
 		}
-		return descs, capDescs, nil
+		return descs, nil
 	}
 	ids := a.skillRegistry.List()
 	descs := make([]aitypes.SkillDescriptor, 0, len(ids))
@@ -478,7 +468,7 @@ func (a *HarnessAgent) gatherSkillDescriptors() ([]aitypes.SkillDescriptor, []ca
 		}
 		descs = append(descs, skillToDescriptor(id, s))
 	}
-	return descs, nil, nil
+	return descs, nil
 }
 
 func (a *HarnessAgent) storeMessages(ctx context.Context, req coreagent.MessageRequest, resp *coreagent.MessageResponse) {

@@ -48,7 +48,7 @@ func TestBuildPlannerContext_SetsAssistantIdentity(t *testing.T) {
 		{ID: "skill-1", Name: "Test", Description: "A test skill"},
 	}
 
-	pCtx, err := a.buildPlannerContext(context.Background(), req, skillDescs, nil)
+	pCtx, err := a.buildPlannerContext(context.Background(), req, skillDescs)
 	if err != nil {
 		t.Fatalf("buildPlannerContext failed: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestBuildPlannerContext_WithConversationStore(t *testing.T) {
 		TenantID: "t1", UserID: "u1", SessionID: "s1", Message: "continue",
 	}
 
-	pCtx, err := a.buildPlannerContext(context.Background(), req, nil, nil)
+	pCtx, err := a.buildPlannerContext(context.Background(), req, nil)
 	if err != nil {
 		t.Fatalf("buildPlannerContext failed: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestBuildPlannerContext_NoMemoryManager_NoPanic(t *testing.T) {
 		TenantID: "t1", UserID: "u1", SessionID: "s1", Message: "test",
 	}
 
-	pCtx, err := a.buildPlannerContext(context.Background(), req, nil, nil)
+	pCtx, err := a.buildPlannerContext(context.Background(), req, nil)
 	if err != nil {
 		t.Fatalf("buildPlannerContext failed: %v", err)
 	}
@@ -129,15 +129,12 @@ func TestPhaseGatherSkillDescriptors_WithCapRegistry(t *testing.T) {
 			{ID: "cap-2", Name: "Cap2", Description: "Another capability"},
 		}},
 	}
-	skillDescs, capDescs, err := a.gatherSkillDescriptors()
+	skillDescs, err := a.gatherSkillDescriptors()
 	if err != nil {
 		t.Fatalf("gatherSkillDescriptors failed: %v", err)
 	}
 	if len(skillDescs) != 2 {
 		t.Errorf("skillDescs len = %d, want 2", len(skillDescs))
-	}
-	if len(capDescs) != 2 {
-		t.Errorf("capDescs len = %d, want 2", len(capDescs))
 	}
 }
 
@@ -149,15 +146,12 @@ func TestPhaseGatherSkillDescriptors_WithSkillDisabled(t *testing.T) {
 		}},
 		skillDisabled: func(id string) bool { return id == "disabled" },
 	}
-	skillDescs, capDescs, err := a.gatherSkillDescriptors()
+	skillDescs, err := a.gatherSkillDescriptors()
 	if err != nil {
 		t.Fatalf("gatherSkillDescriptors failed: %v", err)
 	}
 	if len(skillDescs) != 1 || skillDescs[0].ID != "enabled" {
 		t.Errorf("skillDescs = %v, want only [enabled]", skillDescs)
-	}
-	if len(capDescs) != 1 {
-		t.Errorf("capDescs len = %d, want 1", len(capDescs))
 	}
 }
 
@@ -167,15 +161,12 @@ func TestPhaseGatherSkillDescriptors_FallbackSkillRegistry(t *testing.T) {
 			"skill-a": {id: "skill-a", name: "A", desc: "Skill A"},
 		}},
 	}
-	skillDescs, capDescs, err := a.gatherSkillDescriptors()
+	skillDescs, err := a.gatherSkillDescriptors()
 	if err != nil {
 		t.Fatalf("gatherSkillDescriptors failed: %v", err)
 	}
 	if len(skillDescs) != 1 || skillDescs[0].ID != "skill-a" {
 		t.Errorf("skillDescs = %v, want [{ID:skill-a}]", skillDescs)
-	}
-	if capDescs != nil {
-		t.Errorf("capDescs = %v, want nil (no cap registry)", capDescs)
 	}
 }
 

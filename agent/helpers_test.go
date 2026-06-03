@@ -6,6 +6,7 @@ import (
 
 	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
 	"github.com/openbotstack/openbotstack-core/planner"
+	"github.com/openbotstack/openbotstack-core/registry/skills"
 )
 
 func TestSkillDescriptorTypeIdentity(t *testing.T) {
@@ -32,7 +33,7 @@ func TestSkillDescriptorTypeIdentity(t *testing.T) {
 		t.Errorf("ID = %q, want %q", pCtx.Skills[0].ID, "core/test")
 	}
 
-	// Verify the canonical skillToDescriptor function works via capability.SkillToDescriptor.
+	// Verify the canonical skillToDescriptor function works via skills.GetDescriptor.
 	desc := skillToDescriptor("test", &mockSkillForHelper{id: "h1", name: "Helper", desc: "test skill"})
 	if desc.ID != "h1" {
 		t.Errorf("skillToDescriptor ID = %q, want %q", desc.ID, "h1")
@@ -62,6 +63,52 @@ func TestSkillDescriptorDirectPassThrough(t *testing.T) {
 		t.Errorf("Skills[1].Name = %q, want %q", pCtx.Skills[1].Name, "Skill2")
 	}
 }
+
+// TestSkillToDescriptorUsesGetDescriptor verifies that the unified skillToDescriptor
+// path goes through skills.GetDescriptor (which checks DescriptorProvider).
+func TestSkillToDescriptorUsesGetDescriptor(t *testing.T) {
+	// A skill that implements DescriptorProvider
+	s := &descriptorProviderSkill{
+		id:   "custom/skill",
+		name: "Custom",
+		desc: "Custom skill",
+		descriptor: aitypes.SkillDescriptor{
+			ID:          "custom/skill",
+			Name:        "Custom",
+			Description: "Custom skill",
+			Kind:        "skill",
+			SourceID:    "custom/skill",
+		},
+	}
+	got := skillToDescriptor("custom/skill", s)
+	if got.Kind != "skill" {
+		t.Errorf("Kind = %q, want %q", got.Kind, "skill")
+	}
+	if got.SourceID != "custom/skill" {
+		t.Errorf("SourceID = %q, want %q", got.SourceID, "custom/skill")
+	}
+}
+
+// descriptorProviderSkill implements both skills.Skill and skills.DescriptorProvider.
+type descriptorProviderSkill struct {
+	id, name, desc string
+	descriptor     aitypes.SkillDescriptor
+}
+
+func (s *descriptorProviderSkill) ID() string                        { return s.id }
+func (s *descriptorProviderSkill) Name() string                      { return s.name }
+func (s *descriptorProviderSkill) Description() string               { return s.desc }
+func (s *descriptorProviderSkill) InputSchema() *aitypes.JSONSchema  { return nil }
+func (s *descriptorProviderSkill) OutputSchema() *aitypes.JSONSchema { return nil }
+func (s *descriptorProviderSkill) RequiredPermissions() []string     { return nil }
+func (s *descriptorProviderSkill) Timeout() time.Duration            { return 0 }
+func (s *descriptorProviderSkill) Validate() error                   { return nil }
+func (s *descriptorProviderSkill) Descriptor() aitypes.SkillDescriptor {
+	return s.descriptor
+}
+
+// Verify interface compliance
+var _ skills.DescriptorProvider = (*descriptorProviderSkill)(nil)
 
 // mockSkillForHelper is a minimal Skill implementation for testing skillToDescriptor.
 type mockSkillForHelper struct {

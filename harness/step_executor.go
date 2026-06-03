@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"log/slog"
@@ -13,36 +12,70 @@ import (
 	"github.com/openbotstack/openbotstack-runtime/toolrunner"
 )
 
+// Compile-time interface compliance checks.
+var _ toolrunner.StepDispatcher = (*StepExecutor)(nil)
+
 // StepExecutor handles execution of individual tool and skill steps.
+// It implements toolrunner.StepDispatcher and uses a StepHandler registry
+// for pluggable step routing instead of string prefix matching.
 type StepExecutor struct {
 	toolRunner    toolrunner.ToolRunner
 	skillExecutor execution.SkillExecutor
-	runners       map[string]toolrunner.ToolRunner // prefix → runner
+	handlers      []toolrunner.StepHandler // ordered list; first CanHandle wins
 }
 
-// StepExecutorDeps captures optional runners.
+// StepExecutorDeps captures optional handlers/runners.
+// For backwards compatibility, MCPRunner and BuiltinRunner are converted
+// to prefix-based handlers internally.
 type StepExecutorDeps struct {
 	MCPRunner     toolrunner.ToolRunner
 	BuiltinRunner toolrunner.ToolRunner
+	// ExtraHandlers allows registering custom StepHandlers beyond the
+	// default MCP and builtin prefix handlers.
+	ExtraHandlers []toolrunner.StepHandler
 }
 
-// NewStepExecutor creates a step executor.
+// NewStepExecutor creates a step executor with prefix-based handlers derived
+// from the legacy MCPRunner/BuiltinRunner deps.
 func NewStepExecutor(toolRunner toolrunner.ToolRunner, skillExecutor execution.SkillExecutor, deps StepExecutorDeps) *StepExecutor {
-	runners := make(map[string]toolrunner.ToolRunner)
+	var handlers []toolrunner.StepHandler
 	if deps.MCPRunner != nil {
-		runners["mcp."] = deps.MCPRunner
+		handlers = append(handlers, &prefixHandler{prefix: "mcp.", runner: deps.MCPRunner})
 	}
 	if deps.BuiltinRunner != nil {
-		runners["builtin."] = deps.BuiltinRunner
+		handlers = append(handlers, &prefixHandler{prefix: "builtin.", runner: deps.BuiltinRunner})
 	}
+	handlers = append(handlers, deps.ExtraHandlers...)
 	return &StepExecutor{
 		toolRunner:    toolRunner,
 		skillExecutor: skillExecutor,
-		runners:       runners,
+		handlers:      handlers,
 	}
 }
 
-// Execute dispatches a single step to the correct runner based on step type and name prefix.
+// Dispatch implements toolrunner.StepDispatcher.
+func (se *StepExecutor) Dispatch(
+	ctx context.Context,
+	step *execution.ExecutionStep,
+	ec *execution.ExecutionContext,
+	prevResults map[string]any,
+	stepTimeout time.Duration,
+) (*execution.StepResult, error) {
+	return se.Execute(ctx, step, ec, prevResults, stepTimeout)
+}
+
+// DispatchFallback implements toolrunner.StepDispatcher.
+func (se *StepExecutor) DispatchFallback(
+	ctx context.Context,
+	fallbackTool string,
+	arguments map[string]any,
+	ec *execution.ExecutionContext,
+	prevResults map[string]any,
+) (*execution.StepResult, error) {
+	return se.ExecuteFallback(ctx, fallbackTool, arguments, ec, prevResults)
+}
+
+// Execute dispatches a single step to the correct runner based on step type and handler registry.
 func (se *StepExecutor) Execute(
 	ctx context.Context,
 	step *execution.ExecutionStep,
@@ -65,11 +98,11 @@ func (se *StepExecutor) Execute(
 	}
 }
 
-// lookupRunner finds a runner by step name prefix.
-func (se *StepExecutor) lookupRunner(stepName string) toolrunner.ToolRunner {
-	for prefix, runner := range se.runners {
-		if strings.HasPrefix(stepName, prefix) {
-			return runner
+// lookupHandler finds the first handler that can handle the given step.
+func (se *StepExecutor) lookupHandler(step *execution.ExecutionStep) toolrunner.StepHandler {
+	for _, h := range se.handlers {
+		if h.CanHandle(step) {
+			return h
 		}
 	}
 	return nil
@@ -83,39 +116,44 @@ func (se *StepExecutor) ExecuteTool(
 	prevResults map[string]any,
 	stepTimeout time.Duration,
 ) (*execution.StepResult, error) {
-	step = step.Clone()
-	if n := step.CoerceStringNumbers(); n > 0 {
-		slog.DebugContext(ctx, "step_executor: coerced argument types", "step", step.Name, "count", n)
+	cloned := step.Clone()
+	if n := cloned.CoerceStringNumbers(); n > 0 {
+		slog.DebugContext(ctx, "step_executor: coerced argument types", "step", cloned.Name, "count", n)
 	}
-	step.ResolveArguments(prevResults)
+	cloned.ResolveArguments(prevResults)
 
 	start := time.Now()
 
-	// Route to prefix-matched runner first, then default toolRunner.
-	if runner := se.lookupRunner(step.Name); runner != nil {
-		return se.executeWithRunner(ctx, runner, step, ec, stepTimeout, start)
+	// Route to registered handler first, then default toolRunner.
+	if handler := se.lookupHandler(cloned); handler != nil {
+		return handler.Handle(ctx, cloned, ec, prevResults, stepTimeout)
 	}
 
 	if se.toolRunner == nil {
 		return &execution.StepResult{
-			StepID:   step.StepID,
-			StepName: step.Name,
-			Type:     string(step.Type),
+			StepID:   cloned.StepID,
+			StepName: cloned.Name,
+			Type:     string(cloned.Type),
 			Error:    fmt.Errorf("no tool runner configured"),
 			Duration: time.Since(start),
-		}, fmt.Errorf("tool step %q skipped: no tool runner configured", step.Name)
+		}, fmt.Errorf("tool step %q skipped: no tool runner configured", cloned.Name)
 	}
-	return se.executeWithRunner(ctx, se.toolRunner, step, ec, stepTimeout, start)
+	result, err := runToolWithTimeout(ctx, se.toolRunner, cloned, ec, stepTimeout)
+	if result != nil {
+		result.Duration = time.Since(start)
+	}
+	return result, err
 }
 
-// executeWithRunner handles tool execution via any ToolRunner with timeout management.
-func (se *StepExecutor) executeWithRunner(
+// runToolWithTimeout handles tool execution via any ToolRunner with timeout management
+// and standardized StepResult construction. Used by both the default runner path and
+// prefixHandler to avoid duplicating timeout/error logic.
+func runToolWithTimeout(
 	ctx context.Context,
 	runner toolrunner.ToolRunner,
 	step *execution.ExecutionStep,
 	ec *execution.ExecutionContext,
 	stepTimeout time.Duration,
-	start time.Time,
 ) (*execution.StepResult, error) {
 	var stepCtx context.Context
 	var cancel context.CancelFunc
@@ -126,6 +164,7 @@ func (se *StepExecutor) executeWithRunner(
 	}
 	defer cancel()
 
+	start := time.Now()
 	toolRes, err := runner.Execute(stepCtx, step.Name, step.Arguments, ec)
 	duration := time.Since(start)
 
@@ -161,41 +200,41 @@ func (se *StepExecutor) ExecuteSkill(
 	prevResults map[string]any,
 	stepTimeout time.Duration,
 ) (*execution.StepResult, error) {
-	// Prefix-routed steps (mcp.*, builtin.*) are handled as tool steps.
-	if se.lookupRunner(step.Name) != nil {
+	// Handler-routed steps (mcp.*, builtin.*) are handled as tool steps.
+	if handler := se.lookupHandler(step); handler != nil {
 		return se.ExecuteTool(ctx, step, ec, prevResults, stepTimeout)
 	}
 
-	step = step.Clone()
-	if n := step.CoerceStringNumbers(); n > 0 {
-		slog.DebugContext(ctx, "step_executor: coerced argument types", "step", step.Name, "count", n)
+	cloned := step.Clone()
+	if n := cloned.CoerceStringNumbers(); n > 0 {
+		slog.DebugContext(ctx, "step_executor: coerced argument types", "step", cloned.Name, "count", n)
 	}
-	step.ResolveArguments(prevResults)
+	cloned.ResolveArguments(prevResults)
 
 	start := time.Now()
 
 	if se.skillExecutor == nil {
 		return &execution.StepResult{
-			StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
+			StepID: cloned.StepID, StepName: cloned.Name, Type: string(cloned.Type),
 			Error: fmt.Errorf("no skill executor configured"), Duration: time.Since(start),
-		}, fmt.Errorf("skill step %q skipped: no skill executor configured", step.Name)
+		}, fmt.Errorf("skill step %q skipped: no skill executor configured", cloned.Name)
 	}
 
-	inputBytes, err := step.ArgumentsJSON()
+	inputBytes, err := cloned.ArgumentsJSON()
 	if err != nil {
 		return &execution.StepResult{
-			StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
+			StepID: cloned.StepID, StepName: cloned.Name, Type: string(cloned.Type),
 			Error: fmt.Errorf("serialize arguments: %w", err), Duration: time.Since(start),
-		}, fmt.Errorf("skill step %q: serialize arguments: %w", step.Name, err)
+		}, fmt.Errorf("skill step %q: serialize arguments: %w", cloned.Name, err)
 	}
 
 	timeout := stepTimeout
-	if step.Timeout > 0 {
-		timeout = time.Duration(step.Timeout) * time.Millisecond
+	if cloned.Timeout > 0 {
+		timeout = time.Duration(cloned.Timeout) * time.Millisecond
 	}
 
 	req := execution.ExecutionRequest{
-		SkillID:   step.Name,
+		SkillID:   cloned.Name,
 		Input:     inputBytes,
 		Timeout:   timeout,
 		TenantID:  ec.TenantID,
@@ -215,12 +254,12 @@ func (se *StepExecutor) ExecuteSkill(
 	if err != nil {
 		if ctx.Err() != nil {
 			return &execution.StepResult{
-				StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
+				StepID: cloned.StepID, StepName: cloned.Name, Type: string(cloned.Type),
 				Error: ctx.Err(), Duration: duration,
 			}, ctx.Err()
 		}
 		return &execution.StepResult{
-			StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
+			StepID: cloned.StepID, StepName: cloned.Name, Type: string(cloned.Type),
 			Error: err, Duration: duration,
 		}, err
 	}
@@ -231,7 +270,7 @@ func (se *StepExecutor) ExecuteSkill(
 	}
 
 	return &execution.StepResult{
-		StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
+		StepID: cloned.StepID, StepName: cloned.Name, Type: string(cloned.Type),
 		Output: output, Duration: duration,
 	}, nil
 }
@@ -265,4 +304,29 @@ func ArgumentsToMap(result *execution.StepResult) map[string]any {
 		}
 	}
 	return map[string]any{result.StepName: result.Output}
+}
+
+// prefixHandler adapts a ToolRunner to the StepHandler interface using
+// step name prefix matching. This replaces the previous string-prefix
+// map lookup with a pluggable handler pattern.
+type prefixHandler struct {
+	prefix string
+	runner toolrunner.ToolRunner
+}
+
+// CanHandle returns true if the step name starts with this handler's prefix.
+func (h *prefixHandler) CanHandle(step *execution.ExecutionStep) bool {
+	return len(step.Name) >= len(h.prefix) && step.Name[:len(h.prefix)] == h.prefix
+}
+
+// Handle delegates to the shared runToolWithTimeout helper, avoiding duplication
+// with the default runner path in ExecuteTool.
+func (h *prefixHandler) Handle(
+	ctx context.Context,
+	step *execution.ExecutionStep,
+	ec *execution.ExecutionContext,
+	_ map[string]any,
+	stepTimeout time.Duration,
+) (*execution.StepResult, error) {
+	return runToolWithTimeout(ctx, h.runner, step, ec, stepTimeout)
 }
