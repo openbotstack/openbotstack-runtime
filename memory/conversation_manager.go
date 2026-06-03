@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"log/slog"
 
 	coreagent "github.com/openbotstack/openbotstack-core/control/agent"
 	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
@@ -74,7 +75,9 @@ func (cm *ConversationManager) GetConversationContext(ctx context.Context, sessi
 			SessionID: sessionID,
 		})
 		entries, err := cm.memoryManager.RetrieveSimilar(memCtx, message, 5)
-		if err == nil && len(entries) > 0 {
+		if err != nil {
+			slog.WarnContext(ctx, "conversation_manager: memory retrieval failed", "error", err)
+		} else if len(entries) > 0 {
 			result.MemoryEntries = entries
 		}
 	}

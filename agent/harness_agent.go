@@ -148,24 +148,23 @@ func (a *HarnessAgent) buildPlannerContext(ctx context.Context, req coreagent.Me
 
 	// Pass pre-fetched memories to context assembler to prevent duplicate retrieval
 	if a.contextAssembler != nil {
-		// If we already have memories, set them on the assembler before calling Assemble
-		if ca, ok := a.contextAssembler.(*rtcontext.RuntimeContextAssembler); ok && memoryEntries != nil {
-			ca.SetPrefetchedMemories(memoryEntries)
+		var assembled *corecontext.AssembledContext
+		var err error
+		assistantCtx := corecontext.AssistantContext{
+			ProfileID:       a.runtime.AssistantID,
+			EnabledSkillIDs: skillIDsFromDescriptors(skillDescs),
 		}
-
-		assembled, err := a.contextAssembler.Assemble(ctx,
-			corecontext.AssistantContext{
-				ProfileID:       a.runtime.AssistantID,
-				EnabledSkillIDs: skillIDsFromDescriptors(skillDescs),
-			},
-			corecontext.UserRequest{
-				Message:        req.Message,
-				ConversationID: req.SessionID,
-				TenantID:       req.TenantID,
-				UserID:         req.UserID,
-			},
-			conversationHistory,
-		)
+		userReq := corecontext.UserRequest{
+			Message:        req.Message,
+			ConversationID: req.SessionID,
+			TenantID:       req.TenantID,
+			UserID:         req.UserID,
+		}
+		if ca, ok := a.contextAssembler.(*rtcontext.RuntimeContextAssembler); ok && memoryEntries != nil {
+			assembled, err = ca.AssembleWithMemories(ctx, assistantCtx, userReq, conversationHistory, memoryEntries)
+		} else {
+			assembled, err = a.contextAssembler.Assemble(ctx, assistantCtx, userReq, conversationHistory)
+		}
 		if err != nil {
 			slog.WarnContext(ctx, "harness_agent: context assembly failed", "error", err)
 		} else if assembled != nil && len(assembled.Messages) > 0 {

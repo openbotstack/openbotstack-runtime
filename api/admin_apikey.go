@@ -159,14 +159,7 @@ func (ar *AdminRouter) listAPIKeys(w http.ResponseWriter, r *http.Request, userI
 }
 
 func (ar *AdminRouter) handleRevokeKey(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		slog.WarnContext(r.Context(), "request validation error",
-			"method", r.Method,
-			"path", r.URL.Path,
-			"status", http.StatusMethodNotAllowed,
-			"error", "method not allowed",
-		)
-		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
+	if !requireMethod(w, r, http.MethodDelete) {
 		return
 	}
 

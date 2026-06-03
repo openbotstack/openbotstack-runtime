@@ -27,10 +27,6 @@ type skillGetter interface {
 type RuntimeContextAssembler struct {
 	registry      skillGetter
 	memoryManager abstraction.MemoryManager
-	// prefetchedMemories, when non-nil, bypasses the internal RetrieveSimilar call
-	// and uses these memories instead. This prevents duplicate retrieval when
-	// HarnessAgent already fetched memories via ConversationManager.
-	prefetchedMemories []abstraction.MemoryEntry
 }
 
 // NewRuntimeContextAssembler creates a new context assembler.
@@ -42,12 +38,6 @@ func NewRuntimeContextAssembler(registry skillGetter, memoryManager abstraction.
 	}
 }
 
-// SetPrefetchedMemories configures the assembler to use pre-fetched memories
-// instead of calling RetrieveSimilar internally. Pass nil to disable.
-func (a *RuntimeContextAssembler) SetPrefetchedMemories(memories []abstraction.MemoryEntry) {
-	a.prefetchedMemories = memories
-}
-
 // Assemble builds the complete context for an LLM request.
 func (a *RuntimeContextAssembler) Assemble(
 	ctx context.Context,
@@ -55,15 +45,36 @@ func (a *RuntimeContextAssembler) Assemble(
 	request corecontext.UserRequest,
 	conversationHistory []aitypes.Message,
 ) (*corecontext.AssembledContext, error) {
+	return a.assemble(ctx, assistant, request, conversationHistory, nil)
+}
+
+// AssembleWithMemories builds context using pre-fetched memories instead of
+// calling RetrieveSimilar internally. This prevents duplicate retrieval when
+// the caller (e.g., ConversationManager) has already fetched memories.
+func (a *RuntimeContextAssembler) AssembleWithMemories(
+	ctx context.Context,
+	assistant corecontext.AssistantContext,
+	request corecontext.UserRequest,
+	conversationHistory []aitypes.Message,
+	prefetched []abstraction.MemoryEntry,
+) (*corecontext.AssembledContext, error) {
+	return a.assemble(ctx, assistant, request, conversationHistory, prefetched)
+}
+
+func (a *RuntimeContextAssembler) assemble(
+	ctx context.Context,
+	assistant corecontext.AssistantContext,
+	request corecontext.UserRequest,
+	conversationHistory []aitypes.Message,
+	prefetched []abstraction.MemoryEntry,
+) (*corecontext.AssembledContext, error) {
 	// 1. Build system prompt from persona + base prompt
 	systemPrompt := buildPersonaSystemPrompt(assistant.Persona, assistant.BaseSystemPrompt)
 
-	// 2. Retrieve relevant memories (best-effort).
-	// If prefetched memories were provided (e.g., by ConversationManager), use those
-	// to avoid duplicate RetrieveSimilar calls.
+	// 2. Resolve memories: use prefetched if provided, otherwise retrieve.
 	var relevantMemories []abstraction.MemoryEntry
-	if a.prefetchedMemories != nil {
-		relevantMemories = a.prefetchedMemories
+	if prefetched != nil {
+		relevantMemories = prefetched
 	} else if a.memoryManager != nil && request.Message != "" {
 		memories, err := a.memoryManager.RetrieveSimilar(ctx, request.Message, 5)
 		if err != nil {

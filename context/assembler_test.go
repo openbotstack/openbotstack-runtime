@@ -360,7 +360,7 @@ func TestContract_MissingSkillsSkipped(t *testing.T) {
 
 // Mock implementations
 
-// mockRegistry implements agent.SkillRegistry (List + Get).
+// mockRegistry implements skillGetter (Get).
 type mockRegistry struct {
 	skills map[string]mockSkill
 }
@@ -464,7 +464,7 @@ func (m *trackingMemoryManager) Summarize(_ context.Context, _ []abstraction.Mem
 	return abstraction.MemoryEntry{}, nil
 }
 
-func TestAssemble_PrefetchedMemoriesBypassInternalRetrieval(t *testing.T) {
+func TestAssembleWithMemories_BypassInternalRetrieval(t *testing.T) {
 	tracker := &trackingMemoryManager{
 		entries: []abstraction.MemoryEntry{
 			{Content: "internal retrieval result"},
@@ -475,16 +475,16 @@ func TestAssemble_PrefetchedMemoriesBypassInternalRetrieval(t *testing.T) {
 		{Content: "prefetched result 1"},
 		{Content: "prefetched result 2"},
 	}
-	assembler.SetPrefetchedMemories(prefetched)
 
-	result, err := assembler.Assemble(
+	result, err := assembler.AssembleWithMemories(
 		context.Background(),
 		corecontext.AssistantContext{ProfileID: "test"},
 		corecontext.UserRequest{Message: "hello"},
 		nil,
+		prefetched,
 	)
 	if err != nil {
-		t.Fatalf("Assemble failed: %v", err)
+		t.Fatalf("AssembleWithMemories failed: %v", err)
 	}
 	if tracker.callCount != 0 {
 		t.Errorf("RetrieveSimilar called %d times, want 0 (should use prefetched)", tracker.callCount)
@@ -497,14 +497,13 @@ func TestAssemble_PrefetchedMemoriesBypassInternalRetrieval(t *testing.T) {
 	}
 }
 
-func TestAssemble_PrefetchedNil_FallsBackToMemoryManager(t *testing.T) {
+func TestAssemble_NilMemories_FallsBackToMemoryManager(t *testing.T) {
 	tracker := &trackingMemoryManager{
 		entries: []abstraction.MemoryEntry{
 			{Content: "from memory manager"},
 		},
 	}
 	assembler := NewRuntimeContextAssembler(nil, tracker)
-	assembler.SetPrefetchedMemories(nil)
 
 	result, err := assembler.Assemble(
 		context.Background(),
