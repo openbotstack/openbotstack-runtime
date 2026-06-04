@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
 	agent "github.com/openbotstack/openbotstack-core/control/agent"
 )
 
@@ -94,7 +95,7 @@ func TestDualWrite_AppendMessage_WritesToBoth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetHistory: %v", err)
 	}
-	if len(history) != 1 || history[0].Content != "Hello world" {
+	if len(history) != 1 || aitypes.FlattenToText(history[0].Contents) != "Hello world" {
 		t.Errorf("Markdown history = %v, want 1 message 'Hello world'", history)
 	}
 

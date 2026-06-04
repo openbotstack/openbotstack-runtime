@@ -1,0 +1,30 @@
+id: xray-summary
+name: X-Ray Summary
+description: Summarizes X-ray findings into a concise radiological report.
+execution:
+  mode: declarative
+input_schema:
+  type: object
+  properties:
+    image_url:
+      type: string
+      description: URL of the X-ray image
+    body_region:
+      type: string
+      description: Body region imaged (chest, extremity, spine, etc.)
+    prior_report:
+      type: string
+      description: Optional prior report for comparison
+  required:
+    - image_url
+output_schema:
+  type: object
+  properties:
+    summary:
+      type: string
+    findings:
+      type: array
+    comparison:
+      type: string
+permissions: []
+timeout: 120s

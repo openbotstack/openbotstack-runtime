@@ -355,8 +355,8 @@ func TestSessionHistoryEndpointWithProvider(t *testing.T) {
 		Agent: &mockAgent{},
 		History: &mockHistoryProvider{
 			history: []aitypes.Message{
-				{Role: "user", Content: "Hello"},
-				{Role: "assistant", Content: "Hi there!"},
+				aitypes.NewTextMessage("user", "Hello"),
+				aitypes.NewTextMessage("assistant", "Hi there!"),
 			},
 		},
 	})

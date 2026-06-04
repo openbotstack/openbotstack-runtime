@@ -164,9 +164,9 @@ func (b *ServerBuilder) buildLLMGenerator() harnesspkg.LLMGenerator {
 
 		msgs := []types.Message{}
 		if systemPrompt != "" {
-			msgs = append(msgs, types.Message{Role: "system", Content: systemPrompt})
+			msgs = append(msgs, types.NewTextMessage("system", systemPrompt))
 		}
-		msgs = append(msgs, types.Message{Role: "user", Content: userMessage})
+		msgs = append(msgs, types.NewTextMessage("user", userMessage))
 
 		resp, err := provider.Generate(ctx, types.GenerateRequest{
 			Messages:  msgs,

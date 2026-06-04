@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/openbotstack/openbotstack-core/capability"
 	mcppkg "github.com/openbotstack/openbotstack-runtime/mcp"
@@ -16,6 +17,13 @@ func (b *ServerBuilder) InitCapabilities() *ServerBuilder {
 
 	registrar := NewCapabilityRegistrar(capRegistry, b.exec)
 	builtinRunner := registrar.RegisterAll(ctx)
+
+	// Inject LLM access for vision_analyze and future LLMAwareTools.
+	if b.modelRouter != nil {
+		llmAccess := NewRuntimeLLMAccess(b.modelRouter, 2048, 60*time.Second)
+		builtinRunner.SetLLMAccess(llmAccess)
+		slog.Info("builtin tools: LLM access injected for vision-capable tools")
+	}
 
 	mcpStore := mcppkg.NewSQLiteMCPStore(b.pdb.DB)
 	mcpManager := mcppkg.NewMCPManager(mcpStore, capRegistry)

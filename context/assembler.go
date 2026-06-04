@@ -94,10 +94,7 @@ func (a *RuntimeContextAssembler) assemble(
 		for _, m := range relevantMemories {
 			memParts = append(memParts, "- "+m.Content)
 		}
-		messages = append(messages, aitypes.Message{
-			Role:    "system",
-			Content: "Relevant context from memory:\n" + strings.Join(memParts, "\n"),
-		})
+		messages = append(messages, aitypes.NewTextMessage("system", "Relevant context from memory:\n"+strings.Join(memParts, "\n")))
 	}
 
 	// Append conversation history

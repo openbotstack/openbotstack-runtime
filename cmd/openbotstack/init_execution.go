@@ -24,7 +24,7 @@ func (b *ServerBuilder) InitExecution() *ServerBuilder {
 	hostFuncs := &wasm.HostFunctions{
 		LLMGenerate: func(ctx context.Context, prompt string) (string, error) {
 			mReq := types.GenerateRequest{
-				Messages: []types.Message{{Role: "user", Content: prompt}},
+				Messages: []types.Message{types.NewTextMessage("user", prompt)},
 			}
 			prov, err := b.modelRouter.Route([]types.CapabilityType{types.CapTextGeneration}, types.ModelConstraints{})
 			if err != nil {

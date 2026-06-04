@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/openbotstack/openbotstack-core/execution"
 )
@@ -21,16 +22,81 @@ type BuiltinTool interface {
 	Execute(ctx context.Context, input map[string]any) (map[string]any, error)
 }
 
+// LLMAwareTool is an optional interface for builtin tools that need LLM access.
+type LLMAwareTool interface {
+	SetLLMAccess(access LLMAccess)
+}
+
+// LLMAccess is a restricted LLM interface for builtin tools.
+// It provides a simplified Generate method without exposing the full
+// ModelProvider/ModelRouter surface area.
+type LLMAccess interface {
+	Generate(ctx context.Context, req LLMRequest) (*LLMResponse, error)
+}
+
+// LLMRequest is a simplified generation request for builtin tools.
+type LLMRequest struct {
+	SystemPrompt string
+	Contents     []ContentBlock
+	MaxTokens    int
+	Temperature  float64
+}
+
+// LLMResponse is the result of an LLM generation call for builtin tools.
+type LLMResponse struct {
+	Content   string
+	Usage     TokenUsage
+	ModelUsed string
+	Latency   time.Duration
+}
+
+// TokenUsage tracks token consumption.
+type TokenUsage struct {
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+}
+
+// ContentBlock represents a single content element in a message.
+type ContentBlock struct {
+	Type     string `json:"type"`                // "text" | "image"
+	Text     string `json:"text,omitempty"`      // for type="text"
+	ImageURL string `json:"image_url,omitempty"` // for type="image"
+}
+
+// NewTextBlock creates a text content block.
+func NewTextBlock(text string) ContentBlock {
+	return ContentBlock{Type: "text", Text: text}
+}
+
+// NewImageBlock creates an image content block.
+func NewImageBlock(imageURL string) ContentBlock {
+	return ContentBlock{Type: "image", ImageURL: imageURL}
+}
+
 // BuiltinToolRunner dispatches builtin.* tool calls to registered BuiltinTool implementations.
 type BuiltinToolRunner struct {
-	mu    sync.RWMutex
-	tools map[string]BuiltinTool
+	mu       sync.RWMutex
+	tools    map[string]BuiltinTool
+	llmAccess LLMAccess
 }
 
 func NewBuiltinToolRunner() *BuiltinToolRunner {
 	r := &BuiltinToolRunner{tools: make(map[string]BuiltinTool)}
 	r.registerDefaults()
 	return r
+}
+
+// SetLLMAccess injects LLM access into all LLMAwareTool implementations.
+func (r *BuiltinToolRunner) SetLLMAccess(access LLMAccess) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.llmAccess = access
+	for _, t := range r.tools {
+		if la, ok := t.(LLMAwareTool); ok {
+			la.SetLLMAccess(access)
+		}
+	}
 }
 
 func (r *BuiltinToolRunner) registerDefaults() {
@@ -42,6 +108,7 @@ func (r *BuiltinToolRunner) registerDefaults() {
 		&JSONParseTool{},
 		&JSONQueryTool{},
 		&UUIDGenerateTool{},
+		&VisionAnalyzeTool{},
 	} {
 		r.tools[t.Name()] = t
 	}

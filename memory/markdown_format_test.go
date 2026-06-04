@@ -3,6 +3,7 @@ package memory_test
 import (
 	"testing"
 
+	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
 	"github.com/openbotstack/openbotstack-runtime/memory"
 )
 
@@ -80,22 +81,22 @@ func TestParseMessageBlocks(t *testing.T) {
 	if msgs[0].Role != "user" {
 		t.Errorf("msgs[0].Role = %q, want %q", msgs[0].Role, "user")
 	}
-	if msgs[0].Content != "What is the weather in Tokyo?" {
-		t.Errorf("msgs[0].Content = %q, want %q", msgs[0].Content, "What is the weather in Tokyo?")
+	if aitypes.FlattenToText(msgs[0].Contents) != "What is the weather in Tokyo?" {
+		t.Errorf("aitypes.FlattenToText(msgs[0].Contents) = %q, want %q", aitypes.FlattenToText(msgs[0].Contents), "What is the weather in Tokyo?")
 	}
 
 	if msgs[1].Role != "assistant" {
 		t.Errorf("msgs[1].Role = %q, want %q", msgs[1].Role, "assistant")
 	}
-	if msgs[1].Content != "Let me check the weather for you." {
-		t.Errorf("msgs[1].Content = %q, want %q", msgs[1].Content, "Let me check the weather for you.")
+	if aitypes.FlattenToText(msgs[1].Contents) != "Let me check the weather for you." {
+		t.Errorf("aitypes.FlattenToText(msgs[1].Contents) = %q, want %q", aitypes.FlattenToText(msgs[1].Contents), "Let me check the weather for you.")
 	}
 
 	if msgs[2].Role != "assistant" {
 		t.Errorf("msgs[2].Role = %q, want %q", msgs[2].Role, "assistant")
 	}
-	if msgs[2].Content != "The weather in Tokyo is sunny, 22C." {
-		t.Errorf("msgs[2].Content = %q, want %q", msgs[2].Content, "The weather in Tokyo is sunny, 22C.")
+	if aitypes.FlattenToText(msgs[2].Contents) != "The weather in Tokyo is sunny, 22C." {
+		t.Errorf("aitypes.FlattenToText(msgs[2].Contents) = %q, want %q", aitypes.FlattenToText(msgs[2].Contents), "The weather in Tokyo is sunny, 22C.")
 	}
 }
 
@@ -121,8 +122,8 @@ func TestParseMessageBlocksWithExecutionID(t *testing.T) {
 	if msgs[1].ExecutionID != "exec-abc-123" {
 		t.Errorf("msgs[1].ExecutionID = %q, want %q", msgs[1].ExecutionID, "exec-abc-123")
 	}
-	if msgs[1].Content != "Hi there" {
-		t.Errorf("msgs[1].Content = %q, want %q", msgs[1].Content, "Hi there")
+	if aitypes.FlattenToText(msgs[1].Contents) != "Hi there" {
+		t.Errorf("aitypes.FlattenToText(msgs[1].Contents) = %q, want %q", aitypes.FlattenToText(msgs[1].Contents), "Hi there")
 	}
 }
 
@@ -134,16 +135,16 @@ func TestMessageWithMarkdownContent(t *testing.T) {
 		t.Fatalf("expected 3 messages, got %d", len(msgs))
 	}
 
-	if msgs[0].Role != "user" || msgs[0].Content != "Show me a Go hello world." {
+	if msgs[0].Role != "user" || aitypes.FlattenToText(msgs[0].Contents) != "Show me a Go hello world." {
 		t.Errorf("msgs[0] = %+v", msgs[0])
 	}
 
 	wantContent := "Here is a Go hello world:\n\n```go\npackage main\n\nimport \"fmt\"\n\nfunc main() {\n    fmt.Println(\"Hello, World!\")\n}\n```\n\nAnd a list:\n- Item 1\n- Item 2\n- Item 3"
-	if msgs[1].Content != wantContent {
-		t.Errorf("msgs[1].Content = %q\nwant %q", msgs[1].Content, wantContent)
+	if aitypes.FlattenToText(msgs[1].Contents) != wantContent {
+		t.Errorf("aitypes.FlattenToText(msgs[1].Contents) = %q\nwant %q", aitypes.FlattenToText(msgs[1].Contents), wantContent)
 	}
 
-	if msgs[2].Role != "user" || msgs[2].Content != "Thanks!" {
+	if msgs[2].Role != "user" || aitypes.FlattenToText(msgs[2].Contents) != "Thanks!" {
 		t.Errorf("msgs[2] = %+v", msgs[2])
 	}
 }
@@ -155,10 +156,10 @@ func TestParseMessageBlocksTrailingContent(t *testing.T) {
 	if len(msgs) != 2 {
 		t.Fatalf("expected 2 messages, got %d", len(msgs))
 	}
-	if msgs[0].Content != "Hello" {
-		t.Errorf("msgs[0].Content = %q, want %q", msgs[0].Content, "Hello")
+	if aitypes.FlattenToText(msgs[0].Contents) != "Hello" {
+		t.Errorf("aitypes.FlattenToText(msgs[0].Contents) = %q, want %q", aitypes.FlattenToText(msgs[0].Contents), "Hello")
 	}
-	if msgs[1].Content != "Hi there!" {
-		t.Errorf("msgs[1].Content = %q, want %q", msgs[1].Content, "Hi there!")
+	if aitypes.FlattenToText(msgs[1].Contents) != "Hi there!" {
+		t.Errorf("aitypes.FlattenToText(msgs[1].Contents) = %q, want %q", aitypes.FlattenToText(msgs[1].Contents), "Hi there!")
 	}
 }

@@ -21,7 +21,7 @@ func (g *LLMTextGenerator) GenerateText(ctx context.Context, prompt string) (str
 	}
 	resp, err := provider.Generate(ctx, types.GenerateRequest{
 		Messages: []types.Message{
-			{Role: "user", Content: prompt},
+			types.NewTextMessage("user", prompt),
 		},
 	})
 	if err != nil {
@@ -40,7 +40,7 @@ func (g *LLMTextGenerator) GenerateStreamText(ctx context.Context, prompt string
 
 	req := types.GenerateRequest{
 		Messages: []types.Message{
-			{Role: "user", Content: prompt},
+			types.NewTextMessage("user", prompt),
 		},
 	}
 

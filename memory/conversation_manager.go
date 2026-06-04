@@ -55,10 +55,7 @@ func (cm *ConversationManager) GetConversationContext(ctx context.Context, sessi
 		summary, err := cm.convStore.GetSummary(ctx, tenantID, userID, sessionID)
 		if err == nil && summary != "" {
 			result.Summary = summary
-			result.History = append(result.History, aitypes.Message{
-				Role:    "system",
-				Content: "Previous conversation summary:\n" + summary,
-			})
+			result.History = append(result.History, aitypes.NewTextMessage("system", "Previous conversation summary:\n"+summary))
 		}
 
 		msgs, err := cm.convStore.GetHistory(ctx, tenantID, userID, sessionID, cm.maxMessages)

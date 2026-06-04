@@ -122,7 +122,7 @@ func ParseMessageBlocks(body []byte) []aitypes.Message {
 		content := strings.TrimRight(currentContent.String(), "\n")
 		messages = append(messages, aitypes.Message{
 			Role:        currentRole,
-			Content:     content,
+			Contents:    []aitypes.ContentBlock{aitypes.NewTextBlock(content)},
 			ExecutionID: currentExecID,
 		})
 		currentContent.Reset()

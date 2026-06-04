@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
 	"github.com/openbotstack/openbotstack-core/control/agent"
 	"github.com/openbotstack/openbotstack-runtime/memory"
 )
@@ -56,10 +57,10 @@ func TestAppendAndGetHistory(t *testing.T) {
 	if len(history) != 3 {
 		t.Fatalf("expected 3 messages, got %d", len(history))
 	}
-	if history[0].Role != "user" || history[0].Content != "Hello" {
+	if history[0].Role != "user" || aitypes.FlattenToText(history[0].Contents) != "Hello" {
 		t.Errorf("first message = %+v, want user/Hello", history[0])
 	}
-	if history[2].Role != "user" || history[2].Content != "How are you?" {
+	if history[2].Role != "user" || aitypes.FlattenToText(history[2].Contents) != "How are you?" {
 		t.Errorf("third message = %+v, want user/How are you?", history[2])
 	}
 }
@@ -104,11 +105,11 @@ func TestGetHistoryMaxMessages(t *testing.T) {
 		t.Fatalf("expected 5 messages, got %d", len(history))
 	}
 	// Should return the LAST 5 messages (f, g, h, i, j)
-	if history[0].Content != "f" {
-		t.Errorf("expected first message content 'f', got %q", history[0].Content)
+	if aitypes.FlattenToText(history[0].Contents) != "f" {
+		t.Errorf("expected first message content 'f', got %q", aitypes.FlattenToText(history[0].Contents))
 	}
-	if history[4].Content != "j" {
-		t.Errorf("expected last message content 'j', got %q", history[4].Content)
+	if aitypes.FlattenToText(history[4].Contents) != "j" {
+		t.Errorf("expected last message content 'j', got %q", aitypes.FlattenToText(history[4].Contents))
 	}
 }
 
@@ -129,10 +130,10 @@ func TestTenantIsolation(t *testing.T) {
 	historyA, _ := store.GetHistory(ctx, "tenantA", "u1", "s1", 0)
 	historyB, _ := store.GetHistory(ctx, "tenantB", "u1", "s1", 0)
 
-	if len(historyA) != 1 || historyA[0].Content != "secret A" {
+	if len(historyA) != 1 || aitypes.FlattenToText(historyA[0].Contents) != "secret A" {
 		t.Errorf("tenantA should see 'secret A', got %v", historyA)
 	}
-	if len(historyB) != 1 || historyB[0].Content != "secret B" {
+	if len(historyB) != 1 || aitypes.FlattenToText(historyB[0].Contents) != "secret B" {
 		t.Errorf("tenantB should see 'secret B', got %v", historyB)
 	}
 }
@@ -273,7 +274,7 @@ func TestLargeMessageWithMarkdown(t *testing.T) {
 	if len(history) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(history))
 	}
-	if history[0].Content != content {
-		t.Errorf("content mismatch:\ngot:      %q\nexpected: %q", history[0].Content, content)
+	if aitypes.FlattenToText(history[0].Contents) != content {
+		t.Errorf("content mismatch:\ngot:      %q\nexpected: %q", aitypes.FlattenToText(history[0].Contents), content)
 	}
 }

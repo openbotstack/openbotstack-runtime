@@ -49,7 +49,7 @@ func (s *KeywordStrategy) Search(ctx context.Context, scope MemoryScope, query s
 	}
 	var candidates []scored
 	for _, m := range msgs {
-		s := score(tokens, m.Content)
+		s := score(tokens, aitypes.FlattenToText(m.Contents))
 		if s > 0 {
 			candidates = append(candidates, scored{msg: m, score: s})
 		}
@@ -73,7 +73,7 @@ func (s *KeywordStrategy) Search(ctx context.Context, scope MemoryScope, query s
 	for i := 0; i < limit; i++ {
 		results = append(results, abstraction.MemoryEntry{
 			ID:      fmt.Sprintf("msg_%d", i),
-			Content: candidates[i].msg.Content,
+			Content: aitypes.FlattenToText(candidates[i].msg.Contents),
 			Tags:    []string{"role:" + candidates[i].msg.Role},
 			Metadata: map[string]string{
 				"tenant_id":  scope.TenantID,

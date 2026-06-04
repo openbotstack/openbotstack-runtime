@@ -48,8 +48,8 @@ func TestAssemble_WithConversationHistory(t *testing.T) {
 	assembler := NewRuntimeContextAssembler(nil, nil)
 
 	history := []types.Message{
-		{Role: "user", Content: "What is Go?"},
-		{Role: "assistant", Content: "Go is a programming language."},
+		types.NewTextMessage("user", "What is Go?"),
+		types.NewTextMessage("assistant", "Go is a programming language."),
 	}
 
 	result, err := assembler.Assemble(
@@ -65,8 +65,8 @@ func TestAssemble_WithConversationHistory(t *testing.T) {
 	if len(result.Messages) != 2 {
 		t.Fatalf("expected 2 messages, got %d", len(result.Messages))
 	}
-	if result.Messages[0].Content != "What is Go?" {
-		t.Errorf("unexpected first message: %q", result.Messages[0].Content)
+	if types.FlattenToText(result.Messages[0].Contents) != "What is Go?" {
+		t.Errorf("unexpected first message: %q", types.FlattenToText(result.Messages[0].Contents))
 	}
 }
 
@@ -171,8 +171,8 @@ func TestAssemble_MemoryRetrievalSuccess(t *testing.T) {
 	if result.Messages[0].Role != "system" {
 		t.Errorf("expected first message role 'system', got %q", result.Messages[0].Role)
 	}
-	if !strings.Contains(result.Messages[0].Content, "User prefers dark mode") {
-		t.Errorf("memory not in system message: %q", result.Messages[0].Content)
+	if !strings.Contains(types.FlattenToText(result.Messages[0].Contents), "User prefers dark mode") {
+		t.Errorf("memory not in system message: %q", types.FlattenToText(result.Messages[0].Contents))
 	}
 }
 
@@ -185,8 +185,8 @@ func TestAssemble_MemoryAndHistory(t *testing.T) {
 	assembler := NewRuntimeContextAssembler(nil, memoryManager)
 
 	history := []types.Message{
-		{Role: "user", Content: "Previous question"},
-		{Role: "assistant", Content: "Previous answer"},
+		types.NewTextMessage("user", "Previous question"),
+		types.NewTextMessage("assistant", "Previous answer"),
 	}
 
 	result, err := assembler.Assemble(
@@ -208,8 +208,8 @@ func TestAssemble_MemoryAndHistory(t *testing.T) {
 		t.Errorf("expected first message to be system (memory), got %q", result.Messages[0].Role)
 	}
 	// Then history in order
-	if result.Messages[1].Content != "Previous question" {
-		t.Errorf("expected history message, got %q", result.Messages[1].Content)
+	if types.FlattenToText(result.Messages[1].Contents) != "Previous question" {
+		t.Errorf("expected history message, got %q", types.FlattenToText(result.Messages[1].Contents))
 	}
 }
 
@@ -316,7 +316,7 @@ func TestContract_MemoryMessagesPrecedeHistory(t *testing.T) {
 	}
 	assembler := NewRuntimeContextAssembler(nil, memoryManager)
 	history := []types.Message{
-		{Role: "user", Content: "history msg"},
+		types.NewTextMessage("user", "history msg"),
 	}
 	result, err := assembler.Assemble(
 		context.Background(),
@@ -333,8 +333,8 @@ func TestContract_MemoryMessagesPrecedeHistory(t *testing.T) {
 	if result.Messages[0].Role != "system" {
 		t.Fatalf("contract violation: first message should be system (memory), got %q", result.Messages[0].Role)
 	}
-	if result.Messages[1].Content != "history msg" {
-		t.Fatalf("contract violation: second message should be history, got %q", result.Messages[1].Content)
+	if types.FlattenToText(result.Messages[1].Contents) != "history msg" {
+		t.Fatalf("contract violation: second message should be history, got %q", types.FlattenToText(result.Messages[1].Contents))
 	}
 }
 

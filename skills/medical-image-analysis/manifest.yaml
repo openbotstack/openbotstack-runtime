@@ -1,0 +1,30 @@
+id: medical-image-analysis
+name: Medical Image Analysis
+description: Analyzes medical images using vision AI to identify clinical findings with structured reporting.
+execution:
+  mode: declarative
+input_schema:
+  type: object
+  properties:
+    image_url:
+      type: string
+      description: URL of the medical image to analyze
+    body_part:
+      type: string
+      description: Body part or imaging type (e.g., chest, brain, abdomen)
+    clinical_question:
+      type: string
+      description: Specific clinical question to answer
+  required:
+    - image_url
+output_schema:
+  type: object
+  properties:
+    findings:
+      type: array
+    impression:
+      type: string
+    confidence:
+      type: number
+permissions: []
+timeout: 120s

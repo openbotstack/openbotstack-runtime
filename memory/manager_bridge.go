@@ -7,6 +7,7 @@ import (
 	"time"
 
 	coreagent "github.com/openbotstack/openbotstack-core/control/agent"
+	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
 	"github.com/openbotstack/openbotstack-core/memory/abstraction"
 )
 
@@ -150,14 +151,14 @@ func (b *MarkdownMemoryBridge) RetrieveByTag(ctx context.Context, tags []string,
 		// ALL tags must match (AND semantics per interface contract)
 		allMatch := true
 		for _, tag := range tags {
-			if !strings.Contains(strings.ToLower(m.Content), strings.ToLower(tag)) {
+			if !strings.Contains(strings.ToLower(aitypes.FlattenToText(m.Contents)), strings.ToLower(tag)) {
 				allMatch = false
 				break
 			}
 		}
 		if allMatch {
 			results = append(results, abstraction.MemoryEntry{
-				Content: m.Content,
+				Content: aitypes.FlattenToText(m.Contents),
 				Tags:    []string{"role:" + m.Role},
 			})
 			if limit > 0 && len(results) >= limit {

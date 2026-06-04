@@ -24,7 +24,7 @@ func (m *mockConvStoreForCM) AppendMessage(_ context.Context, msg coreagent.Sess
 	if m.appendErr != nil {
 		return m.appendErr
 	}
-	m.msgs = append(m.msgs, aitypes.Message{Role: msg.Role, Content: msg.Content})
+	m.msgs = append(m.msgs, aitypes.NewTextMessage(msg.Role, msg.Content))
 	return nil
 }
 func (m *mockConvStoreForCM) GetHistory(_ context.Context, _, _, _ string, limit int) ([]aitypes.Message, error) {
@@ -73,8 +73,8 @@ func (m *mockMemoryForCM) Summarize(_ context.Context, _ []abstraction.MemoryEnt
 func TestConversationManager_GetContext_LoadsHistory(t *testing.T) {
 	convStore := &mockConvStoreForCM{
 		msgs: []aitypes.Message{
-			{Role: "user", Content: "Hello"},
-			{Role: "assistant", Content: "Hi there"},
+			aitypes.NewTextMessage("user", "Hello"),
+			aitypes.NewTextMessage("assistant", "Hi there"),
 		},
 	}
 	cm := NewConversationManager(convStore, nil, 50)
@@ -86,8 +86,8 @@ func TestConversationManager_GetContext_LoadsHistory(t *testing.T) {
 	if len(ctx.History) != 2 {
 		t.Errorf("History len = %d, want 2", len(ctx.History))
 	}
-	if ctx.History[0].Content != "Hello" {
-		t.Errorf("History[0] = %q, want %q", ctx.History[0].Content, "Hello")
+	if aitypes.FlattenToText(ctx.History[0].Contents) != "Hello" {
+		t.Errorf("History[0] = %q, want %q", aitypes.FlattenToText(ctx.History[0].Contents), "Hello")
 	}
 }
 
@@ -111,8 +111,8 @@ func TestConversationManager_GetContext_LoadsSummary(t *testing.T) {
 	if ctx.History[0].Role != "system" {
 		t.Errorf("History[0].Role = %q, want %q", ctx.History[0].Role, "system")
 	}
-	if !strings.Contains(ctx.History[0].Content, "Previous conversation about Go") {
-		t.Errorf("History[0] should contain summary, got: %q", ctx.History[0].Content)
+	if !strings.Contains(aitypes.FlattenToText(ctx.History[0].Contents), "Previous conversation about Go") {
+		t.Errorf("History[0] should contain summary, got: %q", aitypes.FlattenToText(ctx.History[0].Contents))
 	}
 }
 
@@ -208,8 +208,8 @@ func TestConversationManager_GetContext_FullPipeline(t *testing.T) {
 	convStore := &mockConvStoreForCM{
 		summary: "Previous: discussed APIs",
 		msgs: []aitypes.Message{
-			{Role: "user", Content: "Tell me about REST"},
-			{Role: "assistant", Content: "REST is..."},
+			aitypes.NewTextMessage("user", "Tell me about REST"),
+			aitypes.NewTextMessage("assistant", "REST is..."),
 		},
 	}
 	memory := &mockMemoryForCM{
@@ -250,8 +250,8 @@ func TestConversationManager_StoreMessage(t *testing.T) {
 	if len(convStore.msgs) != 1 {
 		t.Fatalf("msgs len = %d, want 1", len(convStore.msgs))
 	}
-	if convStore.msgs[0].Content != "hello" {
-		t.Errorf("msg content = %q, want %q", convStore.msgs[0].Content, "hello")
+	if aitypes.FlattenToText(convStore.msgs[0].Contents) != "hello" {
+		t.Errorf("msg content = %q, want %q", aitypes.FlattenToText(convStore.msgs[0].Contents), "hello")
 	}
 }
 

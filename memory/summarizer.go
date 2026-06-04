@@ -72,7 +72,7 @@ func (s *ConversationSummarizer) generateSummary(ctx context.Context, msgs []ait
 	for _, m := range msgs {
 		sb.WriteString(m.Role)
 		sb.WriteString(": ")
-		sb.WriteString(m.Content)
+		sb.WriteString(aitypes.FlattenToText(m.Contents))
 		sb.WriteString("\n")
 	}
 
@@ -83,7 +83,7 @@ func (s *ConversationSummarizer) generateSummary(ctx context.Context, msgs []ait
 
 	resp, err := prov.Generate(ctx, types.GenerateRequest{
 		Messages: []types.Message{
-			{Role: "user", Content: sb.String()},
+			aitypes.NewTextMessage("user", sb.String()),
 		},
 	})
 	if err != nil {

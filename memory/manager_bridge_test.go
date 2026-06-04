@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
 	"github.com/openbotstack/openbotstack-core/control/agent"
 	"github.com/openbotstack/openbotstack-core/memory/abstraction"
 )
@@ -43,8 +44,8 @@ func TestStoreShortTerm_AppendsMessage(t *testing.T) {
 	if len(msgs) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(msgs))
 	}
-	if msgs[0].Content != "Hello from test" {
-		t.Errorf("expected content 'Hello from test', got %q", msgs[0].Content)
+	if aitypes.FlattenToText(msgs[0].Contents) != "Hello from test" {
+		t.Errorf("expected content 'Hello from test', got %q", aitypes.FlattenToText(msgs[0].Contents))
 	}
 	if msgs[0].Role != "user" {
 		t.Errorf("expected role 'user', got %q", msgs[0].Role)

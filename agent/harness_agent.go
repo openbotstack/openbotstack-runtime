@@ -496,7 +496,7 @@ func (a *HarnessAgent) loadHistory(ctx context.Context, req coreagent.MessageReq
 	summary, err := a.conversationStore.GetSummary(ctx, req.TenantID, req.UserID, req.SessionID)
 	if err == nil && summary != "" {
 		history = append(history, aitypes.Message{
-			Role: "system", Content: "Previous conversation summary:\n" + summary,
+			Role: "system", Contents: []aitypes.ContentBlock{aitypes.NewTextBlock("Previous conversation summary:\n" + summary)},
 		})
 	}
 	msgs, err := a.conversationStore.GetHistory(ctx, req.TenantID, req.UserID, req.SessionID, a.maxHistoryMessages)
