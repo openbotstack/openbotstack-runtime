@@ -33,7 +33,7 @@ jobs:
 
       - name: Run Tests
         working-directory: openbotstack-runtime
-        run: make binary test-v
+        run: make binary test-verbose
 
   build-frontend:
     runs-on: ubuntu-latest
