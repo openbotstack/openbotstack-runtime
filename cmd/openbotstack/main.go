@@ -120,7 +120,7 @@ func NewServer(deps ServerDeps, skillAdmin *api.SkillAdminService, cfg *config.C
 		DB:     deps.DB.DB,
 		Strict: os.Getenv("OBS_AUTH_STRICT") == "true",
 	})
-	var authMW func(http.Handler) http.Handler = apiKeyMW
+	var authMW = apiKeyMW
 
 	if jwtSecret := os.Getenv("JWT_SECRET"); jwtSecret != "" {
 		if len(jwtSecret) < 32 {

@@ -159,9 +159,10 @@ func buildPolicyCompliance(events []audit.AuditEvent) audit.PolicyComplianceSect
 			continue
 		}
 		pc.TotalChecks++
-		if e.Outcome == "allowed" {
+		switch e.Outcome {
+		case "allowed":
 			pc.Allowed++
-		} else if e.Outcome == "denied" {
+		case "denied":
 			pc.Denied++
 			if e.Resource != "" {
 				deniedActions[e.Resource]++
@@ -192,9 +193,10 @@ func buildExecutionHealth(events []audit.AuditEvent) audit.ExecutionHealthSectio
 		}
 		eh.StepsTotal++
 
-		if e.Status == "completed" {
+		switch e.Status {
+		case "completed":
 			eh.StepsCompleted++
-		} else if e.Status == "failed" {
+		case "failed":
 			eh.StepsFailed++
 			src := string(e.Source)
 			if src == "" {

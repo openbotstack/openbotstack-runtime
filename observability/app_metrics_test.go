@@ -78,13 +78,13 @@ func TestActiveRequest_NilSafe(t *testing.T) {
 
 func TestTracingHelpers(t *testing.T) {
 	// These should work even without a real tracer provider (no-op tracer)
-	ctx, span := StartSkillSpan(context.Background(), "core/test")
+	_, span := StartSkillSpan(context.Background(), "core/test")
 	if span == nil {
 		t.Error("StartSkillSpan should return non-nil span")
 	}
 	span.End()
 
-	ctx, span = StartLLMSpan(context.Background(), "openai", "gpt-4")
+	ctx, span := StartLLMSpan(context.Background(), "openai", "gpt-4")
 	if span == nil {
 		t.Error("StartLLMSpan should return non-nil span")
 	}

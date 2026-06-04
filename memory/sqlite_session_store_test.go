@@ -215,6 +215,7 @@ func TestSessionStateStore_DeleteSession_TenantIsolation(t *testing.T) {
 	got, _ := store.GetSession(ctxB, "shared-id")
 	if got == nil {
 		t.Error("tenant-b session should still exist")
+		return
 	}
 	if got.TenantID != "tenant-b" {
 		t.Errorf("got tenant %q, want tenant-b", got.TenantID)

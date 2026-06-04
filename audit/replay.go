@@ -155,9 +155,10 @@ func buildSteps(events []audit.AuditEvent) []ReplayStep {
 			stepOrder = append(stepOrder, e.StepID)
 		}
 
-		if e.Status == "started" {
+		switch e.Status {
+		case "started":
 			acc.started = &e
-		} else if e.Status == "completed" || e.Status == "failed" {
+		case "completed", "failed":
 			acc.terminal = &e
 		}
 	}

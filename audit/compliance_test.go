@@ -627,7 +627,7 @@ func TestComplianceReport_NilContext(t *testing.T) {
 	querier := &mockComplianceQuerier{}
 	generator := NewComplianceReportGenerator(querier, nil)
 
-	_, err := generator.Generate(nil, ComplianceReportRequest{
+	_, err := generator.Generate(context.Background(), ComplianceReportRequest{
 		Period: audit.TimeRange{From: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), To: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)},
 	})
 	if err == nil {

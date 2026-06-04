@@ -9,9 +9,8 @@ import (
 	"time"
 
 	"github.com/openbotstack/openbotstack-core/ai/providers"
-	"github.com/openbotstack/openbotstack-core/ai/types"
-	coreagent "github.com/openbotstack/openbotstack-core/control/agent"
 	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
+	coreagent "github.com/openbotstack/openbotstack-core/control/agent"
 )
 
 const summarizationTimeout = 15 * time.Second
@@ -76,13 +75,13 @@ func (s *ConversationSummarizer) generateSummary(ctx context.Context, msgs []ait
 		sb.WriteString("\n")
 	}
 
-	prov, err := s.router.Route([]types.CapabilityType{types.CapTextGeneration}, types.ModelConstraints{})
+	prov, err := s.router.Route([]aitypes.CapabilityType{aitypes.CapTextGeneration}, aitypes.ModelConstraints{})
 	if err != nil {
 		return "", fmt.Errorf("summarizer: routing failed: %w", err)
 	}
 
-	resp, err := prov.Generate(ctx, types.GenerateRequest{
-		Messages: []types.Message{
+	resp, err := prov.Generate(ctx, aitypes.GenerateRequest{
+		Messages: []aitypes.Message{
 			aitypes.NewTextMessage("user", sb.String()),
 		},
 	})

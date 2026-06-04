@@ -31,6 +31,7 @@ func TestContract1_PlannerDependencyIsolation(t *testing.T) {
 	// Also forbid importing the runtime module itself
 	plannerDir := coreRoot + "/planner"
 	fset := token.NewFileSet()
+	//nolint:staticcheck // SA1019: ParseDir is deprecated but still needed for test
 	pkgs, err := parser.ParseDir(fset, plannerDir, nil, parser.ImportsOnly)
 	if err != nil {
 		t.Fatalf("parse planner dir: %v", err)
@@ -73,6 +74,7 @@ func TestContract5_NoTransportLeakageInCore(t *testing.T) {
 	}
 	for _, dir := range coreDirs {
 		fset := token.NewFileSet()
+		//nolint:staticcheck // SA1019: ParseDir is deprecated but still needed for test
 		pkgs, err := parser.ParseDir(fset, dir, nil, parser.ImportsOnly)
 		if err != nil {
 			t.Logf("skip %s: %v", dir, err)

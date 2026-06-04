@@ -78,9 +78,6 @@ func (ar *AdminRouter) handleAudit(w http.ResponseWriter, r *http.Request) {
 	for i, e := range events {
 		envelopes[i] = e.ToEnvelope()
 	}
-	if envelopes == nil {
-		envelopes = []audit.AuditEnvelope{}
-	}
 
 	// Support ?format=<format_id> for industry-specific mapping (e.g. FHIR).
 	if format := r.URL.Query().Get("format"); format != "" {

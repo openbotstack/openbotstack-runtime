@@ -12,7 +12,7 @@ import (
 func TestSkillDescriptorTypeIdentity(t *testing.T) {
 	// Verify that aitypes.SkillDescriptor is the canonical type used directly
 	// by both agent and planner packages (no aliases needed).
-	var sd aitypes.SkillDescriptor = aitypes.SkillDescriptor{
+	sd := aitypes.SkillDescriptor{
 		ID:          "core/test",
 		Name:        "Test",
 		Description: "A test skill",
