@@ -95,7 +95,7 @@ func (t *WebFetchTool) Execute(ctx context.Context, input map[string]any) (map[s
 	if err != nil {
 		return nil, fmt.Errorf("web_fetch: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	maxBytes := t.MaxBytes
 	if maxBytes == 0 {

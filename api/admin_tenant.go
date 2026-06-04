@@ -155,7 +155,7 @@ func (ar *AdminRouter) deleteTenant(w http.ResponseWriter, r *http.Request, tena
 		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to begin transaction")
 		return
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// Delete API keys for users in this tenant
 	if _, err := tx.Exec(`DELETE FROM api_keys WHERE user_id IN (SELECT id FROM users WHERE tenant_id = ?)`, tenantID); err != nil {

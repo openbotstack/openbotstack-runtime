@@ -68,7 +68,7 @@ func (s *SQLiteMCPStore) List(ctx context.Context) ([]mcpcore.ServerConfig, erro
 	if err != nil {
 		return nil, fmt.Errorf("list mcp servers: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var configs []mcpcore.ServerConfig
 	for rows.Next() {

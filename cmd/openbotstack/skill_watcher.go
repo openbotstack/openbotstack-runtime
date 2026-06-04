@@ -47,7 +47,7 @@ func (w *SkillWatcher) Start(ctx context.Context) error {
 	w.ctx, w.cancel = context.WithCancel(ctx)
 
 	if err := watcher.Add(w.skillsDir); err != nil {
-		watcher.Close()
+		_ = watcher.Close()
 		return err
 	}
 
@@ -78,7 +78,7 @@ func (w *SkillWatcher) Stop() {
 		w.cancel()
 	}
 	if w.watcher != nil {
-		w.watcher.Close()
+		_ = w.watcher.Close()
 	}
 	w.debMu.Lock()
 	for _, t := range w.debounce {

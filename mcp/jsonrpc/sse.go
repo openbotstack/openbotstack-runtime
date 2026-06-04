@@ -44,7 +44,7 @@ func (t *SSETransport) Send(ctx context.Context, request json.RawMessage) (json.
 	if err != nil {
 		return nil, fmt.Errorf("http request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Limit response body to 10MB to prevent memory exhaustion
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
@@ -86,7 +86,7 @@ func (t *SSETransport) SendNotification(request json.RawMessage) error {
 	if err != nil {
 		return fmt.Errorf("send notification: %w", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	return nil
 }
 

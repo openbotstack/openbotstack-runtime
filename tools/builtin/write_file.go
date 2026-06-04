@@ -48,7 +48,7 @@ func (t *WriteFileTool) Execute(_ context.Context, input map[string]any) (map[st
 	if err != nil {
 		return nil, fmt.Errorf("write_file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	n, err := f.WriteString(content)
 	if err != nil {
 		return nil, fmt.Errorf("write_file: %w", err)

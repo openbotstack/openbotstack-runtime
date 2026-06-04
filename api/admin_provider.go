@@ -143,7 +143,7 @@ func (ar *AdminRouter) updateProviderConfig(w http.ResponseWriter, r *http.Reque
 		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to begin transaction")
 		return
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// If setting as default, clear other defaults first
 	if isDefault {

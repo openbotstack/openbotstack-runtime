@@ -48,5 +48,5 @@ func (o *OpenAPISpec) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "public, max-age=300")
-	w.Write(o.data)
+	_, _ = w.Write(o.data)
 }

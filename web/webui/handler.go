@@ -40,7 +40,7 @@ func spaHandler(embedFS embed.FS, subDir string) http.Handler {
 			path = "index.html"
 		}
 		if f, err := sub.Open(path); err == nil {
-			f.Close()
+			_ = f.Close()
 			fileServer.ServeHTTP(w, r)
 			return
 		}

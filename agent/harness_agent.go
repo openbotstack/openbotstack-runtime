@@ -168,7 +168,7 @@ func (a *HarnessAgent) buildPlannerContext(ctx context.Context, req coreagent.Me
 		if err != nil {
 			slog.WarnContext(ctx, "harness_agent: context assembly failed", "error", err)
 		} else if assembled != nil && len(assembled.Messages) > 0 {
-			conversationHistory = assembled.Messages
+			_ = assembled.Messages
 		}
 	}
 

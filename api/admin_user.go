@@ -192,7 +192,7 @@ func (ar *AdminRouter) deleteUser(w http.ResponseWriter, r *http.Request, userID
 		writeAPIError(w, http.StatusInternalServerError, ErrInternal, "failed to begin transaction")
 		return
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.Exec(`DELETE FROM api_keys WHERE user_id = ?`, userID); err != nil {
 		slog.ErrorContext(r.Context(), "failed to delete user API keys", "error", err)

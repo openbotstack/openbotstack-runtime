@@ -137,7 +137,7 @@ func (ar *AdminRouter) handleAuditExport(w http.ResponseWriter, r *http.Request)
 				"event_id", env.EventID, "error", err)
 			continue
 		}
-		fmt.Fprintf(w, "%s\n", line)
+		_, _ = fmt.Fprintf(w, "%s\n", line)
 	}
 }
 
