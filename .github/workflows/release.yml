@@ -34,15 +34,7 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: openbotstack-runtime/web/package-lock.json
-
-      - name: Install Frontend Dependencies
-        working-directory: openbotstack-runtime/web
-        run: npm ci
-
-      - name: Build Frontend
-        working-directory: openbotstack-runtime/web
-        run: npm run build
+          cache-dependency-path: openbotstack-runtime/web/user/package-lock.json
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
