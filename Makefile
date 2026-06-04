@@ -34,7 +34,7 @@ build: ## Compile all packages
 # Binary builds
 # ============================================================================
 
-binary: web-build ## Build production binary with version info
+binary: web-install web-build ## Build production binary with version info
 	mkdir -p $(BUILD_DIR)
 	mkdir -p data/skills
 	cp -rn skills/ data/skills/ 2>/dev/null || true
@@ -178,9 +178,9 @@ build-skills: ## Build Go Wasm skills (if any in skills/ directory)
 web-install: ## Install frontend dependencies for both UIs
 	@set -e; \
 	echo "Installing user plane deps..."; \
-	cd web/user && npm install; \
+	cd web/user && npm ci; \
 	echo "Installing admin plane deps..."; \
-	cd ../../web/admin && npm install
+	cd ../../web/admin && npm ci
 
 web-build: ## Build both frontends for embedding
 	@set -e; \
