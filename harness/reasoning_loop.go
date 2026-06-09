@@ -30,6 +30,22 @@ func formatStepDesc(step *execution.ExecutionStep) string {
 	return step.Name + "(" + strings.Join(parts, ", ") + ")"
 }
 
+// TurnPlanner generates a plan for the next execution turn using structured
+// tool results from previous turns. This is a narrow interface that replaces
+// the legacy pattern of injecting raw XML <observation> tags into MemoryContext.
+type TurnPlanner interface {
+	PlanTurn(ctx context.Context, pCtx *planner.PlannerContext) (*execution.ExecutionPlan, error)
+}
+
+// defaultTurnPlanner adapts planner.ExecutionPlanner to TurnPlanner.
+type defaultTurnPlanner struct {
+	planner planner.ExecutionPlanner
+}
+
+func (a *defaultTurnPlanner) PlanTurn(ctx context.Context, pCtx *planner.PlannerContext) (*execution.ExecutionPlan, error) {
+	return a.planner.Plan(ctx, pCtx)
+}
+
 // ReasoningLoop executes iterative LLM reasoning for a single LLM-type step.
 // It is bounded, non-nesting, and request-scoped.
 type ReasoningLoop interface {
@@ -39,7 +55,7 @@ type ReasoningLoop interface {
 // DefaultReasoningLoop implements the bounded reasoning loop.
 type DefaultReasoningLoop struct {
 	config       ReasoningLoopConfig
-	planner      planner.ExecutionPlanner
+	turnPlanner  TurnPlanner
 	stepExecutor *StepExecutor
 	compactor    ContextCompactor
 }
@@ -53,7 +69,7 @@ func NewDefaultReasoningLoop(
 ) *DefaultReasoningLoop {
 	return &DefaultReasoningLoop{
 		config:       config,
-		planner:      plannerExec,
+		turnPlanner:  &defaultTurnPlanner{planner: plannerExec},
 		stepExecutor: stepExecutor,
 		compactor:    compactor,
 	}
@@ -100,7 +116,7 @@ func (rl *DefaultReasoningLoop) Run(ctx context.Context, step *execution.Executi
 		}
 
 		planCtx, planCancel := context.WithTimeout(ctx, remaining)
-		plan, err := rl.planner.Plan(planCtx, pCtx)
+		plan, err := rl.turnPlanner.PlanTurn(planCtx, pCtx)
 		planCancel()
 
 		if err != nil {
@@ -272,15 +288,25 @@ func (rl *DefaultReasoningLoop) Run(ctx context.Context, step *execution.Executi
 			break
 		}
 
-		// Update PlannerContext with observations for next turn.
-			// Observations are wrapped in XML markers to prevent tool output
-			// from being interpreted as planner instructions.
-			if pCtx != nil && len(turnResult.Observations) > 0 {
-				obsStr := fmt.Sprintf("<observation turn=\"%d\">\n%v\n</observation>", turnsElapsed, turnResult.Observations)
-				pCtx.MemoryContext = append(pCtx.MemoryContext, planner.SearchResult{
-					Content: []byte(obsStr),
-					Score:   1.0,
-				})
+			// Update PlannerContext with structured turn results for the next turn.
+			// Uses TurnToolResult (structured) instead of legacy XML <observation> injection.
+			if pCtx != nil && len(turnResult.Actions) > 0 {
+				for _, action := range turnResult.Actions {
+					tr := execution.TurnToolResult{
+						StepName: action.StepName,
+						StepType: action.StepType,
+						Success:  action.Error == "",
+						Error:    action.Error,
+					}
+					if action.Output != nil {
+						outputStr := FormatOutput(action.Output)
+						if len(outputStr) > 200 {
+							outputStr = outputStr[:200] + "..."
+						}
+						tr.Summary = outputStr
+					}
+					pCtx.TurnResults = append(pCtx.TurnResults, tr)
+				}
 			}
 
 		// Context compaction between turns
