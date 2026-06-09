@@ -108,7 +108,7 @@ export function ExecutionDrawer() {
         )}
 
         {/* Phase filter bar */}
-        {viewModel && viewModel.phases.length > 1 && (
+        {viewModel && viewModel.phases.length >= 1 && (
           <div className="exec-phase-bar">
             <button className={`phase-btn ${!selectedPhaseId ? 'active' : ''}`} onClick={() => setSelectedPhaseId(null)}>
               All ({viewModel.phases.length})
@@ -151,16 +151,21 @@ export function ExecutionDrawer() {
 
                     {expandedPhases.has(phase.id) && (
                       <div className="exec-phase-body">
-                        {phase.type === 'llm_phase' && phase.turns ? (
+                        {phase.type === 'llm_phase' && phase.turns && phase.turns.length > 0 ? (
                           phase.turns.map(turn => (
                             <TurnView key={turn.turnNumber} turn={turn} selectedStep={selectedStep} onSelectStep={selectStep} />
                           ))
-                        ) : (
+                        ) : phase.type !== 'llm_phase' && phase.children.length > 0 ? (
                           phase.children.map((child, i) => (
                             <StepRow key={child.id || i} step={child} selected={selectedStep} onSelect={selectStep} />
                           ))
+                        ) : (
+                          <div className="exec-phase-summary">
+                            <span className="exec-phase-summary-text">{phase.label}</span>
+                            <span className="exec-phase-dur-inline">{formatDur(phase.durationMs)}</span>
+                            {phase.status && <span className={`exec-phase-status status-${phase.status}`}>{phase.status}</span>}
+                          </div>
                         )}
-                        {/* Main step input/output placeholder for future use */}
                       </div>
                     )}
                   </div>

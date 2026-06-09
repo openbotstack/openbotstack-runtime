@@ -258,6 +258,20 @@
   margin-left: 20px;
 }
 
+.exec-phase-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.exec-phase-summary-text { color: var(--text-primary); font-weight: 500; }
+.exec-phase-dur-inline { color: var(--text-muted); font-family: monospace; }
+.exec-phase-status { text-transform: uppercase; font-size: 10px; padding: 1px 6px; border-radius: 3px; }
+.exec-phase-status.status-completed { background: #84a98c33; color: #84a98c; }
+.exec-phase-status.status-failed { background: #c7605b33; color: #c7605b; }
+
 /* --- Step Row --- */
 .exec-step {
   display: flex;

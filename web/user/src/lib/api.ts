@@ -108,8 +108,12 @@ export async function deleteSession(sessionId: string): Promise<void> {
 }
 
 export async function getSessionHistory(sessionId: string): Promise<{ role: string; content: string; execution_id?: string }[]> {
-  const data = await apiCall<{ session_id: string; messages: { role: string; content: string; execution_id?: string }[] }>(`/v1/sessions/${sessionId}/history`)
-  return data.messages || []
+  const data = await apiCall<{ session_id: string; messages: { role: string; content?: string; contents?: { type: string; text: string }[]; execution_id?: string }[] }>(`/v1/sessions/${sessionId}/history`)
+  return (data.messages || []).map(m => ({
+    role: m.role,
+    content: m.content || (m.contents?.map(c => c.text).join('') ?? ''),
+    execution_id: m.execution_id,
+  }))
 }
 
 // --- Reasoning API ---

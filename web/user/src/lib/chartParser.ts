@@ -13,6 +13,9 @@ export type ContentSegment =
 const chartBlockRe = /```chart\n([\s\S]*?)```/g
 
 export function parseChartBlocks(content: string): ContentSegment[] {
+  if (!content || typeof content !== 'string') {
+    return [{ type: 'text', content: String(content ?? '') }]
+  }
   const segments: ContentSegment[] = []
   let lastIndex = 0
 
