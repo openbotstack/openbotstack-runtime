@@ -17,6 +17,8 @@ import (
 type ReasoningResponse struct {
 	ExecutionID   string                     `json:"execution_id"`
 	PlanID        string                     `json:"plan_id,omitempty"`
+	ReplanCount   int                        `json:"replan_count,omitempty"`
+	PlanIDs       []string                   `json:"plan_ids,omitempty"`
 	Tree          *reasoning.ReasoningEvent  `json:"tree"`
 	Text          string                     `json:"text"`
 	Metrics       *TraceMetricsJSON          `json:"metrics,omitempty"`
@@ -106,6 +108,8 @@ func (r *Router) handleExecutionReasoning(w http.ResponseWriter, req *http.Reque
 		resp := ReasoningResponse{
 			ExecutionID: executionID,
 			PlanID:      trace.PlanID,
+			ReplanCount: trace.ReplanCount,
+			PlanIDs:     trace.PlanIDs,
 			Tree:        tree,
 			Text:        text,
 			Metrics: &TraceMetricsJSON{

@@ -38,6 +38,13 @@ func (s *KeywordStrategy) Search(ctx context.Context, scope MemoryScope, query s
 		return nil, nil
 	}
 
+	// Skip messages already in the conversation history window
+	if scope.ExcludeRecentMessages > 0 && scope.ExcludeRecentMessages < len(msgs) {
+		msgs = msgs[:len(msgs)-scope.ExcludeRecentMessages]
+	} else if scope.ExcludeRecentMessages >= len(msgs) {
+		return nil, nil
+	}
+
 	tokens := tokenize(query)
 	if len(tokens) == 0 {
 		return nil, nil

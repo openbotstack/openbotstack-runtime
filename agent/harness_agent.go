@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -15,7 +14,6 @@ import (
 	"github.com/openbotstack/openbotstack-core/capability"
 	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
 
-	corecontext "github.com/openbotstack/openbotstack-core/context"
 	"github.com/openbotstack/openbotstack-core/execution"
 	"github.com/openbotstack/openbotstack-core/memory/abstraction"
 	"github.com/openbotstack/openbotstack-core/planner"
@@ -44,8 +42,6 @@ type HarnessAgentConfig struct {
 	SkillDisabled func(id string) bool
 
 	// Session state (optional — nil = feature disabled)
-	ConversationStore   coreagent.ConversationStore
-	ContextAssembler    corecontext.ContextAssembler
 	MemoryManager       abstraction.MemoryManager
 	ConversationMgr     *rtmemory.ConversationManager
 	ReasoningStore      harness.ReasoningStorer
@@ -66,8 +62,6 @@ type HarnessAgent struct {
 	skillRegistry      skillLister
 	capRegistry        capability.CapabilityRegistry
 	skillDisabled      func(id string) bool
-	conversationStore  coreagent.ConversationStore
-	contextAssembler   corecontext.ContextAssembler
 	memoryManager      abstraction.MemoryManager
 	conversationMgr    *rtmemory.ConversationManager
 	reasoningStore     harness.ReasoningStorer
@@ -89,8 +83,6 @@ func NewHarnessAgent(cfg HarnessAgentConfig) *HarnessAgent {
 		capRegistry:        cfg.CapRegistry,
 		runtime:            cfg.Runtime,
 		harness:            cfg.Harness,
-		conversationStore:  cfg.ConversationStore,
-		contextAssembler:   cfg.ContextAssembler,
 		memoryManager:      cfg.MemoryManager,
 		conversationMgr:    cfg.ConversationMgr,
 		workflowResolver:    cfg.WorkflowResolver,
@@ -101,21 +93,17 @@ func NewHarnessAgent(cfg HarnessAgentConfig) *HarnessAgent {
 	}
 }
 
-func (a *HarnessAgent) SetConversationStore(cs coreagent.ConversationStore) { a.conversationStore = cs }
 func (a *HarnessAgent) SetMaxHistoryMessages(n int)                        { a.maxHistoryMessages = n }
-func (a *HarnessAgent) SetContextAssembler(ca corecontext.ContextAssembler) { a.contextAssembler = ca }
 func (a *HarnessAgent) SetMemoryManager(mm abstraction.MemoryManager)      { a.memoryManager = mm }
 func (a *HarnessAgent) SetConversationManager(cm *rtmemory.ConversationManager) { a.conversationMgr = cm }
 
-// buildPlannerContext assembles the PlannerContext: loads history, enriches via
-// ContextAssembler, retrieves memory, and constructs the planning context.
-// When a ConversationManager is configured, it consolidates history + memory retrieval
-// into a single call to avoid duplicate RetrieveSimilar calls.
-func (a *HarnessAgent) buildPlannerContext(ctx context.Context, req coreagent.MessageRequest, descs []aitypes.SkillDescriptor) (*planner.PlannerContext, error) {
+// AssembleContext assembles the PlannerContext using ConversationManager.
+// Implements ContextAssembler.
+func (a *HarnessAgent) AssembleContext(ctx context.Context, req coreagent.MessageRequest, descs []aitypes.SkillDescriptor) (*planner.PlannerContext, error) {
 	var conversationHistory []aitypes.Message
 	var memoryEntries []abstraction.MemoryEntry
+	var sessionSummary string
 
-	// Use ConversationManager for consolidated retrieval when available
 	if a.conversationMgr != nil && req.SessionID != "" {
 		convCtx, err := a.conversationMgr.GetConversationContext(ctx, req.SessionID, req.Message, req.TenantID, req.UserID)
 		if err != nil {
@@ -123,78 +111,38 @@ func (a *HarnessAgent) buildPlannerContext(ctx context.Context, req coreagent.Me
 		} else if convCtx != nil {
 			conversationHistory = convCtx.History
 			memoryEntries = convCtx.MemoryEntries
-		}
-	} else {
-		// Fallback: load history directly when ConversationManager is not configured
-		if a.conversationStore != nil && req.SessionID != "" {
-			conversationHistory = a.loadHistory(ctx, req)
-		}
-
-		// Fallback: retrieve memories directly
-		if a.memoryManager != nil && req.Message != "" {
-			memCtx := rtmemory.ScopeWithMemory(ctx, rtmemory.MemoryScope{
-				TenantID:  req.TenantID,
-				UserID:    req.UserID,
-				SessionID: req.SessionID,
-			})
-			entries, err := a.memoryManager.RetrieveSimilar(memCtx, req.Message, defaultMemoryRetrievalLimit)
-			if err != nil {
-				slog.WarnContext(ctx, "harness_agent: memory retrieval failed", "error", err)
-			} else if len(entries) > 0 {
-				memoryEntries = entries
-			}
-		}
-	}
-
-	// Pass pre-fetched memories to context assembler to prevent duplicate retrieval
-	if a.contextAssembler != nil {
-		var assembled *corecontext.AssembledContext
-		var err error
-		assistantCtx := corecontext.AssistantContext{
-			ProfileID:       a.runtime.AssistantID,
-			EnabledSkillIDs: skillIDsFromDescriptors(descs),
-		}
-		userReq := corecontext.UserRequest{
-			Message:        req.Message,
-			ConversationID: req.SessionID,
-			TenantID:       req.TenantID,
-			UserID:         req.UserID,
-		}
-		if memoryEntries != nil {
-			assembled, err = a.contextAssembler.AssembleWithMemories(ctx, assistantCtx, userReq, conversationHistory, memoryEntries)
-		} else {
-			assembled, err = a.contextAssembler.Assemble(ctx, assistantCtx, userReq, conversationHistory)
-		}
-		if err != nil {
-			slog.WarnContext(ctx, "harness_agent: context assembly failed", "error", err)
-		} else if assembled != nil && len(assembled.Messages) > 0 {
-			_ = assembled.Messages
+			sessionSummary = convCtx.Summary
 		}
 	}
 
 	var memoryContext []planner.SearchResult
-	if len(memoryEntries) > 0 {
-		memoryContext = make([]planner.SearchResult, len(memoryEntries))
-		for i, e := range memoryEntries {
-			memoryContext[i] = planner.SearchResult{
-				Content: []byte(e.Content),
-				Score:   1.0,
-			}
-		}
+	if sessionSummary != "" {
+		memoryContext = append(memoryContext, planner.SearchResult{
+			Content: []byte("[Session Summary] " + sessionSummary),
+			Score:   2.0,
+		})
+	}
+	for _, e := range memoryEntries {
+		memoryContext = append(memoryContext, planner.SearchResult{
+			Content: []byte(e.Content),
+			Score:   1.0,
+		})
 	}
 
 	return &planner.PlannerContext{
-		AssistantID:   a.runtime.AssistantID,
-		Soul:          a.runtime.Soul,
-		MemoryContext: memoryContext,
-		Skills:        descs,
-		UserRequest:   req.Message,
+		AssistantID:         a.runtime.AssistantID,
+		Soul:                a.runtime.Soul,
+		MemoryContext:       memoryContext,
+		Skills:              descs,
+		UserRequest:         req.Message,
+		ConversationHistory: conversationHistory,
 	}, nil
 }
 
-// resolveTasks determines execution tasks via workflow decomposition,
+// ResolveTasks determines execution tasks via workflow decomposition,
 // falling back to a single task if no workflow matches.
-func (a *HarnessAgent) resolveTasks(ctx context.Context, req coreagent.MessageRequest, pCtx *planner.PlannerContext) []harness.TaskInput {
+// Implements TaskResolver.
+func (a *HarnessAgent) ResolveTasks(ctx context.Context, req coreagent.MessageRequest, pCtx *planner.PlannerContext) []harness.TaskInput {
 	if a.workflowResolver == nil {
 		return []harness.TaskInput{{TaskDescription: req.Message, PlannerContext: pCtx}}
 	}
@@ -235,7 +183,7 @@ func (a *HarnessAgent) HandleMessage(ctx context.Context, req coreagent.MessageR
 	emit("loading_context", "正在加载上下文...")
 
 	// Phase 1: Gather skills
-	descriptors, err := a.gatherSkillDescriptors()
+	descriptors, err := a.GatherSkills(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("harness_agent: failed to gather skills: %w", err)
 	}
@@ -244,23 +192,23 @@ func (a *HarnessAgent) HandleMessage(ctx context.Context, req coreagent.MessageR
 	}
 
 	// Phase 2: Assemble planner context
-	pCtx, err := a.buildPlannerContext(ctx, req, descriptors)
+	pCtx, err := a.AssembleContext(ctx, req, descriptors)
 	if err != nil {
 		return nil, fmt.Errorf("harness_agent: failed to build context: %w", err)
 	}
 
 	// Phase 3: Resolve tasks
-	tasks := a.resolveTasks(ctx, req, pCtx)
+	tasks := a.ResolveTasks(ctx, req, pCtx)
 
 	// Phase 4: Prepare execution context
 	execID := uuid.NewString()
-	ec := a.prepareExecutionContext(ctx, execID, req)
+	ec := a.PrepareExecutionContext(ctx, execID, req)
 
 	emit("planning", "")
 	a.propagateProgressToTasks(tasks, ec)
 
 	// Phase 5: Execute tasks
-	lastResult, message, skillUsed, execErr := a.executeTasks(ctx, tasks, ec)
+	lastResult, message, skillUsed, execErr := a.ExecuteTasks(ctx, tasks, ec)
 	if execErr != nil {
 		errMsg := fmt.Sprintf("Execution failed: %v", execErr)
 		slog.WarnContext(ctx, "harness_agent: execution failed", "error", execErr)
@@ -286,13 +234,14 @@ func (a *HarnessAgent) HandleMessage(ctx context.Context, req coreagent.MessageR
 	}
 
 	// Phase 6: Finalize
-	a.finalize(ctx, execID, req.TenantID, lastResult, req, resp)
+	a.Finalize(ctx, execID, req.TenantID, lastResult, req, resp)
 
 	return resp, nil
 }
 
-// prepareExecutionContext builds the ExecutionContext for this request (Phase 4).
-func (a *HarnessAgent) prepareExecutionContext(ctx context.Context, execID string, req coreagent.MessageRequest) *execution.ExecutionContext {
+// PrepareExecutionContext builds the ExecutionContext for this request.
+// Implements ExecutionContextPreparer.
+func (a *HarnessAgent) PrepareExecutionContext(ctx context.Context, execID string, req coreagent.MessageRequest) *execution.ExecutionContext {
 	ec := execution.NewExecutionContext(ctx, execID, a.runtime.AssistantID, req.SessionID, req.TenantID, req.UserID)
 	ec.LoopMode = "harness"
 	ec.GrantedPermissions = a.grantedPermissions
@@ -314,10 +263,11 @@ func (a *HarnessAgent) propagateProgressToTasks(tasks []harness.TaskInput, ec *e
 	}
 }
 
-// executeTasks runs plan+execute for each task (Phase 5).
+// ExecuteTasks runs plan+execute for each task.
 // For a single task, returns the direct result. For multiple tasks,
 // aggregates into a summary. Returns (lastResult, message, skillUsed, error).
-func (a *HarnessAgent) executeTasks(ctx context.Context, tasks []harness.TaskInput, ec *execution.ExecutionContext) (*harness.HarnessResult, string, string, error) {
+// Implements TaskExecuter.
+func (a *HarnessAgent) ExecuteTasks(ctx context.Context, tasks []harness.TaskInput, ec *execution.ExecutionContext) (*harness.HarnessResult, string, string, error) {
 	if len(tasks) == 1 {
 		result, err := harness.PlanAndRun(ctx, a.planner, a.harness, tasks[0], ec)
 		if err != nil {
@@ -342,8 +292,9 @@ func (a *HarnessAgent) executeTasks(ctx context.Context, tasks []harness.TaskInp
 	return lastResult, summary, "", nil
 }
 
-// finalize stores reasoning traces and conversation messages (Phase 6).
-func (a *HarnessAgent) finalize(ctx context.Context, execID, tenantID string, result *harness.HarnessResult, req coreagent.MessageRequest, resp *coreagent.MessageResponse) {
+// Finalize stores reasoning traces and conversation messages.
+// Implements Finalizer.
+func (a *HarnessAgent) Finalize(ctx context.Context, execID, tenantID string, result *harness.HarnessResult, req coreagent.MessageRequest, resp *coreagent.MessageResponse) {
 	if a.reasoningStore != nil && result != nil {
 		auditTrail := stepResultsToAuditTrail(result.StepResults, execID)
 		a.reasoningStore.StoreTrail(execID, auditTrail)
@@ -365,7 +316,7 @@ func (a *HarnessAgent) extractMessage(result *harness.HarnessResult) string {
 			continue
 		}
 		if sr.Output != nil {
-			return fmt.Sprintf("%v", sr.Output)
+			return harness.FormatOutput(sr.Output)
 		}
 		if sr.Error != nil {
 			return fmt.Sprintf("Step %q failed: %s", sr.StepName, sanitizeStepError(sr.Error))
@@ -444,7 +395,9 @@ func stepResultsToAuditTrail(results []execution.StepResult, traceID string) []a
 	return entries
 }
 
-func (a *HarnessAgent) gatherSkillDescriptors() ([]aitypes.SkillDescriptor, error) {
+// GatherSkills collects available skill/tool descriptors.
+// Implements SkillGatherer.
+func (a *HarnessAgent) GatherSkills(ctx context.Context) ([]aitypes.SkillDescriptor, error) {
 	if a.capRegistry != nil {
 		caps := a.capRegistry.List()
 		descs := make([]aitypes.SkillDescriptor, 0, len(caps))
@@ -472,39 +425,17 @@ func (a *HarnessAgent) gatherSkillDescriptors() ([]aitypes.SkillDescriptor, erro
 }
 
 func (a *HarnessAgent) storeMessages(ctx context.Context, req coreagent.MessageRequest, resp *coreagent.MessageResponse) {
-	if a.conversationStore == nil || req.SessionID == "" {
+	if a.conversationMgr == nil || req.SessionID == "" {
 		return
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if err := a.conversationStore.AppendMessage(ctx, coreagent.SessionMessage{
-		TenantID: req.TenantID, UserID: req.UserID, SessionID: req.SessionID,
-		Role: "user", Content: req.Message, Timestamp: now,
-	}); err != nil {
+	if err := a.conversationMgr.StoreMessage(ctx, req.SessionID, req.TenantID, req.UserID, "user", req.Message, ""); err != nil {
 		slog.WarnContext(ctx, "harness_agent: failed to store user message", "error", err)
 	}
-	if err := a.conversationStore.AppendMessage(ctx, coreagent.SessionMessage{
-		TenantID: req.TenantID, UserID: req.UserID, SessionID: req.SessionID,
-		Role: "assistant", Content: resp.Message,
-		Timestamp: time.Now().UTC().Format(time.RFC3339Nano), ExecutionID: resp.ExecutionID,
-	}); err != nil {
+	if err := a.conversationMgr.StoreMessage(ctx, req.SessionID, req.TenantID, req.UserID, "assistant", resp.Message, resp.ExecutionID); err != nil {
 		slog.WarnContext(ctx, "harness_agent: failed to store assistant message", "error", err)
 	}
 }
 
-func (a *HarnessAgent) loadHistory(ctx context.Context, req coreagent.MessageRequest) []aitypes.Message {
-	var history []aitypes.Message
-	summary, err := a.conversationStore.GetSummary(ctx, req.TenantID, req.UserID, req.SessionID)
-	if err == nil && summary != "" {
-		history = append(history, aitypes.Message{
-			Role: "system", Contents: []aitypes.ContentBlock{aitypes.NewTextBlock("Previous conversation summary:\n" + summary)},
-		})
-	}
-	msgs, err := a.conversationStore.GetHistory(ctx, req.TenantID, req.UserID, req.SessionID, a.maxHistoryMessages)
-	if err == nil && len(msgs) > 0 {
-		history = append(history, msgs...)
-	}
-	return history
-}
 
 func sanitizeStepError(err error) string {
 	if err == nil {

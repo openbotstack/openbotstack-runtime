@@ -39,12 +39,6 @@ func (s *ConversationSummarizer) CheckAndSummarize(ctx context.Context, tenantID
 		return
 	}
 
-	// Check if summary already exists
-	existing, _ := s.store.GetSummary(ctx, tenantID, userID, sessionID)
-	if existing != "" {
-		return
-	}
-
 	slog.InfoContext(ctx, "memory: generating session summary",
 		"tenant_id", tenantID, "user_id", userID, "session_id", sessionID, "message_count", len(msgs))
 
@@ -100,12 +94,20 @@ type SummarizingConversationStore struct {
 	inner      coreagent.ConversationStore
 	summarizer *ConversationSummarizer
 	indexer    *AsyncEmbeddingIndexer // optional: nil = vector indexing disabled
+	compactor  Compactor              // optional: nil = compaction disabled
 
 	// Per-session summarization dedup + threshold counter
 	mu        sync.Mutex
 	pending   map[string]struct{} // sessions with in-flight summarization
 	counts    map[string]int      // sessionID -> message count since last summarization
 	threshold int                 // cached from summarizer
+
+	// Per-session compaction dedup + throttle
+	compactionPending map[string]struct{}
+	compactionCounts  map[string]int // sessionID -> message count since last compaction
+
+	// Token budget for compaction trigger
+	maxTokens int
 
 	// Bounded concurrency for indexer
 	idxSem chan struct{} // semaphore, cap = maxConcurrentIndexing
@@ -114,18 +116,26 @@ type SummarizingConversationStore struct {
 // NewSummarizingConversationStore creates a decorator that auto-summarizes conversations.
 func NewSummarizingConversationStore(inner coreagent.ConversationStore, summarizer *ConversationSummarizer) *SummarizingConversationStore {
 	return &SummarizingConversationStore{
-		inner:      inner,
-		summarizer: summarizer,
-		pending:    make(map[string]struct{}),
-		counts:     make(map[string]int),
-		threshold:  summarizer.threshold,
-		idxSem:     make(chan struct{}, 16),
+		inner:             inner,
+		summarizer:        summarizer,
+		pending:           make(map[string]struct{}),
+		counts:            make(map[string]int),
+		compactionPending: make(map[string]struct{}),
+		compactionCounts:  make(map[string]int),
+		threshold:         summarizer.threshold,
+		maxTokens:         16000,
+		idxSem:            make(chan struct{}, 16),
 	}
 }
 
 // SetIndexer sets the async embedding indexer for vector search.
 func (s *SummarizingConversationStore) SetIndexer(indexer *AsyncEmbeddingIndexer) {
 	s.indexer = indexer
+}
+
+// SetCompactor sets the session compactor for progressive compression.
+func (s *SummarizingConversationStore) SetCompactor(compactor Compactor) {
+	s.compactor = compactor
 }
 
 func (s *SummarizingConversationStore) AppendMessage(ctx context.Context, msg coreagent.SessionMessage) error {
@@ -147,6 +157,9 @@ func (s *SummarizingConversationStore) AppendMessage(ctx context.Context, msg co
 		}
 	}
 
+	// Initialize state from persistent store if needed
+	s.initializeSessionState(ctx, msg.TenantID, msg.UserID, msg.SessionID)
+
 	// Threshold-gated summarization with per-session dedup
 	if s.shouldTriggerSummarization(msg.SessionID) {
 		sumCtx, cancel := context.WithTimeout(context.Background(), summarizationTimeout)
@@ -155,6 +168,20 @@ func (s *SummarizingConversationStore) AppendMessage(ctx context.Context, msg co
 			defer s.clearPending(msg.SessionID)
 			s.summarizer.CheckAndSummarize(sumCtx, msg.TenantID, msg.UserID, msg.SessionID)
 		}()
+	}
+
+	// Zone-aware compaction trigger (gated by message count threshold)
+	if s.compactor != nil {
+		if zoned, ok := s.inner.(ZonedStore); ok {
+			if s.shouldTriggerCompaction(msg.SessionID, len(msg.Content)) {
+				compCtx, cancel := context.WithTimeout(context.Background(), compactionTimeout)
+				go func() {
+					defer cancel()
+					defer s.clearCompactionPending(msg.SessionID)
+					s.runCompaction(compCtx, zoned, msg.TenantID, msg.UserID, msg.SessionID)
+				}()
+			}
+		}
 	}
 
 	return nil
@@ -179,18 +206,181 @@ func (s *SummarizingConversationStore) shouldTriggerSummarization(sessionID stri
 	if count < s.threshold {
 		return false
 	}
-	// Trigger at threshold, then every threshold/2 after
-	if count == s.threshold || (count > s.threshold && s.threshold > 0 && (count-s.threshold)%(s.threshold/2) == 0) {
+	// Trigger at threshold; counter resets after each summarization via clearPending
+	// Wait, if count is strictly increasing, clearPending deletes it from s.counts,
+	// so it starts from 0 again. Then count will grow to threshold again.
+	// We don't need (count-s.threshold)%(s.threshold/2) if it resets to 0.
+	// The original code did: `count == s.threshold || ...`. Let's just trigger at threshold.
+	if count >= s.threshold {
 		s.pending[sessionID] = struct{}{}
 		return true
 	}
 	return false
 }
 
+// initializeSessionState ensures local counters are initialized from the store.
+func (s *SummarizingConversationStore) initializeSessionState(ctx context.Context, tenantID, userID, sessionID string) {
+	s.mu.Lock()
+	_, ok1 := s.counts[sessionID]
+	_, ok2 := s.compactionCounts[sessionID]
+	if ok1 && ok2 {
+		s.mu.Unlock()
+		return
+	}
+	s.mu.Unlock()
+
+	count := 0
+	if provider, ok := s.inner.(MessageCountProvider); ok {
+		c, err := provider.GetMessageCount(ctx, tenantID, userID, sessionID)
+		if err == nil {
+			count = c
+		}
+	} else if msgs, err := s.inner.GetHistory(ctx, tenantID, userID, sessionID, 0); err == nil {
+		count = len(msgs)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.counts[sessionID]; !ok {
+		// Use modulo threshold to avoid instant triggers on old long sessions
+		if s.threshold > 0 {
+			s.counts[sessionID] = count % s.threshold
+		} else {
+			s.counts[sessionID] = count
+		}
+	}
+	if _, ok := s.compactionCounts[sessionID]; !ok {
+		s.compactionCounts[sessionID] = count
+	}
+}
+
 func (s *SummarizingConversationStore) clearPending(sessionID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.pending, sessionID)
+	delete(s.counts, sessionID)
+}
+
+func (s *SummarizingConversationStore) shouldTriggerCompaction(sessionID string, contentLen int) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.compactionPending[sessionID]; ok {
+		s.compactionCounts[sessionID]++
+		return false
+	}
+	s.compactionCounts[sessionID]++
+	// Skip trivial messages to avoid unnecessary goroutine launches
+	if contentLen < 20 {
+		return false
+	}
+	// Throttle: only check every 5 messages
+	if s.compactionCounts[sessionID]%5 != 0 {
+		return false
+	}
+	s.compactionPending[sessionID] = struct{}{}
+	return true
+}
+
+func (s *SummarizingConversationStore) clearCompactionPending(sessionID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.compactionPending, sessionID)
+	// Keep compactionCounts to maintain throttle across compaction rounds
+}
+
+func (s *SummarizingConversationStore) runCompaction(ctx context.Context, store ZonedStore, tenantID, userID, sessionID string) {
+	zoned, err := store.GetZonedHistory(ctx, tenantID, userID, sessionID)
+	if err != nil || len(zoned) == 0 {
+		return
+	}
+
+	totalTokens := EstimateZonedTokens(zoned)
+	if totalTokens <= s.maxTokens {
+		return
+	}
+
+	// Build compaction plan
+	plan := s.buildCompactionPlan(zoned)
+	result, err := s.compactor.Compact(ctx, plan)
+	if err != nil {
+		slog.Warn("compaction failed", "session_id", sessionID, "error", err)
+		return
+	}
+
+	// Rebuild zoned messages with compaction result
+	updated := s.applyCompactionResult(plan, result)
+	if err := store.WriteZonedHistory(ctx, tenantID, userID, sessionID, updated); err != nil {
+		slog.Warn("compaction write failed", "session_id", sessionID, "error", err)
+	}
+}
+
+func (s *SummarizingConversationStore) buildCompactionPlan(zoned []ZonedMessage) CompactionPlan {
+	var plan CompactionPlan
+	var fullMsgs []aitypes.Message
+	var compressedTurns []TurnSummary
+
+	for _, zm := range zoned {
+		switch zm.Zone {
+		case ZoneArchive:
+			plan.ArchiveSummary = zm.ArchiveSummary
+		case ZoneCompressed:
+			if zm.TurnSummary != nil {
+				compressedTurns = append(compressedTurns, *zm.TurnSummary)
+			}
+		case ZoneFull:
+			if zm.Message != nil {
+				fullMsgs = append(fullMsgs, *zm.Message)
+			}
+		}
+	}
+
+	// Only compress oldest half of full-zone messages
+	if len(fullMsgs) > 5 {
+		compressCount := len(fullMsgs) / 2
+		plan.MessagesToCompress = fullMsgs[:compressCount]
+		plan.fullMsgsToKeep = fullMsgs[compressCount:]
+	} else {
+		plan.fullMsgsToKeep = fullMsgs
+	}
+
+	// Only archive oldest half of compressed turns
+	if len(compressedTurns) > 5 {
+		archiveCount := len(compressedTurns) / 2
+		plan.TurnsToArchive = compressedTurns[:archiveCount]
+		plan.compressedToKeep = compressedTurns[archiveCount:]
+	} else {
+		plan.compressedToKeep = compressedTurns
+	}
+
+	return plan
+}
+
+func (s *SummarizingConversationStore) applyCompactionResult(plan CompactionPlan, result *CompactionResult) []ZonedMessage {
+	var updated []ZonedMessage
+
+	// Archive zone
+	if result.UpdatedArchive != "" {
+		updated = append(updated, ZonedMessage{Zone: ZoneArchive, ArchiveSummary: result.UpdatedArchive})
+	} else if plan.ArchiveSummary != "" {
+		updated = append(updated, ZonedMessage{Zone: ZoneArchive, ArchiveSummary: plan.ArchiveSummary})
+	}
+
+	// Compressed zone: new summaries + kept existing turns
+	for _, ts := range result.NewTurnSummaries {
+		tsCopy := ts
+		updated = append(updated, ZonedMessage{Zone: ZoneCompressed, TurnSummary: &tsCopy})
+	}
+	for _, ts := range plan.compressedToKeep {
+		tsCopy := ts
+		updated = append(updated, ZonedMessage{Zone: ZoneCompressed, TurnSummary: &tsCopy})
+	}
+
+	// Full zone: only messages not compressed
+	for i := range plan.fullMsgsToKeep {
+		updated = append(updated, ZonedMessage{Zone: ZoneFull, Message: &plan.fullMsgsToKeep[i]})
+	}
+
+	return updated
 }
 
 func (s *SummarizingConversationStore) GetHistory(ctx context.Context, tenantID, userID, sessionID string, maxMessages int) ([]aitypes.Message, error) {
@@ -205,6 +395,21 @@ func (s *SummarizingConversationStore) StoreSummary(ctx context.Context, tenantI
 	return s.inner.StoreSummary(ctx, tenantID, userID, sessionID, summary)
 }
 
+// GetSummaryMeta delegates to inner store if it supports SummaryMetaProvider.
+func (s *SummarizingConversationStore) GetSummaryMeta(ctx context.Context, tenantID, userID, sessionID string) (*SummaryMetadata, error) {
+	if provider, ok := s.inner.(SummaryMetaProvider); ok {
+		return provider.GetSummaryMeta(ctx, tenantID, userID, sessionID)
+	}
+	return nil, nil
+}
+
 func (s *SummarizingConversationStore) ClearSession(ctx context.Context, tenantID, userID, sessionID string) error {
-	return s.inner.ClearSession(ctx, tenantID, userID, sessionID)
+	err := s.inner.ClearSession(ctx, tenantID, userID, sessionID)
+	s.mu.Lock()
+	delete(s.counts, sessionID)
+	delete(s.pending, sessionID)
+	delete(s.compactionPending, sessionID)
+	delete(s.compactionCounts, sessionID)
+	s.mu.Unlock()
+	return err
 }

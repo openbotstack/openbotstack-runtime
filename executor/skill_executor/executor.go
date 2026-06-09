@@ -3,6 +3,7 @@ package skill_executor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -45,6 +46,14 @@ type TextGenerator interface {
 type StreamingTextGenerator interface {
 	TextGenerator
 	GenerateStreamText(ctx context.Context, prompt string, tokenFn func(string)) (string, error)
+}
+
+// VisionTextGenerator extends TextGenerator with multimodal (image + text) generation.
+// Used by declarative skills when input contains image_url.
+type VisionTextGenerator interface {
+	TextGenerator
+	GenerateWithImage(ctx context.Context, prompt string, imageURL string) (string, error)
+	GenerateStreamWithImage(ctx context.Context, prompt string, imageURL string, tokenFn func(string)) (string, error)
 }
 
 // DefaultExecutor implements SkillExecutor with real Wasm execution.
@@ -394,6 +403,8 @@ func (e *DefaultExecutor) tryLLMFallback(
 }
 
 // executeDeclarative handles the declarative (LLM-based) skill execution path.
+// When input contains image_url, it routes through vision-capable LLM with
+// multimodal content blocks instead of plain text.
 func (e *DefaultExecutor) executeDeclarative(
 	ctx context.Context,
 	req execution.ExecutionRequest,
@@ -414,19 +425,28 @@ func (e *DefaultExecutor) executeDeclarative(
 			"skill_id", req.SkillID)
 	}
 
+	// Detect image_url in input and route to vision-capable path.
+	imageURL := extractImageURL(req.Input)
+	useVision := imageURL != ""
+	imageURLLog := imageURL
+	if len(imageURLLog) > 80 {
+		imageURLLog = imageURLLog[:80]
+	}
+	slog.InfoContext(ctx, "declarative skill execution",
+		"skill_id", req.SkillID, "useVision", useVision, "imageURL", imageURLLog)
+
 	var output string
 	var err error
-	if req.TokenFn != nil {
-		if stg, ok := deps.tg.(StreamingTextGenerator); ok {
-			output, err = stg.GenerateStreamText(ctx, prompt, req.TokenFn)
-		} else {
-			output, err = deps.tg.GenerateText(ctx, prompt)
-			if err == nil && output != "" {
-				req.TokenFn(output)
-			}
+
+	if useVision {
+		output, err = e.generateWithVision(ctx, deps.tg, prompt, imageURL, req.TokenFn)
+		if err != nil {
+			slog.WarnContext(ctx, "vision generation failed, falling back to text-only",
+				"skill_id", req.SkillID, "error", err)
+			output, err = e.generateText(ctx, deps.tg, prompt, req.TokenFn)
 		}
 	} else {
-		output, err = deps.tg.GenerateText(ctx, prompt)
+		output, err = e.generateText(ctx, deps.tg, prompt, req.TokenFn)
 	}
 
 	if err != nil {
@@ -436,17 +456,68 @@ func (e *DefaultExecutor) executeDeclarative(
 		return result, err
 	}
 
+	execMode := mode
+	if useVision {
+		execMode = mode + "+vision"
+	}
+
 	duration := time.Since(start)
 	e.emitAudit(ctx, deps.al, audit.AuditEvent{
 		ID: uuid.NewString(), TenantID: req.TenantID, UserID: req.UserID,
 		RequestID: req.RequestID, Source: audit.SourceExecutor,
 		Action: "skills.execute", Resource: "skill/" + req.SkillID,
 		Outcome: "success", Duration: duration,
-		Metadata: map[string]string{"execution_mode": mode}, Timestamp: time.Now(),
+		Metadata: map[string]string{"execution_mode": execMode}, Timestamp: time.Now(),
 	})
 	return &execution.ExecutionResult{
 		Status: execution.StatusSuccess, Output: []byte(output), Duration: duration,
 	}, nil
+}
+
+// generateText performs text-only LLM generation, with streaming if available.
+func (e *DefaultExecutor) generateText(ctx context.Context, tg TextGenerator, prompt string, tokenFn func(string)) (string, error) {
+	if tokenFn != nil {
+		if stg, ok := tg.(StreamingTextGenerator); ok {
+			return stg.GenerateStreamText(ctx, prompt, tokenFn)
+		}
+		output, err := tg.GenerateText(ctx, prompt)
+		if err == nil && output != "" {
+			tokenFn(output)
+		}
+		return output, err
+	}
+	return tg.GenerateText(ctx, prompt)
+}
+
+// generateWithVision performs multimodal LLM generation with image content.
+func (e *DefaultExecutor) generateWithVision(ctx context.Context, tg TextGenerator, prompt string, imageURL string, tokenFn func(string)) (string, error) {
+	vtg, ok := tg.(VisionTextGenerator)
+	if !ok {
+		return "", fmt.Errorf("text generator does not support vision")
+	}
+	if tokenFn != nil {
+		return vtg.GenerateStreamWithImage(ctx, prompt, imageURL, tokenFn)
+	}
+	return vtg.GenerateWithImage(ctx, prompt, imageURL)
+}
+
+// extractImageURL checks if the input JSON contains an image_url field.
+func extractImageURL(input []byte) string {
+	if len(input) == 0 {
+		return ""
+	}
+	var m map[string]any
+	if err := json.Unmarshal(input, &m); err != nil {
+		return ""
+	}
+	url, _ := m["image_url"].(string)
+	if url == "" {
+		return ""
+	}
+	if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
+		return url
+	}
+	return ""
 }
 
 // buildSkillPrompt constructs the LLM prompt for a skill, using SKILL.md if available.

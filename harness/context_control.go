@@ -3,6 +3,8 @@ package harness
 import (
 	"context"
 	"fmt"
+
+	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
 )
 
 // CompactionTrigger defines when context compaction should occur.
@@ -111,4 +113,53 @@ func (a *ContextCompactorAdapter) Compact(ctx context.Context, turnResults []Tur
 		return nil, fmt.Errorf("context compaction failed: %w", err)
 	}
 	return result, nil
+}
+
+// EstimateMessageTokens estimates token count from message content using chars/4 heuristic.
+func EstimateMessageTokens(msgs []aitypes.Message) int {
+	return estimateMessageChars(msgs) / 4
+}
+
+func estimateMessageChars(msgs []aitypes.Message) int {
+	totalChars := 0
+	for _, m := range msgs {
+		for _, c := range m.Contents {
+			if c.Type == "text" && c.Text != "" {
+				totalChars += len(c.Text)
+			}
+		}
+	}
+	return totalChars
+}
+
+// TruncateHistoryByToken drops oldest messages to fit within maxTokens.
+// Always keeps at least 1 message (the most recent) if input is non-empty.
+// Returns nil for nil input.
+func TruncateHistoryByToken(history []aitypes.Message, maxTokens int) []aitypes.Message {
+	if history == nil {
+		return nil
+	}
+	if maxTokens <= 0 {
+		return nil
+	}
+	maxChars := maxTokens * 4
+	if estimateMessageChars(history) <= maxChars {
+		return history
+	}
+	// Walk from end (most recent), accumulate chars, keep tail within budget
+	var kept []aitypes.Message
+	accumulated := 0
+	for i := len(history) - 1; i >= 0; i-- {
+		msgChars := estimateMessageChars(history[i : i+1])
+		if accumulated+msgChars > maxChars && len(kept) > 0 {
+			break
+		}
+		accumulated += msgChars
+		kept = append(kept, history[i])
+	}
+	// Reverse to maintain original order
+	for l, r := 0, len(kept)-1; l < r; l, r = l+1, r-1 {
+		kept[l], kept[r] = kept[r], kept[l]
+	}
+	return kept
 }

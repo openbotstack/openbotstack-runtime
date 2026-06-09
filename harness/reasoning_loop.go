@@ -244,7 +244,7 @@ func (rl *DefaultReasoningLoop) Run(ctx context.Context, step *execution.Executi
 				stepResults[planStep.Name] = res.Output
 				if res.Output != nil {
 					lastOutput = res.Output
-					turnResult.Observations = append(turnResult.Observations, fmt.Sprintf("%v", res.Output))
+					turnResult.Observations = append(turnResult.Observations, FormatOutput(res.Output))
 				}
 			}
 		}

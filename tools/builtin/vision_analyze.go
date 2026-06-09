@@ -7,18 +7,23 @@ import (
 	"net"
 	"net/url"
 	"strings"
+
+	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
 )
 
 // VisionAnalyzeTool analyzes images using a vision-capable LLM.
 // It sends an image URL along with an instruction to the LLM and returns
 // the analysis result.
 type VisionAnalyzeTool struct {
-	llmAccess LLMAccess
+	llmAccess aitypes.LLMAccess
+	// allowPrivateIPs disables SSRF protection for private network addresses.
+	// Enable for development/testing with local image servers.
+	allowPrivateIPs bool
 }
 
 // SetLLMAccess injects the LLM access for vision analysis.
 // Implements the LLMAwareTool optional interface.
-func (t *VisionAnalyzeTool) SetLLMAccess(access LLMAccess) {
+func (t *VisionAnalyzeTool) SetLLMAccess(access aitypes.LLMAccess) {
 	t.llmAccess = access
 }
 
@@ -59,15 +64,20 @@ func (t *VisionAnalyzeTool) Execute(ctx context.Context, input map[string]any) (
 		return nil, fmt.Errorf("vision_analyze: image_url must use http:// or https:// scheme")
 	}
 
-	// SSRF protection: block private/internal IPs.
+	// SSRF protection: block private/internal IPs (unless explicitly allowed).
+	// NOTE: This pre-resolution check prevents accidental/malicious use of internal
+	// URLs by users. It does NOT protect against DNS rebinding since the image URL
+	// is ultimately fetched by the LLM provider, not by this process. For production
+	// deployments, additional SSRF protection should be enforced at the network level
+	// (e.g., via proxy or firewall rules on the LLM provider's outbound connections).
 	host := parsedURL.Hostname()
 	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
 	if err != nil {
 		return nil, fmt.Errorf("vision_analyze: DNS resolution failed for %q: %w", host, err)
 	}
 	for _, ip := range ips {
-		if isPrivateIP(ip.IP) {
-			return nil, fmt.Errorf("vision_analyze: access to private network addresses is blocked (%s)", ip.IP)
+		if !t.allowPrivateIPs && isPrivateIP(ip.IP) {
+			return nil, fmt.Errorf("vision_analyze: access to private network addresses is blocked (%s); set OBS_VISION_ALLOW_PRIVATE_NETWORKS=true to allow", ip.IP)
 		}
 	}
 
@@ -83,11 +93,11 @@ func (t *VisionAnalyzeTool) Execute(ctx context.Context, input map[string]any) (
 	}
 
 	// Build the LLM request with text + image content blocks.
-	req := LLMRequest{
+	req := aitypes.LLMRequest{
 		SystemPrompt: "You are a vision analysis assistant. Analyze the provided image and respond to the user's instruction.",
-		Contents: []ContentBlock{
-			NewTextBlock(instruction),
-			NewImageBlock(imageURL),
+		Contents: []aitypes.ContentBlock{
+			aitypes.NewTextBlock(instruction),
+			aitypes.NewImageBlock(imageURL),
 		},
 		MaxTokens:   1024,
 		Temperature: 0.3,

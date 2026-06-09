@@ -6,9 +6,8 @@ import (
 	"os"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/openbotstack/openbotstack-core/control/agent"
+	coreagent "github.com/openbotstack/openbotstack-core/control/agent"
 	agentpkg "github.com/openbotstack/openbotstack-runtime/agent"
-	contextassembler "github.com/openbotstack/openbotstack-runtime/context"
 	"github.com/openbotstack/openbotstack-runtime/memory"
 )
 
@@ -25,7 +24,7 @@ func (b *ServerBuilder) InitMemory() *ServerBuilder {
 	}
 	slog.Info("markdown memory store initialized", "data_dir", b.cfg.Memory.DataDir)
 
-	var convStore agent.ConversationStore = markdownStore
+	var convStore coreagent.ConversationStore = markdownStore
 	if b.cfg.Memory.SummaryEnabled {
 		summarizer := memory.NewConversationSummarizer(markdownStore, b.modelRouter, b.cfg.Memory.SummaryThreshold)
 		convStore = memory.NewSummarizingConversationStore(markdownStore, summarizer)
@@ -35,7 +34,6 @@ func (b *ServerBuilder) InitMemory() *ServerBuilder {
 
 	switch a := b.apiAgent.(type) {
 	case *agentpkg.HarnessAgent:
-		a.SetConversationStore(convStore)
 		a.SetMaxHistoryMessages(b.cfg.Memory.MaxHistoryMessages)
 	}
 
@@ -47,19 +45,15 @@ func (b *ServerBuilder) InitMemory() *ServerBuilder {
 		slog.Info("vector search disabled (keyword matching only)")
 	}
 
-	contextAssembler := contextassembler.NewRuntimeContextAssembler(b.exec, memoryBridge)
-
-	// Create ConversationManager to consolidate history + memory retrieval,
-	// preventing duplicate RetrieveSimilar calls between HarnessAgent and ContextAssembler.
+	// Create ConversationManager to consolidate history + memory retrieval.
 	conversationMgr := memory.NewConversationManager(convStore, memoryBridge, b.cfg.Memory.MaxHistoryMessages)
 
 	switch a := b.apiAgent.(type) {
 	case *agentpkg.HarnessAgent:
-		a.SetContextAssembler(contextAssembler)
 		a.SetMemoryManager(memoryBridge)
 		a.SetConversationManager(conversationMgr)
 	}
-	slog.Info("context assembler initialized")
+	slog.Info("conversation manager initialized")
 
 	b.markdownStore = markdownStore
 	b.sessionStore = sessionStateStore
@@ -67,7 +61,7 @@ func (b *ServerBuilder) InitMemory() *ServerBuilder {
 }
 
 // initVectorSearch initializes optional PostgreSQL + pgvector for semantic search.
-func (b *ServerBuilder) initVectorSearch(markdownStore *memory.MarkdownMemoryStore, memoryBridge *memory.MarkdownMemoryBridge, convStore agent.ConversationStore) {
+func (b *ServerBuilder) initVectorSearch(markdownStore *memory.MarkdownMemoryStore, memoryBridge *memory.MarkdownMemoryBridge, convStore coreagent.ConversationStore) {
 	pgPool, err := pgxpool.New(context.Background(), b.cfg.Vector.DatabaseURL)
 	if err != nil {
 		slog.Error("failed to parse vector database URL", "error", err)

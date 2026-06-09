@@ -124,25 +124,45 @@ func (se *StepExecutor) ExecuteTool(
 
 	start := time.Now()
 
-	// Route to registered handler first, then default toolRunner.
+	// Route to registered handler first (builtin.*, mcp.*).
 	if handler := se.lookupHandler(cloned); handler != nil {
 		return handler.Handle(ctx, cloned, ec, prevResults, stepTimeout)
 	}
 
-	if se.toolRunner == nil {
-		return &execution.StepResult{
-			StepID:   cloned.StepID,
-			StepName: cloned.Name,
-			Type:     string(cloned.Type),
-			Error:    fmt.Errorf("no tool runner configured"),
-			Duration: time.Since(start),
-		}, fmt.Errorf("tool step %q skipped: no tool runner configured", cloned.Name)
+	// Try the default toolRunner.
+	if se.toolRunner != nil {
+		result, err := runToolWithTimeout(ctx, se.toolRunner, cloned, ec, stepTimeout)
+		if err == nil {
+			if result != nil {
+				result.Duration = time.Since(start)
+			}
+			return result, nil
+		}
+		// If toolRunner failed with 404, fall through to skill executor.
+		// This handles the case where the planner marks a skill as type "tool".
+		if se.skillExecutor != nil {
+			slog.DebugContext(ctx, "step_executor: tool runner failed, falling back to skill executor",
+				"step", cloned.Name, "error", err)
+			return se.ExecuteSkill(ctx, step, ec, prevResults, stepTimeout)
+		}
+		if result != nil {
+			result.Duration = time.Since(start)
+		}
+		return result, err
 	}
-	result, err := runToolWithTimeout(ctx, se.toolRunner, cloned, ec, stepTimeout)
-	if result != nil {
-		result.Duration = time.Since(start)
+
+	// No toolRunner: fall back to skill executor for unrecognized tool names.
+	if se.skillExecutor != nil {
+		return se.ExecuteSkill(ctx, step, ec, prevResults, stepTimeout)
 	}
-	return result, err
+
+	return &execution.StepResult{
+		StepID:   cloned.StepID,
+		StepName: cloned.Name,
+		Type:     string(cloned.Type),
+		Error:    fmt.Errorf("no tool runner configured"),
+		Duration: time.Since(start),
+	}, fmt.Errorf("tool step %q skipped: no tool runner configured", cloned.Name)
 }
 
 // runToolWithTimeout handles tool execution via any ToolRunner with timeout management

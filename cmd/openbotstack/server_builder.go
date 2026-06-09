@@ -156,7 +156,7 @@ func parseLogLevel(s string) slog.Level {
 
 // buildLLMGenerator creates a function that generates direct LLM text responses.
 func (b *ServerBuilder) buildLLMGenerator() harnesspkg.LLMGenerator {
-	return func(ctx context.Context, systemPrompt, userMessage string) (string, error) {
+	return func(ctx context.Context, systemPrompt, userMessage string, history []types.Message) (string, error) {
 		provider, err := b.modelRouter.Route([]types.CapabilityType{types.CapTextGeneration}, types.ModelConstraints{})
 		if err != nil {
 			return "", fmt.Errorf("llm generator: route failed: %w", err)
@@ -165,6 +165,15 @@ func (b *ServerBuilder) buildLLMGenerator() harnesspkg.LLMGenerator {
 		msgs := []types.Message{}
 		if systemPrompt != "" {
 			msgs = append(msgs, types.NewTextMessage("system", systemPrompt))
+		}
+		// Safety net: truncate history to 16000 tokens
+		if len(history) > 0 {
+			history = harnesspkg.TruncateHistoryByToken(history, 16000)
+		}
+		for _, m := range history {
+			if m.Role != "system" {
+				msgs = append(msgs, m)
+			}
 		}
 		msgs = append(msgs, types.NewTextMessage("user", userMessage))
 

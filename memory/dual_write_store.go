@@ -85,3 +85,11 @@ func (d *DualWriteConversationStore) ClearSession(ctx context.Context, tenantID,
 	}
 	return nil
 }
+
+// GetSummaryMeta delegates to inner store if it supports SummaryMetaProvider.
+func (d *DualWriteConversationStore) GetSummaryMeta(ctx context.Context, tenantID, userID, sessionID string) (*SummaryMetadata, error) {
+	if provider, ok := d.inner.(SummaryMetaProvider); ok {
+		return provider.GetSummaryMeta(ctx, tenantID, userID, sessionID)
+	}
+	return nil, nil
+}

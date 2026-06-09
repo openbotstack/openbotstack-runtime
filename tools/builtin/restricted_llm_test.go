@@ -4,43 +4,30 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
 )
-
-type mockProvider struct {
-	generateFn func(ctx context.Context, messages []providerMessage) (*providerResponse, error)
-}
-
-type providerMessage struct {
-	Role    string
-	Content any
-}
-
-type providerResponse struct {
-	Content   string
-	ModelUsed string
-	Tokens    int
-}
 
 func TestRestrictedLLMAccess_EnforcesMaxTokens(t *testing.T) {
 	called := false
 	access := &restrictedLLMAccess{
 		maxTokens: 512,
 		timeout:   30 * time.Second,
-		generateFn: func(ctx context.Context, req LLMRequest) (*LLMResponse, error) {
+		generateFn: func(ctx context.Context, req aitypes.LLMRequest) (*aitypes.LLMResponse, error) {
 			called = true
 			if req.MaxTokens > 512 {
 				t.Errorf("MaxTokens = %d, should be capped at 512", req.MaxTokens)
 			}
-			return &LLMResponse{
+			return &aitypes.LLMResponse{
 				Content:   "test response",
 				ModelUsed: "test",
-				Usage:     TokenUsage{TotalTokens: 50},
+				Usage:     aitypes.TokenUsage{TotalTokens: 50},
 			}, nil
 		},
 	}
 
-	resp, err := access.Generate(context.Background(), LLMRequest{
-		Contents:  []ContentBlock{NewTextBlock("test")},
+	resp, err := access.Generate(context.Background(), aitypes.LLMRequest{
+		Contents:  []aitypes.ContentBlock{aitypes.NewTextBlock("test")},
 		MaxTokens: 9999,
 	})
 	if err != nil {
@@ -58,15 +45,15 @@ func TestRestrictedLLMAccess_DefaultMaxTokens(t *testing.T) {
 	access := &restrictedLLMAccess{
 		maxTokens: 2048,
 		timeout:   30 * time.Second,
-		generateFn: func(ctx context.Context, req LLMRequest) (*LLMResponse, error) {
+		generateFn: func(ctx context.Context, req aitypes.LLMRequest) (*aitypes.LLMResponse, error) {
 			if req.MaxTokens != 2048 {
 				t.Errorf("MaxTokens = %d, want default 2048", req.MaxTokens)
 			}
-			return &LLMResponse{Content: "ok"}, nil
+			return &aitypes.LLMResponse{Content: "ok"}, nil
 		},
 	}
-	access.Generate(context.Background(), LLMRequest{
-		Contents: []ContentBlock{NewTextBlock("test")},
+	access.Generate(context.Background(), aitypes.LLMRequest{
+		Contents: []aitypes.ContentBlock{aitypes.NewTextBlock("test")},
 	})
 }
 
@@ -74,14 +61,14 @@ func TestRestrictedLLMAccess_EnforcesTimeout(t *testing.T) {
 	access := &restrictedLLMAccess{
 		maxTokens: 1024,
 		timeout:   1 * time.Millisecond,
-		generateFn: func(ctx context.Context, req LLMRequest) (*LLMResponse, error) {
+		generateFn: func(ctx context.Context, req aitypes.LLMRequest) (*aitypes.LLMResponse, error) {
 			<-ctx.Done()
 			return nil, ctx.Err()
 		},
 	}
 
-	_, err := access.Generate(context.Background(), LLMRequest{
-		Contents: []ContentBlock{NewTextBlock("test")},
+	_, err := access.Generate(context.Background(), aitypes.LLMRequest{
+		Contents: []aitypes.ContentBlock{aitypes.NewTextBlock("test")},
 	})
 	if err == nil {
 		t.Error("expected timeout error")
@@ -89,21 +76,21 @@ func TestRestrictedLLMAccess_EnforcesTimeout(t *testing.T) {
 }
 
 func TestRestrictedLLMAccess_MultimodalPasses(t *testing.T) {
-	var captured LLMRequest
+	var captured aitypes.LLMRequest
 	access := &restrictedLLMAccess{
 		maxTokens: 2048,
 		timeout:   30 * time.Second,
-		generateFn: func(ctx context.Context, req LLMRequest) (*LLMResponse, error) {
+		generateFn: func(ctx context.Context, req aitypes.LLMRequest) (*aitypes.LLMResponse, error) {
 			captured = req
-			return &LLMResponse{Content: "a cat"}, nil
+			return &aitypes.LLMResponse{Content: "a cat"}, nil
 		},
 	}
 
-	_, err := access.Generate(context.Background(), LLMRequest{
+	_, err := access.Generate(context.Background(), aitypes.LLMRequest{
 		SystemPrompt: "You are a vision assistant.",
-		Contents: []ContentBlock{
-			NewTextBlock("What is this?"),
-			NewImageBlock("https://example.com/cat.jpg"),
+		Contents: []aitypes.ContentBlock{
+			aitypes.NewTextBlock("What is this?"),
+			aitypes.NewImageBlock("https://example.com/cat.jpg"),
 		},
 	})
 	if err != nil {

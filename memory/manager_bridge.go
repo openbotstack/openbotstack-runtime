@@ -46,6 +46,9 @@ type MemoryScope struct {
 	TenantID  string
 	UserID    string
 	SessionID string
+	// ExcludeRecentMessages is the number of most recent messages to skip during
+	// retrieval. Used to avoid returning messages already in the conversation history window.
+	ExcludeRecentMessages int
 }
 
 // ScopeWithMemory adds memory scope to context.
@@ -146,19 +149,29 @@ func (b *MarkdownMemoryBridge) RetrieveByTag(ctx context.Context, tags []string,
 		return nil, abstraction.ErrRetrieveFailed
 	}
 
+	lowerTags := make([]string, len(tags))
+	for i, tag := range tags {
+		lowerTags[i] = strings.ToLower(tag)
+	}
+
 	var results []abstraction.MemoryEntry
-	for _, m := range msgs {
+	// Search backwards from most recent
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
+		content := aitypes.FlattenToText(m.Contents)
+		lowerContent := strings.ToLower(content)
+		
 		// ALL tags must match (AND semantics per interface contract)
 		allMatch := true
-		for _, tag := range tags {
-			if !strings.Contains(strings.ToLower(aitypes.FlattenToText(m.Contents)), strings.ToLower(tag)) {
+		for _, tag := range lowerTags {
+			if !strings.Contains(lowerContent, tag) {
 				allMatch = false
 				break
 			}
 		}
 		if allMatch {
 			results = append(results, abstraction.MemoryEntry{
-				Content: aitypes.FlattenToText(m.Contents),
+				Content: content,
 				Tags:    []string{"role:" + m.Role},
 			})
 			if limit > 0 && len(results) >= limit {

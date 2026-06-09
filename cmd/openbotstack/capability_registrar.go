@@ -53,6 +53,13 @@ func (r *CapabilityRegistrar) RegisterBuiltins() *builtintools.BuiltinToolRunner
 	runner.ConfigureFileTools(allowedDirs, maxBytes)
 	slog.Info("file tools configured", "allowed_dirs", allowedDirs, "max_bytes", maxBytes)
 
+	// Configure vision tool: allow private network IPs for development.
+	allowPrivateNetworks := os.Getenv("OBS_VISION_ALLOW_PRIVATE_NETWORKS") == "true"
+	runner.ConfigureVisionTool(allowPrivateNetworks)
+	if allowPrivateNetworks {
+		slog.Warn("vision tool: private network access enabled (development mode)")
+	}
+
 	for _, tool := range runner.Tools() {
 		params := tool.Parameters()
 		props := make(map[string]*types.JSONSchema, len(params))

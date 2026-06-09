@@ -19,6 +19,7 @@ const (
 	HarnessHookPost HarnessState = "hook_post_step"
 	HarnessRetry    HarnessState = "retry"
 	HarnessFallback HarnessState = "fallback"
+	HarnessReplan   HarnessState = "replan"
 	HarnessDone     HarnessState = "done"
 )
 
@@ -41,6 +42,7 @@ const (
 	StopReasonApprovalDenied    StopReason = "approval_denied"
 	StopReasonApprovalExpired   StopReason = "approval_expired"
 	StopReasonApprovalTimeout   StopReason = "approval_timeout"
+	StopReasonReplanFailed      StopReason = "replan_failed"
 )
 
 // StopCondition captures why execution stopped.
@@ -102,6 +104,8 @@ type HarnessResult struct {
 	Duration      time.Duration
 	TurnData      map[string][]TurnResult
 	StepInputs    map[string]map[string]any
+	ReplanCount   int
+	PlanIDs       []string // lineage: [original, replan1, replan2, ...]
 }
 
 // TurnAction captures a single action (tool/skill call) within a reasoning turn.
@@ -177,6 +181,8 @@ type ExecutionTraceData struct {
 	StopReason  string
 	StopDetail  string
 	DurationMs  int
+	ReplanCount int
+	PlanIDs     []string // lineage chain: [original, replan1, ...]
 }
 
 // StepTraceData captures a single step's trace within an execution.

@@ -88,7 +88,7 @@ func (ar *AdminRouter) createUser(w http.ResponseWriter, r *http.Request, tenant
 }
 
 func (ar *AdminRouter) listUsers(w http.ResponseWriter, r *http.Request, tenantID string) {
-	rows, err := ar.db.Query(`SELECT id, tenant_id, name, role, created_at FROM users WHERE tenant_id = ?`, tenantID)
+	rows, err := ar.db.Query(`SELECT id, tenant_id, name, role, created_at FROM users WHERE tenant_id = ? ORDER BY created_at`, tenantID)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "admin handler error",
 			"method", r.Method,

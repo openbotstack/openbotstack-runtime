@@ -8,7 +8,6 @@ import (
 	agentpkg "github.com/openbotstack/openbotstack-runtime/agent"
 	harnesspkg "github.com/openbotstack/openbotstack-runtime/harness"
 	reasoningpkg "github.com/openbotstack/openbotstack-runtime/harness/reasoning"
-	"github.com/openbotstack/openbotstack-runtime/toolrunner"
 )
 
 // InitAgent creates either a HarnessAgent or DefaultAgent based on config.
@@ -24,7 +23,7 @@ func (b *ServerBuilder) InitAgent() *ServerBuilder {
 		harnessCfg.MaxSteps = b.cfg.Agent.DualLoop.MaxSteps
 		harnessCfg.MaxSessionRuntime = b.cfg.Agent.DualLoop.MaxSessionRuntime
 
-		toolRunner := toolrunner.NewRegistryToolRunner(b.registryClient)
+		toolRunner := b.registryClient // RegistryClient implements ToolRunner directly
 
 		stepExec := harnesspkg.NewStepExecutor(toolRunner, b.exec, harnesspkg.StepExecutorDeps{
 			MCPRunner:     b.mcpRunner,

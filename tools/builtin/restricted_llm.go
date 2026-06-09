@@ -3,16 +3,18 @@ package builtin
 import (
 	"context"
 	"time"
+
+	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
 )
 
 // restrictedLLMAccess enforces caps on LLM calls from builtin tools.
 type restrictedLLMAccess struct {
 	maxTokens  int
 	timeout    time.Duration
-	generateFn func(ctx context.Context, req LLMRequest) (*LLMResponse, error)
+	generateFn func(ctx context.Context, req aitypes.LLMRequest) (*aitypes.LLMResponse, error)
 }
 
-func (a *restrictedLLMAccess) Generate(ctx context.Context, req LLMRequest) (*LLMResponse, error) {
+func (a *restrictedLLMAccess) Generate(ctx context.Context, req aitypes.LLMRequest) (*aitypes.LLMResponse, error) {
 	// Enforce max tokens cap.
 	if req.MaxTokens <= 0 || req.MaxTokens > a.maxTokens {
 		req.MaxTokens = a.maxTokens

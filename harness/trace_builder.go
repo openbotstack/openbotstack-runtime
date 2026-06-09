@@ -17,6 +17,8 @@ func BuildExecutionTrace(result *HarnessResult, executionID, tenantID string) *E
 		DurationMs:  int(result.Duration.Milliseconds()),
 		StopReason:  string(result.StopCondition.Reason),
 		StopDetail:  result.StopCondition.Detail,
+		ReplanCount: result.ReplanCount,
+		PlanIDs:     result.PlanIDs,
 		Metrics: TraceMetricsData{
 			TotalSteps:     result.Metrics.TotalSteps,
 			TotalToolCalls: result.Metrics.TotalToolCalls,

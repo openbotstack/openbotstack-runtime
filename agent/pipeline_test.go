@@ -37,8 +37,7 @@ func (m *mockConvStore) ClearSession(ctx context.Context, tenantID, userID, sess
 func TestBuildPlannerContext_SetsAssistantIdentity(t *testing.T) {
 	a := &HarnessAgent{
 		runtime:            &assistant.AssistantRuntime{AssistantID: "test-assistant"},
-		conversationStore:  &mockConvStore{},
-		maxHistoryMessages: 50,
+				maxHistoryMessages: 50,
 	}
 
 	req := coreagent.MessageRequest{
@@ -48,7 +47,7 @@ func TestBuildPlannerContext_SetsAssistantIdentity(t *testing.T) {
 		{ID: "skill-1", Name: "Test", Description: "A test skill"},
 	}
 
-	pCtx, err := a.buildPlannerContext(context.Background(), req, skillDescs)
+	pCtx, err := a.AssembleContext(context.Background(), req, skillDescs)
 	if err != nil {
 		t.Fatalf("buildPlannerContext failed: %v", err)
 	}
@@ -66,7 +65,6 @@ func TestBuildPlannerContext_SetsAssistantIdentity(t *testing.T) {
 func TestBuildPlannerContext_WithConversationStore(t *testing.T) {
 	a := &HarnessAgent{
 		runtime:            &assistant.AssistantRuntime{AssistantID: "test"},
-		conversationStore:  &mockConvStore{summary: "Previous summary"},
 		maxHistoryMessages: 50,
 	}
 
@@ -74,7 +72,7 @@ func TestBuildPlannerContext_WithConversationStore(t *testing.T) {
 		TenantID: "t1", UserID: "u1", SessionID: "s1", Message: "continue",
 	}
 
-	pCtx, err := a.buildPlannerContext(context.Background(), req, nil)
+	pCtx, err := a.AssembleContext(context.Background(), req, nil)
 	if err != nil {
 		t.Fatalf("buildPlannerContext failed: %v", err)
 	}
@@ -86,15 +84,14 @@ func TestBuildPlannerContext_WithConversationStore(t *testing.T) {
 func TestBuildPlannerContext_NoMemoryManager_NoPanic(t *testing.T) {
 	a := &HarnessAgent{
 		runtime:            &assistant.AssistantRuntime{AssistantID: "test"},
-		conversationStore:  &mockConvStore{},
-		maxHistoryMessages: 10,
+				maxHistoryMessages: 10,
 	}
 
 	req := coreagent.MessageRequest{
 		TenantID: "t1", UserID: "u1", SessionID: "s1", Message: "test",
 	}
 
-	pCtx, err := a.buildPlannerContext(context.Background(), req, nil)
+	pCtx, err := a.AssembleContext(context.Background(), req, nil)
 	if err != nil {
 		t.Fatalf("buildPlannerContext failed: %v", err)
 	}
@@ -108,7 +105,7 @@ func TestResolveTasks_NoWorkflowResolver_SingleTask(t *testing.T) {
 	pCtx := &planner.PlannerContext{UserRequest: "do something"}
 	req := coreagent.MessageRequest{Message: "do something"}
 
-	tasks := a.resolveTasks(context.Background(), req, pCtx)
+	tasks := a.ResolveTasks(context.Background(), req, pCtx)
 	if len(tasks) != 1 {
 		t.Fatalf("tasks len = %d, want 1", len(tasks))
 	}
@@ -129,7 +126,7 @@ func TestPhaseGatherSkillDescriptors_WithCapRegistry(t *testing.T) {
 			{ID: "cap-2", Name: "Cap2", Description: "Another capability"},
 		}},
 	}
-	skillDescs, err := a.gatherSkillDescriptors()
+	skillDescs, err := a.GatherSkills(context.Background())
 	if err != nil {
 		t.Fatalf("gatherSkillDescriptors failed: %v", err)
 	}
@@ -146,7 +143,7 @@ func TestPhaseGatherSkillDescriptors_WithSkillDisabled(t *testing.T) {
 		}},
 		skillDisabled: func(id string) bool { return id == "disabled" },
 	}
-	skillDescs, err := a.gatherSkillDescriptors()
+	skillDescs, err := a.GatherSkills(context.Background())
 	if err != nil {
 		t.Fatalf("gatherSkillDescriptors failed: %v", err)
 	}
@@ -161,7 +158,7 @@ func TestPhaseGatherSkillDescriptors_FallbackSkillRegistry(t *testing.T) {
 			"skill-a": {id: "skill-a", name: "A", desc: "Skill A"},
 		}},
 	}
-	skillDescs, err := a.gatherSkillDescriptors()
+	skillDescs, err := a.GatherSkills(context.Background())
 	if err != nil {
 		t.Fatalf("gatherSkillDescriptors failed: %v", err)
 	}
@@ -180,7 +177,7 @@ func TestPhasePrepareExecutionContext(t *testing.T) {
 		UserID:    "u1",
 		SessionID: "s1",
 	}
-	ec := a.prepareExecutionContext(context.Background(), "exec-123", req)
+	ec := a.PrepareExecutionContext(context.Background(), "exec-123", req)
 	if ec.RequestID != "exec-123" {
 		t.Errorf("RequestID = %q, want %q", ec.RequestID, "exec-123")
 	}
@@ -205,7 +202,7 @@ func TestPhasePrepareExecutionContext_WithProgressCallback(t *testing.T) {
 			called = true
 		},
 	}
-	ec := a.prepareExecutionContext(context.Background(), "exec-456", req)
+	ec := a.PrepareExecutionContext(context.Background(), "exec-456", req)
 	if ec.ProgressFn == nil {
 		t.Error("ProgressFn should be set")
 	}
@@ -219,8 +216,7 @@ func TestPhaseFinalize_StoresTraceAndMessages(t *testing.T) {
 	store := &mockReasoningStore{traces: map[string]any{}}
 	a := &HarnessAgent{
 		reasoningStore:    store,
-		conversationStore: &mockConvStore{},
-	}
+			}
 	result := &harness.HarnessResult{
 		StepResults: []execution.StepResult{
 			{StepID: "s1", StepName: "test-step", Type: "tool", Output: "done"},
@@ -234,7 +230,7 @@ func TestPhaseFinalize_StoresTraceAndMessages(t *testing.T) {
 	req := coreagent.MessageRequest{
 		TenantID: "t1", UserID: "u1", SessionID: "s1", Message: "hello",
 	}
-	a.finalize(context.Background(), "exec-789", req.TenantID, result, req, resp)
+	a.Finalize(context.Background(), "exec-789", req.TenantID, result, req, resp)
 	if _, ok := store.traces["exec-789"]; !ok {
 		t.Error("finalize should store execution trace")
 	}
@@ -244,8 +240,7 @@ func TestPhaseFinalize_NilResult_NoPanic(t *testing.T) {
 	store := &mockReasoningStore{traces: map[string]any{}}
 	a := &HarnessAgent{
 		reasoningStore:    store,
-		conversationStore: &mockConvStore{},
-	}
+			}
 	resp := &coreagent.MessageResponse{
 		SessionID:   "s1",
 		Message:     "done",
@@ -254,7 +249,7 @@ func TestPhaseFinalize_NilResult_NoPanic(t *testing.T) {
 	req := coreagent.MessageRequest{
 		TenantID: "t1", UserID: "u1", SessionID: "s1", Message: "hi",
 	}
-	a.finalize(context.Background(), "exec-000", req.TenantID, nil, req, resp)
+	a.Finalize(context.Background(), "exec-000", req.TenantID, nil, req, resp)
 	// Should not panic and should not store trace for nil result
 	if _, ok := store.traces["exec-000"]; ok {
 		t.Error("finalize should not store trace for nil result")
@@ -263,8 +258,7 @@ func TestPhaseFinalize_NilResult_NoPanic(t *testing.T) {
 
 func TestPhaseFinalize_NilReasoningStore_NoPanic(t *testing.T) {
 	a := &HarnessAgent{
-		conversationStore: &mockConvStore{},
-	}
+			}
 	result := &harness.HarnessResult{
 		StepResults: []execution.StepResult{
 			{StepID: "s1", StepName: "test", Type: "tool", Output: "x"},
@@ -273,7 +267,7 @@ func TestPhaseFinalize_NilReasoningStore_NoPanic(t *testing.T) {
 	resp := &coreagent.MessageResponse{SessionID: "s1", Message: "ok", ExecutionID: "exec-111"}
 	req := coreagent.MessageRequest{TenantID: "t1", UserID: "u1", SessionID: "s1", Message: "hi"}
 	// Should not panic
-	a.finalize(context.Background(), "exec-111", req.TenantID, result, req, resp)
+	a.Finalize(context.Background(), "exec-111", req.TenantID, result, req, resp)
 }
 
 func TestPhaseExecuteTasks_SingleTask(t *testing.T) {
@@ -289,7 +283,7 @@ func TestPhaseExecuteTasks_SingleTask(t *testing.T) {
 		nil,  // no tool runner
 		nil,  // no skill executor
 		harness.HarnessDeps{
-			LLMGenerator: func(ctx context.Context, systemPrompt, userMessage string) (string, error) {
+			LLMGenerator: func(ctx context.Context, systemPrompt, userMessage string, _ []aitypes.Message) (string, error) {
 				return "response text", nil
 			},
 		},
@@ -306,7 +300,7 @@ func TestPhaseExecuteTasks_SingleTask(t *testing.T) {
 		{TaskDescription: "test task", PlannerContext: &planner.PlannerContext{UserRequest: "test"}},
 	}
 
-	lastResult, message, skillUsed, err := a.executeTasks(context.Background(), tasks, ec)
+	lastResult, message, skillUsed, err := a.ExecuteTasks(context.Background(), tasks, ec)
 	if err != nil {
 		t.Fatalf("executeTasks failed: %v", err)
 	}
@@ -334,7 +328,7 @@ func TestPhaseExecuteTasks_MultipleTasks(t *testing.T) {
 		harness.DefaultHarnessConfig(),
 		nil, nil,
 		harness.HarnessDeps{
-			LLMGenerator: func(ctx context.Context, systemPrompt, userMessage string) (string, error) {
+			LLMGenerator: func(ctx context.Context, systemPrompt, userMessage string, _ []aitypes.Message) (string, error) {
 				callCount++
 				return fmt.Sprintf("response %d", callCount), nil
 			},
@@ -353,7 +347,7 @@ func TestPhaseExecuteTasks_MultipleTasks(t *testing.T) {
 		{TaskDescription: "task 2", PlannerContext: &planner.PlannerContext{UserRequest: "task 2"}},
 	}
 
-	lastResult, message, _, err := a.executeTasks(context.Background(), tasks, ec)
+	lastResult, message, _, err := a.ExecuteTasks(context.Background(), tasks, ec)
 	if err != nil {
 		t.Fatalf("executeTasks failed: %v", err)
 	}

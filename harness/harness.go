@@ -3,12 +3,13 @@ package harness
 import (
 	"context"
 	"fmt"
-	"strings"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
 	"github.com/openbotstack/openbotstack-core/audit"
 	"github.com/openbotstack/openbotstack-core/execution"
 	"github.com/openbotstack/openbotstack-core/execution/template"
@@ -22,7 +23,7 @@ import (
 
 // LLMGenerator generates a direct LLM text response (no planning).
 // Used for "respond" steps where the planner already decided a direct LLM reply is needed.
-type LLMGenerator func(ctx context.Context, systemPrompt, userMessage string) (string, error)
+type LLMGenerator func(ctx context.Context, systemPrompt, userMessage string, history []aitypes.Message) (string, error)
 
 // HarnessDeps captures all optional harness dependencies.
 // Pass to NewExecutionHarness to construct a fully-configured harness.
@@ -38,6 +39,7 @@ type HarnessDeps struct {
 	PermChecker     *PermissionChecker
 	ApprovalGateway execution.ApprovalGateway
 	ProgressCB      ProgressCallback
+	Replanner       planner.Replanner
 }
 
 // ExecutionHarness orchestrates plan execution sequentially.
@@ -53,6 +55,8 @@ type ExecutionHarness struct {
 	failureHandler  *FailureHandler
 	permChecker     *PermissionChecker
 	approvalGateway execution.ApprovalGateway
+	replanner       planner.Replanner
+	replanConfig    ReplanConfig
 	currentState    atomic.Value
 	progressCB      ProgressCallback
 	progressMu      sync.RWMutex
@@ -76,6 +80,8 @@ func NewExecutionHarness(
 		failureHandler:  deps.FailureHandler,
 		permChecker:     deps.PermChecker,
 		approvalGateway: deps.ApprovalGateway,
+		replanner:       deps.Replanner,
+		replanConfig:    DefaultReplanConfig(),
 	}
 	if deps.ProgressCB != nil {
 		h.progressCB = deps.ProgressCB
@@ -106,15 +112,22 @@ func (h *ExecutionHarness) Run(ctx context.Context, plan *execution.ExecutionPla
 
 	startTime := time.Now()
 	result := &HarnessResult{
-		PlanID:      fmt.Sprintf("plan-%d", startTime.UnixMilli()),
+		PlanID:      plan.ID,
 		StepResults: make([]execution.StepResult, 0),
 		TurnData:    make(map[string][]TurnResult),
 		StepInputs:  make(map[string]map[string]any),
+		PlanIDs:     []string{plan.ID},
 	}
 
 	sessionDeadline := ec.StartedAt.Add(h.config.MaxSessionRuntime)
 
-	for i, step := range plan.Steps {
+	// Copy plan steps into a mutable active slice for replan support.
+	activeSteps := make([]execution.ExecutionStep, len(plan.Steps))
+	copy(activeSteps, plan.Steps)
+	replanCount := 0
+
+	for i := 0; i < len(activeSteps); i++ {
+		step := activeSteps[i]
 		h.setState(HarnessHookPre)
 
 		if stop := h.checkBounds(ctx, i, sessionDeadline); stop != nil {
@@ -168,6 +181,43 @@ func (h *ExecutionHarness) Run(ctx context.Context, plan *execution.ExecutionPla
 				result.StopCondition = StopCondition{Stopped: true, Reason: StopReasonFailFast}
 				result.Duration = time.Since(startTime)
 				return result, handleErr
+			}
+			// Failure handler recovered the step — clear execErr so replan is not triggered.
+			execErr = nil
+		}
+
+		// Controlled Replan: after failure handler, check if replanning should occur.
+		stepStillFailed := stepResult != nil && stepResult.Error != nil
+		explicitSignal := hasExplicitReplanSignal(stepResult)
+		if h.replanner != nil && (execErr != nil || stepStillFailed || explicitSignal) {
+			checkResult := ShouldReplan(stepResult, execErr, replanCount, h.replanConfig, true)
+			if checkResult.ShouldReplan {
+				h.setState(HarnessReplan)
+				newPlan, replanErr := h.attemptReplan(ctx, plan, step, stepResult, execErr, result, ec, checkResult)
+				if replanErr == nil && newPlan != nil && len(newPlan.Steps) > 0 {
+					// Append the failed step result for audit trail before replacing.
+					if stepResult != nil {
+						result.StepResults = append(result.StepResults, *stepResult)
+						result.Metrics.TotalSteps++
+						if stepResult.Type == string(execution.StepTypeTool) || stepResult.Type == string(execution.StepTypeSkill) {
+							result.Metrics.TotalToolCalls++
+						}
+						h.emitStepAudit(ctx, step, stepResult, ec)
+					}
+					// Replace remaining steps (from i+1 onwards) with new plan steps.
+					executed := activeSteps[:i+1]
+					activeSteps = make([]execution.ExecutionStep, len(executed)+len(newPlan.Steps))
+					copy(activeSteps, executed)
+					copy(activeSteps[len(executed):], newPlan.Steps)
+					replanCount++
+					result.ReplanCount = replanCount
+					result.PlanIDs = append(result.PlanIDs, newPlan.ID)
+					h.emitReplanAudit(ctx, plan, newPlan, step, checkResult, ec)
+					h.emitProgress(ec, ProgressEvent{Type: "step_replanned", Content: newPlan.ID})
+					// Continue loop — next iteration will execute first step of new plan.
+					continue
+				}
+				// Replan failed; fall through to normal error/result handling.
 			}
 		}
 
@@ -338,6 +388,10 @@ func (h *ExecutionHarness) executeStep(
 func (h *ExecutionHarness) executeLLMStep(ctx context.Context, step execution.ExecutionStep, ec *execution.ExecutionContext, result *HarnessResult) (*execution.StepResult, error) {
 	startTime := time.Now()
 
+	// Resolve step result interpolation templates in arguments before use.
+	prevResults := h.buildPrevResults(result.StepResults)
+	step.ResolveArguments(prevResults)
+
 	// Derive user request: prefer ExpectedOutput, fall back to arguments.prompt.
 	userRequest := step.ExpectedOutput
 	if userRequest == "" {
@@ -350,16 +404,23 @@ func (h *ExecutionHarness) executeLLMStep(ctx context.Context, step execution.Ex
 	// that was set on ExecutionContext via PlanAndRun.
 	var origCtx *planner.PlannerContext
 	if ec.PlannerContext() != nil {
-		origCtx, _ = ec.PlannerContext().(*planner.PlannerContext)
+		var ok bool
+		origCtx, ok = ec.PlannerContext().(*planner.PlannerContext)
+		if !ok {
+			slog.Warn("harness: planner context type mismatch",
+				"type", fmt.Sprintf("%T", ec.PlannerContext()))
+		}
 	}
 
 	// "respond" steps: direct LLM generation (no iterative planning loop needed).
 	if step.Name == "respond" && h.llmGenerator != nil {
 		systemPrompt := ""
+		var history []aitypes.Message
 		if origCtx != nil {
 			systemPrompt = origCtx.Soul.SystemPrompt
+			history = origCtx.ConversationHistory
 		}
-		response, err := h.llmGenerator(ctx, systemPrompt, userRequest)
+		response, err := h.llmGenerator(ctx, systemPrompt, userRequest, history)
 		if err != nil {
 			return &execution.StepResult{
 				StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
@@ -384,11 +445,12 @@ func (h *ExecutionHarness) executeLLMStep(ctx context.Context, step execution.Ex
 	pCtx := &planner.PlannerContext{UserRequest: userRequest}
 	if origCtx != nil {
 		pCtx = &planner.PlannerContext{
-			UserRequest:   userRequest,
-			Skills:        origCtx.Skills,
-			Soul:          origCtx.Soul,
-			AssistantID:   origCtx.AssistantID,
-			MemoryContext: origCtx.MemoryContext,
+			UserRequest:         userRequest,
+			Skills:              origCtx.Skills,
+			Soul:                origCtx.Soul,
+			AssistantID:         origCtx.AssistantID,
+			MemoryContext:       origCtx.MemoryContext,
+			ConversationHistory: origCtx.ConversationHistory,
 		}
 	}
 
@@ -452,10 +514,10 @@ func (h *ExecutionHarness) runPostStep(
 ) {
 	if h.hookManager != nil {
 		hookCtx := &execution.HookContext{
-			Step:      snapshotStepPtr(step),
-			StepIndex: stepIndex,
-			Plan:      plan,
-			EC:        ec,
+			Step:       snapshotStepPtr(step),
+			StepIndex:  stepIndex,
+			Plan:       plan,
+			EC:         ec,
 			ToolOutput: stepResult,
 		}
 		if err := h.hookManager.PostStepExecute(ctx, hookCtx); err != nil {
@@ -486,9 +548,26 @@ func (h *ExecutionHarness) buildPrevResults(stepResults []execution.StepResult) 
 	return prevResults
 }
 
+// isSimpleRespondRequest checks if a user message is simple enough to skip planning.
+// Short messages without tool-related keywords can go directly to LLM response.
+func isSimpleRespondRequest(msg string) bool {
+	if len(msg) > 100 {
+		return false
+	}
+	lower := strings.ToLower(msg)
+	toolKeywords := []string{"tool", "use ", "call ", "execute", "fetch", "search", "file",
+		"http", "mcp.", "builtin.", "skill", "read ", "write "}
+	for _, kw := range toolKeywords {
+		if strings.Contains(lower, kw) {
+			return false
+		}
+	}
+	return true
+}
+
 // PlanAndRun creates a plan via the given planner and executes it on this harness.
-// This is a convenience function for callers that have a planner and want plan+execute
-// in one call. The planner belongs to the caller (Control Plane), not the harness.
+// For simple requests (short, no tool keywords), skips the planner and creates
+// a single "respond" step directly.
 func PlanAndRun(ctx context.Context, pl planner.ExecutionPlanner, h *ExecutionHarness, task TaskInput, ec *execution.ExecutionContext) (*HarnessResult, error) {
 	if pl == nil {
 		return nil, fmt.Errorf("harness.PlanAndRun: planner is nil")
@@ -502,18 +581,33 @@ func PlanAndRun(ctx context.Context, pl planner.ExecutionPlanner, h *ExecutionHa
 		task.PlannerContext.UserRequest = task.TaskDescription
 	}
 
-	plan, err := pl.Plan(ctx, task.PlannerContext)
-	if err != nil {
-		return nil, fmt.Errorf("harness.PlanAndRun: planning failed: %w", err)
-	}
-	if plan == nil || len(plan.Steps) == 0 {
-		return &HarnessResult{
-			StopCondition: StopCondition{Stopped: true, Reason: StopReasonPlannerStopped},
-		}, nil
-	}
+	var plan *execution.ExecutionPlan
 
-	if err := plan.Validate(); err != nil {
-		return nil, fmt.Errorf("harness.PlanAndRun: plan validation failed: %w", err)
+	// Fast path: skip planner for simple respond requests
+	if isSimpleRespondRequest(task.PlannerContext.UserRequest) && h.llmGenerator != nil {
+		plan = &execution.ExecutionPlan{
+			Steps: []execution.ExecutionStep{
+				{Name: "respond", Type: execution.StepTypeLLM, Arguments: map[string]any{"prompt": task.PlannerContext.UserRequest}},
+			},
+		}
+		if err := plan.Validate(); err != nil {
+			return nil, fmt.Errorf("harness.PlanAndRun: fast-path plan validation: %w", err)
+		}
+		slog.DebugContext(ctx, "harness: fast path — skipped planner for simple request")
+	} else {
+		var err error
+		plan, err = pl.Plan(ctx, task.PlannerContext)
+		if err != nil {
+			return nil, fmt.Errorf("harness.PlanAndRun: planning failed: %w", err)
+		}
+		if plan == nil || len(plan.Steps) == 0 {
+			return &HarnessResult{
+				StopCondition: StopCondition{Stopped: true, Reason: StopReasonPlannerStopped},
+			}, nil
+		}
+		if err := plan.Validate(); err != nil {
+			return nil, fmt.Errorf("harness.PlanAndRun: plan validation failed: %w", err)
+		}
 	}
 
 	// Set PlannerContext on ExecutionContext so LLM steps can access

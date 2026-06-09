@@ -163,3 +163,21 @@ func TestParseMessageBlocksTrailingContent(t *testing.T) {
 		t.Errorf("aitypes.FlattenToText(msgs[1].Contents) = %q, want %q", aitypes.FlattenToText(msgs[1].Contents), "Hi there!")
 	}
 }
+
+// M-5: Empty timestamp backward compatibility
+func TestParseMessageBlocks_EmptyTimestamp(t *testing.T) {
+	body := []byte("\n## [] user\n\nHello\n\n## [] assistant\n\nHi\n")
+	msgs := memory.ParseMessageBlocks(body)
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 messages with empty timestamps, got %d", len(msgs))
+	}
+	if msgs[0].Role != "user" {
+		t.Errorf("msgs[0].Role = %q, want user", msgs[0].Role)
+	}
+	if aitypes.FlattenToText(msgs[0].Contents) != "Hello" {
+		t.Errorf("msgs[0] content = %q, want Hello", aitypes.FlattenToText(msgs[0].Contents))
+	}
+	if msgs[1].Role != "assistant" {
+		t.Errorf("msgs[1].Role = %q, want assistant", msgs[1].Role)
+	}
+}

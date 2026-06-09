@@ -3,7 +3,6 @@ package memory
 import (
 	"context"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -104,15 +103,9 @@ func TestConversationManager_GetContext_LoadsSummary(t *testing.T) {
 	if ctx.Summary != "Previous conversation about Go" {
 		t.Errorf("Summary = %q, want %q", ctx.Summary, "Previous conversation about Go")
 	}
-	// Summary should be first in history as system message
-	if len(ctx.History) < 1 {
-		t.Fatal("expected at least 1 history message (summary)")
-	}
-	if ctx.History[0].Role != "system" {
-		t.Errorf("History[0].Role = %q, want %q", ctx.History[0].Role, "system")
-	}
-	if !strings.Contains(aitypes.FlattenToText(ctx.History[0].Contents), "Previous conversation about Go") {
-		t.Errorf("History[0] should contain summary, got: %q", aitypes.FlattenToText(ctx.History[0].Contents))
+	// Summary should NOT be in History (moved to MemoryContext at planner level)
+	if len(ctx.History) != 0 {
+		t.Errorf("History should be empty (summary not in history), got %d items", len(ctx.History))
 	}
 }
 
@@ -224,12 +217,12 @@ func TestConversationManager_GetContext_FullPipeline(t *testing.T) {
 		t.Fatalf("GetConversationContext failed: %v", err)
 	}
 
-	// Summary system message + 2 history messages = 3
-	if len(ctx.History) != 3 {
-		t.Errorf("History len = %d, want 3 (summary + 2 msgs)", len(ctx.History))
+	// Summary NOT in history (moved to MemoryContext) + 2 history messages = 2
+	if len(ctx.History) != 2 {
+		t.Errorf("History len = %d, want 2 (summary is in MemoryContext)", len(ctx.History))
 	}
-	if ctx.History[0].Role != "system" {
-		t.Errorf("First history item should be summary system message, got role %q", ctx.History[0].Role)
+	if ctx.Summary == "" {
+		t.Error("Summary should be populated")
 	}
 	if len(ctx.MemoryEntries) != 1 {
 		t.Errorf("MemoryEntries len = %d, want 1", len(ctx.MemoryEntries))
@@ -243,7 +236,7 @@ func TestConversationManager_StoreMessage(t *testing.T) {
 	convStore := &mockConvStoreForCM{}
 	cm := NewConversationManager(convStore, nil, 50)
 
-	err := cm.StoreMessage(context.Background(), "sess-1", "t1", "u1", "user", "hello")
+	err := cm.StoreMessage(context.Background(), "sess-1", "t1", "u1", "user", "hello", "")
 	if err != nil {
 		t.Fatalf("StoreMessage failed: %v", err)
 	}
@@ -257,7 +250,7 @@ func TestConversationManager_StoreMessage(t *testing.T) {
 
 func TestConversationManager_StoreMessage_NilStore_NoPanic(t *testing.T) {
 	cm := NewConversationManager(nil, nil, 50)
-	err := cm.StoreMessage(context.Background(), "sess-1", "t1", "u1", "user", "hello")
+	err := cm.StoreMessage(context.Background(), "sess-1", "t1", "u1", "user", "hello", "")
 	if err != nil {
 		t.Fatalf("StoreMessage should return nil with nil store: %v", err)
 	}
@@ -333,3 +326,78 @@ func TestConversationManager_GetContext_ConcurrentCallsUseSameScope(t *testing.T
 
 // Verify unused import suppression
 var _ = time.Second
+
+// mockConvStoreWithMeta supports SummaryMetaProvider for overlap testing
+type mockConvStoreWithMeta struct {
+	mockConvStoreForCM
+	sourceCount int
+}
+
+func (m *mockConvStoreWithMeta) GetSummaryMeta(_ context.Context, _, _, _ string) (*SummaryMetadata, error) {
+	if m.summary == "" {
+		return nil, nil
+	}
+	return &SummaryMetadata{SourceMessageCount: m.sourceCount}, nil
+}
+
+func TestConversationManager_SummaryHistoryNoOverlap(t *testing.T) {
+	// 10 messages total, summary covers first 6
+	msgs := make([]aitypes.Message, 10)
+	for i := range msgs {
+		msgs[i] = aitypes.NewTextMessage("user", fmt.Sprintf("message %d", i))
+	}
+	store := &mockConvStoreWithMeta{
+		mockConvStoreForCM: mockConvStoreForCM{
+			summary: "Summary of first 6 messages",
+			msgs:    msgs,
+		},
+		sourceCount: 6,
+	}
+	cm := NewConversationManager(store, nil, 50)
+
+	ctx, err := cm.GetConversationContext(context.Background(), "sess-1", "hello", "t1", "u1")
+	if err != nil {
+		t.Fatalf("GetConversationContext failed: %v", err)
+	}
+
+	// Should have: 4 history messages only (7-10, skipping 1-6 covered by summary)
+	if len(ctx.History) != 4 {
+		t.Fatalf("History len = %d, want 4 (summary is in MemoryContext, not history)", len(ctx.History))
+	}
+	if ctx.Summary == "" {
+		t.Error("Summary should be populated")
+	}
+	// History should be messages 6-9 (index 6,7,8,9)
+	for i, msg := range ctx.History {
+		text := aitypes.FlattenToText(msg.Contents)
+		expected := fmt.Sprintf("message %d", i+6)
+		if text != expected {
+			t.Errorf("History[%d] = %q, want %q", i+1, text, expected)
+		}
+	}
+}
+
+func TestConversationManager_NoSummaryProvider_FullHistory(t *testing.T) {
+	// Without SummaryMetaProvider, all messages are returned (backward compat)
+	msgs := []aitypes.Message{
+		aitypes.NewTextMessage("user", "msg 1"),
+		aitypes.NewTextMessage("user", "msg 2"),
+	}
+	store := &mockConvStoreForCM{
+		summary: "Summary",
+		msgs:    msgs,
+	}
+	cm := NewConversationManager(store, nil, 50)
+
+	ctx, err := cm.GetConversationContext(context.Background(), "sess-1", "hello", "t1", "u1")
+	if err != nil {
+		t.Fatalf("GetConversationContext failed: %v", err)
+	}
+	// Summary is separate (not in history), all 2 messages in history
+	if len(ctx.History) != 2 {
+		t.Errorf("History len = %d, want 2 (summary is in MemoryContext)", len(ctx.History))
+	}
+	if ctx.Summary != "Summary" {
+		t.Errorf("Summary = %q, want %q", ctx.Summary, "Summary")
+	}
+}

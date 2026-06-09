@@ -156,6 +156,89 @@ func (s *MarkdownMemoryStore) GetHistory(ctx context.Context, tenantID, userID, 
 	return messages, nil
 }
 
+// GetZonedHistory retrieves zoned messages for a session.
+func (s *MarkdownMemoryStore) GetZonedHistory(ctx context.Context, tenantID, userID, sessionID string) ([]ZonedMessage, error) {
+	if err := validateID(tenantID, "tenant"); err != nil {
+		return nil, err
+	}
+	if err := validateID(userID, "user"); err != nil {
+		return nil, err
+	}
+	if err := validateID(sessionID, "session"); err != nil {
+		return nil, err
+	}
+
+	path := s.sessionPath(tenantID, userID, sessionID)
+	lock := s.getLock(path)
+	lock.RLock()
+	defer lock.RUnlock()
+
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return []ZonedMessage{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("memory: failed to read session file: %w", err)
+	}
+
+	_, body, err := ParseFrontmatter(data)
+	if err != nil {
+		return nil, fmt.Errorf("memory: failed to parse session file: %w", err)
+	}
+
+	return ParseZonedBlocks(body), nil
+}
+
+// WriteZonedHistory overwrites the session with new zoned messages.
+func (s *MarkdownMemoryStore) WriteZonedHistory(ctx context.Context, tenantID, userID, sessionID string, zoned []ZonedMessage) error {
+	if err := validateID(tenantID, "tenant"); err != nil {
+		return err
+	}
+	if err := validateID(userID, "user"); err != nil {
+		return err
+	}
+	if err := validateID(sessionID, "session"); err != nil {
+		return err
+	}
+
+	path := s.sessionPath(tenantID, userID, sessionID)
+	lock := s.getLock(path)
+	lock.Lock()
+	defer lock.Unlock()
+
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("memory: failed to create session directory: %w", err)
+	}
+
+	var meta map[string]string
+	data, err := os.ReadFile(path)
+	if err == nil {
+		meta, _, _ = ParseFrontmatter(data)
+	}
+	if meta == nil {
+		meta = map[string]string{
+			"session_id": sessionID,
+			"tenant_id":  tenantID,
+			"user_id":    userID,
+			"created_at": time.Now().UTC().Format(time.RFC3339Nano),
+		}
+	}
+	meta["updated_at"] = time.Now().UTC().Format(time.RFC3339Nano)
+	
+	// Update message_count based on ZoneFull messages
+	msgCount := 0
+	for _, zm := range zoned {
+		if zm.Zone == ZoneFull && zm.Message != nil {
+			msgCount++
+		}
+	}
+	meta["message_count"] = fmt.Sprintf("%d", msgCount)
+
+	content := FormatFrontmatter(meta) + FormatZonedBody(zoned)
+	return os.WriteFile(path, []byte(content), 0600)
+}
+
 // GetSummary retrieves the current summary for a session.
 func (s *MarkdownMemoryStore) GetSummary(ctx context.Context, tenantID, userID, sessionID string) (string, error) {
 	if err := validateID(tenantID, "tenant"); err != nil {
@@ -188,6 +271,47 @@ func (s *MarkdownMemoryStore) GetSummary(ctx context.Context, tenantID, userID, 
 	return strings.TrimSpace(string(body)), nil
 }
 
+// GetSummaryMeta returns metadata about the stored summary for a session.
+// Returns nil if no summary exists. Implements SummaryMetaProvider.
+func (s *MarkdownMemoryStore) GetSummaryMeta(ctx context.Context, tenantID, userID, sessionID string) (*SummaryMetadata, error) {
+	if err := validateID(tenantID, "tenant"); err != nil {
+		return nil, err
+	}
+	if err := validateID(userID, "user"); err != nil {
+		return nil, err
+	}
+	if err := validateID(sessionID, "session"); err != nil {
+		return nil, err
+	}
+
+	path := s.summaryPath(tenantID, userID, sessionID)
+	lock := s.getLock(path)
+	lock.RLock()
+	defer lock.RUnlock()
+
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("memory: failed to read summary file: %w", err)
+	}
+
+	meta, _, err := ParseFrontmatter(data)
+	if err != nil {
+		return nil, nil
+	}
+	if meta == nil {
+		return nil, nil
+	}
+
+	count := 0
+	if v, ok := meta["source_message_count"]; ok {
+		fmt.Sscanf(v, "%d", &count)
+	}
+	return &SummaryMetadata{SourceMessageCount: count}, nil
+}
+
 // StoreSummary persists a summary for a session.
 func (s *MarkdownMemoryStore) StoreSummary(ctx context.Context, tenantID, userID, sessionID, summary string) error {
 	if err := validateID(tenantID, "tenant"); err != nil {
@@ -210,13 +334,12 @@ func (s *MarkdownMemoryStore) StoreSummary(ctx context.Context, tenantID, userID
 		return fmt.Errorf("memory: failed to create summary directory: %w", err)
 	}
 
-	// Read actual message count from session file for accurate metadata
+	// Count actual parsed message blocks for accurate metadata
 	msgCount := 0
 	sessionFilePath := s.sessionPath(tenantID, userID, sessionID)
 	if sd, err := os.ReadFile(sessionFilePath); err == nil {
-		if m, _, _ := ParseFrontmatter(sd); m != nil {
-			_, _ = fmt.Sscanf(m["message_count"], "%d", &msgCount)
-		}
+		_, body, _ := ParseFrontmatter(sd)
+		msgCount = len(ParseMessageBlocks(body))
 	}
 
 	meta := FormatSummaryFrontmatter(sessionID, msgCount)

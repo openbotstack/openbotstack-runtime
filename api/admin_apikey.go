@@ -127,7 +127,7 @@ func (ar *AdminRouter) createAPIKey(w http.ResponseWriter, r *http.Request, user
 }
 
 func (ar *AdminRouter) listAPIKeys(w http.ResponseWriter, r *http.Request, userID string) {
-	rows, err := ar.db.Query(`SELECT id, key_prefix, name, role, created_at, revoked FROM api_keys WHERE user_id = ?`, userID)
+	rows, err := ar.db.Query(`SELECT id, key_prefix, name, role, created_at, revoked FROM api_keys WHERE user_id = ? ORDER BY created_at DESC`, userID)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "admin handler error",
 			"method", r.Method,

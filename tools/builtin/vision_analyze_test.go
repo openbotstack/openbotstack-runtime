@@ -6,14 +6,16 @@ import (
 	"net/url"
 	"testing"
 	"time"
+
+	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
 )
 
-// mockLLMAccess is a test double for the LLMAccess interface.
+// mockLLMAccess is a test double for the types.LLMAccess interface.
 type mockLLMAccess struct {
-	generateFn func(ctx context.Context, req LLMRequest) (*LLMResponse, error)
+	generateFn func(ctx context.Context, req aitypes.LLMRequest) (*aitypes.LLMResponse, error)
 }
 
-func (m *mockLLMAccess) Generate(ctx context.Context, req LLMRequest) (*LLMResponse, error) {
+func (m *mockLLMAccess) Generate(ctx context.Context, req aitypes.LLMRequest) (*aitypes.LLMResponse, error) {
 	if m.generateFn != nil {
 		return m.generateFn(ctx, req)
 	}
@@ -67,7 +69,7 @@ func TestVisionAnalyzeTool_MissingImageURL(t *testing.T) {
 func TestVisionAnalyzeTool_DefaultInstruction(t *testing.T) {
 	tool := &VisionAnalyzeTool{}
 	tool.SetLLMAccess(&mockLLMAccess{
-		generateFn: func(ctx context.Context, req LLMRequest) (*LLMResponse, error) {
+		generateFn: func(ctx context.Context, req aitypes.LLMRequest) (*aitypes.LLMResponse, error) {
 			// Verify the instruction text block was included with the default.
 			if len(req.Contents) < 2 {
 				t.Fatalf("expected at least 2 content blocks, got %d", len(req.Contents))
@@ -79,9 +81,9 @@ func TestVisionAnalyzeTool_DefaultInstruction(t *testing.T) {
 			if textBlock.Text != "Describe the image in detail." {
 				t.Errorf("default instruction = %q, want %q", textBlock.Text, "Describe the image in detail.")
 			}
-			return &LLMResponse{
+			return &aitypes.LLMResponse{
 				Content:   `{"description":"test"}`,
-				Usage:     TokenUsage{TotalTokens: 10},
+				Usage:     aitypes.TokenUsage{TotalTokens: 10},
 				ModelUsed: "test-model",
 				Latency:   50 * time.Millisecond,
 			}, nil
@@ -101,14 +103,14 @@ func TestVisionAnalyzeTool_SuccessfulAnalysis(t *testing.T) {
 	expectedDescription := "A beautiful sunset over the ocean."
 
 	tool := &VisionAnalyzeTool{}
-	var capturedReq LLMRequest
+	var capturedReq aitypes.LLMRequest
 
 	tool.SetLLMAccess(&mockLLMAccess{
-		generateFn: func(ctx context.Context, req LLMRequest) (*LLMResponse, error) {
+		generateFn: func(ctx context.Context, req aitypes.LLMRequest) (*aitypes.LLMResponse, error) {
 			capturedReq = req
-			return &LLMResponse{
+			return &aitypes.LLMResponse{
 				Content:   expectedDescription,
-				Usage:     TokenUsage{PromptTokens: 50, CompletionTokens: 20, TotalTokens: 70},
+				Usage:     aitypes.TokenUsage{PromptTokens: 50, CompletionTokens: 20, TotalTokens: 70},
 				ModelUsed: "vision-model",
 				Latency:   100 * time.Millisecond,
 			}, nil
@@ -158,10 +160,10 @@ func TestVisionAnalyzeTool_SuccessfulAnalysis(t *testing.T) {
 func TestVisionAnalyzeTool_InvalidURL(t *testing.T) {
 	// Set up a mock LLM so valid URLs pass all validation and succeed.
 	mock := &mockLLMAccess{
-		generateFn: func(ctx context.Context, req LLMRequest) (*LLMResponse, error) {
-			return &LLMResponse{
+		generateFn: func(ctx context.Context, req aitypes.LLMRequest) (*aitypes.LLMResponse, error) {
+			return &aitypes.LLMResponse{
 				Content:   "ok",
-				Usage:     TokenUsage{TotalTokens: 5},
+				Usage:     aitypes.TokenUsage{TotalTokens: 5},
 				ModelUsed: "test",
 				Latency:   10 * time.Millisecond,
 			}, nil
@@ -238,15 +240,15 @@ func TestVisionAnalyzeTool_URLValidation(t *testing.T) {
 
 func TestVisionAnalyzeTool_CustomInstructionPassedToLLM(t *testing.T) {
 	customInstruction := "Identify all objects and their colors in this image."
-	var capturedReq LLMRequest
+	var capturedReq aitypes.LLMRequest
 
 	tool := &VisionAnalyzeTool{}
 	tool.SetLLMAccess(&mockLLMAccess{
-		generateFn: func(ctx context.Context, req LLMRequest) (*LLMResponse, error) {
+		generateFn: func(ctx context.Context, req aitypes.LLMRequest) (*aitypes.LLMResponse, error) {
 			capturedReq = req
-			return &LLMResponse{
+			return &aitypes.LLMResponse{
 				Content:   "Objects found: red car, blue sky",
-				Usage:     TokenUsage{TotalTokens: 30},
+				Usage:     aitypes.TokenUsage{TotalTokens: 30},
 				ModelUsed: "test-model",
 				Latency:   50 * time.Millisecond,
 			}, nil
@@ -272,10 +274,10 @@ func TestVisionAnalyzeTool_JSONResponseParsing(t *testing.T) {
 
 	tool := &VisionAnalyzeTool{}
 	tool.SetLLMAccess(&mockLLMAccess{
-		generateFn: func(ctx context.Context, req LLMRequest) (*LLMResponse, error) {
-			return &LLMResponse{
+		generateFn: func(ctx context.Context, req aitypes.LLMRequest) (*aitypes.LLMResponse, error) {
+			return &aitypes.LLMResponse{
 				Content:   jsonResponse,
-				Usage:     TokenUsage{TotalTokens: 40},
+				Usage:     aitypes.TokenUsage{TotalTokens: 40},
 				ModelUsed: "test-model",
 				Latency:   50 * time.Millisecond,
 			}, nil
