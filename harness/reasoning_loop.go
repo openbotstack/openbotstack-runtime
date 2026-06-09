@@ -88,6 +88,19 @@ func (rl *DefaultReasoningLoop) Run(ctx context.Context, step *execution.Executi
 	toolCallsUsed := 0
 	var lastOutput any
 	var lastPlanSignature string
+	// planFingerprint computes a deterministic fingerprint from plan steps.
+	// Used instead of exact string comparison on plan.Reasoning to avoid
+	// false negatives from minor LLM rephrasing.
+	planFingerprint := func(plan *execution.ExecutionPlan) string {
+		if plan == nil || len(plan.Steps) == 0 {
+			return ""
+		}
+		parts := make([]string, len(plan.Steps))
+		for i, s := range plan.Steps {
+			parts[i] = fmt.Sprintf("%s:%s", s.Type, s.Name)
+		}
+		return strings.Join(parts, "|")
+	}
 
 	for turnsElapsed := 1; turnsElapsed <= rl.config.MaxTurns; turnsElapsed++ {
 		// Safety valve: hard limit at 2x MaxTurns
@@ -159,14 +172,15 @@ func (rl *DefaultReasoningLoop) Run(ctx context.Context, step *execution.Executi
 		turnResult.PlanText = plan.Reasoning
 
 		// Repeat plan detection
-		if rl.config.RepeatPlanStop && plan.Reasoning == lastPlanSignature && lastPlanSignature != "" {
+		fingerprint := planFingerprint(plan)
+		if rl.config.RepeatPlanStop && fingerprint == lastPlanSignature && lastPlanSignature != "" {
 			debugLog(ctx, ec, "reasoning loop: repeated plan detected, stopping", "turn", turnsElapsed)
 			turnResult.StopReason = StopReasonPlannerStopped
 			turnResult.Duration = time.Since(turnStart)
 			turnResults = append(turnResults, turnResult)
 			break
 		}
-		lastPlanSignature = plan.Reasoning
+		lastPlanSignature = fingerprint
 
 		// ACT phase: execute each step in the plan
 		stepResults := make(map[string]any)

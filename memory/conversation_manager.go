@@ -41,8 +41,9 @@ type MessageCountProvider interface {
 }
 
 // ZonedStore extends ZonedHistoryProvider with write support for zoned content.
-// TODO: No production store currently implements ZonedStore; compaction pipeline
-// is inactive until MarkdownMemoryStore (or a wrapper) provides this interface.
+// MarkdownMemoryStore implements both GetZonedHistory and WriteZonedHistory,
+// so the compaction pipeline is active when SummarizingConversationStore wraps
+// a MarkdownMemoryStore.
 type ZonedStore interface {
 	ZonedHistoryProvider
 	WriteZonedHistory(ctx context.Context, tenantID, userID, sessionID string, zoned []ZonedMessage) error
