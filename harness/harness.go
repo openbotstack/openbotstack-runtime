@@ -25,32 +25,39 @@ import (
 // Used for "respond" steps where the planner already decided a direct LLM reply is needed.
 type LLMGenerator func(ctx context.Context, systemPrompt, userMessage string, history []aitypes.Message) (string, error)
 
+// LLMStreamGenerator generates a direct LLM text response with per-token streaming.
+// tokenFn is called for each token as it arrives from the LLM provider.
+// Returns the full accumulated text, or an error.
+type LLMStreamGenerator func(ctx context.Context, systemPrompt, userMessage string, history []aitypes.Message, tokenFn func(string)) (string, error)
+
 // HarnessDeps captures all optional harness dependencies.
 // Pass to NewExecutionHarness to construct a fully-configured harness.
 // All fields are optional (nil = feature disabled).
 type HarnessDeps struct {
-	ReasoningLoop   ReasoningLoop
-	LLMGenerator    LLMGenerator
-	AuditLogger     execution_logs.AuditLogger
-	MCPRunner       toolrunner.ToolRunner
-	BuiltinRunner   toolrunner.ToolRunner
-	HookManager     *HookManager
-	FailureHandler  *FailureHandler
-	PermChecker     *PermissionChecker
-	ApprovalGateway execution.ApprovalGateway
-	ProgressCB      ProgressCallback
-	Replanner       planner.Replanner
+	ReasoningLoop      ReasoningLoop
+	LLMGenerator       LLMGenerator
+	LLMStreamGenerator LLMStreamGenerator // optional; preferred for respond steps
+	AuditLogger        execution_logs.AuditLogger
+	MCPRunner          toolrunner.ToolRunner
+	BuiltinRunner      toolrunner.ToolRunner
+	HookManager        *HookManager
+	FailureHandler     *FailureHandler
+	PermChecker        *PermissionChecker
+	ApprovalGateway    execution.ApprovalGateway
+	ProgressCB         ProgressCallback
+	Replanner          planner.Replanner
 }
 
 // ExecutionHarness orchestrates plan execution sequentially.
 // It is a pure executor: it does NOT hold a planner and cannot generate plans.
 // All planning decisions must be made before calling Run().
 type ExecutionHarness struct {
-	config          HarnessConfig
-	stepExecutor    *StepExecutor
-	reasoningLoop   ReasoningLoop
-	llmGenerator    LLMGenerator
-	auditLogger     execution_logs.AuditLogger
+	config              HarnessConfig
+	stepExecutor        *StepExecutor
+	reasoningLoop       ReasoningLoop
+	llmGenerator        LLMGenerator
+	llmStreamGenerator  LLMStreamGenerator
+	auditLogger         execution_logs.AuditLogger
 	hookManager     *HookManager
 	failureHandler  *FailureHandler
 	permChecker     *PermissionChecker
@@ -71,17 +78,18 @@ func NewExecutionHarness(
 	deps HarnessDeps,
 ) *ExecutionHarness {
 	h := &ExecutionHarness{
-		config:          config,
-		stepExecutor:    NewStepExecutor(toolRunner, skillExecutor, StepExecutorDeps{MCPRunner: deps.MCPRunner, BuiltinRunner: deps.BuiltinRunner}),
-		reasoningLoop:   deps.ReasoningLoop,
-		llmGenerator:    deps.LLMGenerator,
-		auditLogger:     deps.AuditLogger,
-		hookManager:     deps.HookManager,
-		failureHandler:  deps.FailureHandler,
-		permChecker:     deps.PermChecker,
-		approvalGateway: deps.ApprovalGateway,
-		replanner:       deps.Replanner,
-		replanConfig:    DefaultReplanConfig(),
+		config:             config,
+		stepExecutor:       NewStepExecutor(toolRunner, skillExecutor, StepExecutorDeps{MCPRunner: deps.MCPRunner, BuiltinRunner: deps.BuiltinRunner}),
+		reasoningLoop:      deps.ReasoningLoop,
+		llmGenerator:       deps.LLMGenerator,
+		llmStreamGenerator: deps.LLMStreamGenerator,
+		auditLogger:        deps.AuditLogger,
+		hookManager:        deps.HookManager,
+		failureHandler:     deps.FailureHandler,
+		permChecker:        deps.PermChecker,
+		approvalGateway:    deps.ApprovalGateway,
+		replanner:          deps.Replanner,
+		replanConfig:       DefaultReplanConfig(),
 	}
 	if deps.ProgressCB != nil {
 		h.progressCB = deps.ProgressCB
@@ -413,14 +421,31 @@ func (h *ExecutionHarness) executeLLMStep(ctx context.Context, step execution.Ex
 	}
 
 	// "respond" steps: direct LLM generation (no iterative planning loop needed).
-	if step.Name == "respond" && h.llmGenerator != nil {
+	// Prefer streaming LLM generator when available — emits per-token progress events.
+	if step.Name == "respond" && (h.llmGenerator != nil || h.llmStreamGenerator != nil) {
 		systemPrompt := ""
 		var history []aitypes.Message
 		if origCtx != nil {
 			systemPrompt = origCtx.Soul.SystemPrompt
 			history = origCtx.ConversationHistory
 		}
-		response, err := h.llmGenerator(ctx, systemPrompt, userRequest, history)
+
+		// Token callback: forward individual tokens via the execution context progress function.
+		tokenFn := func(token string) {
+			if ec.ProgressFn != nil {
+				ec.ProgressFn("token", token, 0, "")
+			}
+		}
+
+		var response string
+		var err error
+
+		if h.llmStreamGenerator != nil {
+			response, err = h.llmStreamGenerator(ctx, systemPrompt, userRequest, history, tokenFn)
+		} else {
+			response, err = h.llmGenerator(ctx, systemPrompt, userRequest, history)
+		}
+
 		if err != nil {
 			return &execution.StepResult{
 				StepID: step.StepID, StepName: step.Name, Type: string(step.Type),

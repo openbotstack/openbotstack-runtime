@@ -51,12 +51,13 @@ func (b *ServerBuilder) InitAgent() *ServerBuilder {
 		hookMgr = harnesspkg.NewHookManager()
 
 		h := harnesspkg.NewExecutionHarness(harnessCfg, toolRunner, b.exec, harnesspkg.HarnessDeps{
-			ReasoningLoop: reasoningLoop,
-			HookManager:   hookMgr,
-			LLMGenerator:  b.buildLLMGenerator(),
-			AuditLogger:   b.auditLogger,
-			MCPRunner:     b.mcpRunner,
-			BuiltinRunner: b.builtinRunner,
+			ReasoningLoop:      reasoningLoop,
+			HookManager:        hookMgr,
+			LLMGenerator:       b.buildLLMGenerator(),
+			LLMStreamGenerator: b.buildLLMStreamGenerator(),
+			AuditLogger:        b.auditLogger,
+			MCPRunner:          b.mcpRunner,
+			BuiltinRunner:      b.builtinRunner,
 		})
 
 		reasoningStore = reasoningpkg.NewInMemoryStore()

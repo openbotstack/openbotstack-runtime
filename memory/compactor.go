@@ -104,6 +104,7 @@ func (c *SessionCompactor) compressMessages(ctx context.Context, msgs []aitypes.
 		AdditionalProperties: func(b bool) *bool { return &b }(false),
 	}
 
+	prompt := buildCompressionPrompt(msgs)
 	resp, err := c.callLLM(ctx, prompt, schema)
 	if err != nil {
 		return nil, err

@@ -187,3 +187,62 @@ func (b *ServerBuilder) buildLLMGenerator() harnesspkg.LLMGenerator {
 		return resp.Content, nil
 	}
 }
+
+// buildLLMStreamGenerator creates a streaming variant that emits per-token callbacks.
+// Falls back to non-streaming if the provider does not support GenerateStream.
+func (b *ServerBuilder) buildLLMStreamGenerator() harnesspkg.LLMStreamGenerator {
+	return func(ctx context.Context, systemPrompt, userMessage string, history []types.Message, tokenFn func(string)) (string, error) {
+		provider, err := b.modelRouter.Route([]types.CapabilityType{types.CapTextGeneration}, types.ModelConstraints{})
+		if err != nil {
+			return "", fmt.Errorf("llm stream generator: route failed: %w", err)
+		}
+
+		msgs := []types.Message{}
+		if systemPrompt != "" {
+			msgs = append(msgs, types.NewTextMessage("system", systemPrompt))
+		}
+		if len(history) > 0 {
+			history = harnesspkg.TruncateHistoryByToken(history, 16000)
+		}
+		for _, m := range history {
+			if m.Role != "system" {
+				msgs = append(msgs, m)
+			}
+		}
+		msgs = append(msgs, types.NewTextMessage("user", userMessage))
+
+		req := types.GenerateRequest{
+			Messages:  msgs,
+			MaxTokens: 4096,
+		}
+
+		// Try streaming path first.
+		if sp, ok := provider.(providers.StreamingModelProvider); ok {
+			ch, err := sp.GenerateStream(ctx, req)
+			if err != nil {
+				return "", fmt.Errorf("llm stream generator: stream failed: %w", err)
+			}
+			var sb strings.Builder
+			for chunk := range ch {
+				if chunk.Error != nil {
+					return sb.String(), fmt.Errorf("llm stream generator: %w", chunk.Error)
+				}
+				if chunk.Content != "" {
+					tokenFn(chunk.Content)
+					sb.WriteString(chunk.Content)
+				}
+			}
+			return sb.String(), nil
+		}
+
+		// Fallback: non-streaming — send the full response as one token.
+		resp, err := provider.Generate(ctx, req)
+		if err != nil {
+			return "", fmt.Errorf("llm stream generator: generate failed: %w", err)
+		}
+		if resp.Content != "" {
+			tokenFn(resp.Content)
+		}
+		return resp.Content, nil
+	}
+}
