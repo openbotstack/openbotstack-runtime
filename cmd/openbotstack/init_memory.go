@@ -11,8 +11,14 @@ import (
 	"github.com/openbotstack/openbotstack-runtime/memory"
 )
 
+// Compile-time checks: HarnessAgent must satisfy both interfaces.
+var _ coreagent.MemoryConfigurable = (*agentpkg.HarnessAgent)(nil)
+var _ agentpkg.ConversationConfigurable = (*agentpkg.HarnessAgent)(nil)
+
 // InitMemory sets up Markdown store, conversation store, memory bridge, and context assembler.
 func (b *ServerBuilder) InitMemory() *ServerBuilder {
+	b.requireInit("pdb", "InitMemory")
+	b.requireInit("apiAgent", "InitMemory")
 	sessionStateStore := memory.NewSQLiteSessionStateStore(b.pdb.DB,
 		memory.WithStrictTenant(os.Getenv("OBS_AUTH_STRICT") == "true"),
 	)
@@ -25,22 +31,23 @@ func (b *ServerBuilder) InitMemory() *ServerBuilder {
 	slog.Info("markdown memory store initialized", "data_dir", b.cfg.Memory.DataDir)
 
 	var convStore coreagent.ConversationStore = markdownStore
+	var summarizingStore *memory.SummarizingConversationStore
 	if b.cfg.Memory.SummaryEnabled {
 		summarizer := memory.NewConversationSummarizer(markdownStore, b.modelRouter, b.cfg.Memory.SummaryThreshold)
-		convStore = memory.NewSummarizingConversationStore(markdownStore, summarizer)
+		summarizingStore = memory.NewSummarizingConversationStore(markdownStore, summarizer)
+		convStore = summarizingStore
 		slog.Info("conversation summarization enabled", "threshold", b.cfg.Memory.SummaryThreshold)
 	}
 	convStore = memory.NewDualWriteConversationStore(convStore, sessionStateStore)
 
-	switch a := b.apiAgent.(type) {
-	case *agentpkg.HarnessAgent:
-		a.SetMaxHistoryMessages(b.cfg.Memory.MaxHistoryMessages)
+	if mc, ok := b.apiAgent.(coreagent.MemoryConfigurable); ok {
+		mc.SetMaxHistoryMessages(b.cfg.Memory.MaxHistoryMessages)
 	}
 
 	memoryBridge := memory.NewMarkdownMemoryBridge(markdownStore, nil)
 
 	if b.cfg.Vector.Enabled && b.cfg.Vector.DatabaseURL != "" {
-		b.initVectorSearch(markdownStore, memoryBridge, convStore)
+		b.initVectorSearch(markdownStore, memoryBridge, summarizingStore)
 	} else {
 		slog.Info("vector search disabled (keyword matching only)")
 	}
@@ -48,10 +55,11 @@ func (b *ServerBuilder) InitMemory() *ServerBuilder {
 	// Create ConversationManager to consolidate history + memory retrieval.
 	conversationMgr := memory.NewConversationManager(convStore, memoryBridge, b.cfg.Memory.MaxHistoryMessages)
 
-	switch a := b.apiAgent.(type) {
-	case *agentpkg.HarnessAgent:
-		a.SetMemoryManager(memoryBridge)
-		a.SetConversationManager(conversationMgr)
+	if mc, ok := b.apiAgent.(coreagent.MemoryConfigurable); ok {
+		mc.SetMemoryManager(memoryBridge)
+	}
+	if cc, ok := b.apiAgent.(agentpkg.ConversationConfigurable); ok {
+		cc.SetConversationManager(conversationMgr)
 	}
 	slog.Info("conversation manager initialized")
 
@@ -61,7 +69,7 @@ func (b *ServerBuilder) InitMemory() *ServerBuilder {
 }
 
 // initVectorSearch initializes optional PostgreSQL + pgvector for semantic search.
-func (b *ServerBuilder) initVectorSearch(markdownStore *memory.MarkdownMemoryStore, memoryBridge *memory.MarkdownMemoryBridge, convStore coreagent.ConversationStore) {
+func (b *ServerBuilder) initVectorSearch(markdownStore *memory.MarkdownMemoryStore, memoryBridge *memory.MarkdownMemoryBridge, summarizingStore *memory.SummarizingConversationStore) {
 	pgPool, err := pgxpool.New(context.Background(), b.cfg.Vector.DatabaseURL)
 	if err != nil {
 		slog.Error("failed to parse vector database URL", "error", err)
@@ -83,7 +91,7 @@ func (b *ServerBuilder) initVectorSearch(markdownStore *memory.MarkdownMemorySto
 	memoryBridge.SetRetrievalStrategy(memory.NewVectorFirstStrategy(markdownStore, vectorStore, embeddingSvc))
 
 	indexer := memory.NewAsyncEmbeddingIndexer(embeddingSvc, vectorStore)
-	if summarizingStore, ok := convStore.(*memory.SummarizingConversationStore); ok {
+	if summarizingStore != nil {
 		summarizingStore.SetIndexer(indexer)
 	}
 	slog.Info("vector search enabled", "model", b.cfg.Vector.Model, "dimensions", b.cfg.Vector.Dimensions)

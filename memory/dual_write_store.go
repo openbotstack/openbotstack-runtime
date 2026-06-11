@@ -13,14 +13,26 @@ import (
 // DualWriteConversationStore decorates a ConversationStore to also update
 // SQLite session metadata on every AppendMessage. Markdown remains the
 // canonical content store; SQLite holds metadata for fast listing/filtering.
+//
+// It transparently passes through optional interface capabilities (ZonedHistoryProvider,
+// SummaryMetaProvider) from the inner store, resolved once at construction.
 type DualWriteConversationStore struct {
-	inner        coreagent.ConversationStore
-	sessionState SessionStateStore
+	inner           coreagent.ConversationStore
+	sessionState    SessionStateStore
+	innerZoned      ZonedHistoryProvider // resolved at construction; nil = not supported
+	innerSummaryMeta SummaryMetaProvider  // resolved at construction; nil = not supported
 }
 
 // NewDualWriteConversationStore creates a dual-write decorator.
+// Optional capabilities (ZonedHistoryProvider, SummaryMetaProvider) are resolved
+// once from the inner store at construction time.
 func NewDualWriteConversationStore(inner coreagent.ConversationStore, sessionState SessionStateStore) *DualWriteConversationStore {
-	return &DualWriteConversationStore{inner: inner, sessionState: sessionState}
+	dw := &DualWriteConversationStore{inner: inner, sessionState: sessionState}
+	// Resolve optional capabilities at construction time.
+	caps := ResolveCapabilities(inner)
+	dw.innerZoned = caps.ZonedProvider
+	dw.innerSummaryMeta = caps.SummaryMeta
+	return dw
 }
 
 // AppendMessage writes to Markdown (primary) then updates SQLite metadata (best-effort).
@@ -51,8 +63,7 @@ func (d *DualWriteConversationStore) AppendMessage(ctx context.Context, msg core
 	}
 
 	if err := d.sessionState.UpsertSession(ctx, meta); err != nil {
-		slog.WarnContext(ctx, "dual-write: sqlite metadata update failed",
-			"session_id", msg.SessionID, "error", err)
+		return fmt.Errorf("dual-write: sqlite metadata update failed for session %s: %w", msg.SessionID, err)
 	}
 
 	return nil
@@ -86,10 +97,18 @@ func (d *DualWriteConversationStore) ClearSession(ctx context.Context, tenantID,
 	return nil
 }
 
-// GetSummaryMeta delegates to inner store if it supports SummaryMetaProvider.
+// GetSummaryMeta delegates to the resolved SummaryMetaProvider from construction.
 func (d *DualWriteConversationStore) GetSummaryMeta(ctx context.Context, tenantID, userID, sessionID string) (*SummaryMetadata, error) {
-	if provider, ok := d.inner.(SummaryMetaProvider); ok {
-		return provider.GetSummaryMeta(ctx, tenantID, userID, sessionID)
+	if d.innerSummaryMeta != nil {
+		return d.innerSummaryMeta.GetSummaryMeta(ctx, tenantID, userID, sessionID)
 	}
 	return nil, nil
+}
+
+// GetZonedHistory delegates to the resolved ZonedHistoryProvider from construction.
+func (d *DualWriteConversationStore) GetZonedHistory(ctx context.Context, tenantID, userID, sessionID string) ([]ZonedMessage, error) {
+	if d.innerZoned != nil {
+		return d.innerZoned.GetZonedHistory(ctx, tenantID, userID, sessionID)
+	}
+	return nil, fmt.Errorf("memory: zoned history not supported by inner store")
 }

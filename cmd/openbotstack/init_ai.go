@@ -10,6 +10,7 @@ import (
 
 // InitAI creates the model router and registers the configured provider.
 func (b *ServerBuilder) InitAI() *ServerBuilder {
+	b.requireInit("cfg", "InitAI")
 	modelRouter := router.NewDefaultRouter()
 	providerName := b.cfg.Providers.LLM.Default
 	var providerConfig config.LLMProviderConfig

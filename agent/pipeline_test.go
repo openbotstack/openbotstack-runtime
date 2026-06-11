@@ -121,7 +121,7 @@ func TestResolveTasks_NoWorkflowResolver_SingleTask(t *testing.T) {
 
 func TestPhaseGatherSkillDescriptors_WithCapRegistry(t *testing.T) {
 	a := &HarnessAgent{
-		capRegistry: &mockCapRegistry{descs: []capability.CapabilityDescriptor{
+		capRegistry: &mockCapRegistry{descs: []aitypes.SkillDescriptor{
 			{ID: "cap-1", Name: "Cap1", Description: "Test capability"},
 			{ID: "cap-2", Name: "Cap2", Description: "Another capability"},
 		}},
@@ -137,7 +137,7 @@ func TestPhaseGatherSkillDescriptors_WithCapRegistry(t *testing.T) {
 
 func TestPhaseGatherSkillDescriptors_WithSkillDisabled(t *testing.T) {
 	a := &HarnessAgent{
-		capRegistry: &mockCapRegistry{descs: []capability.CapabilityDescriptor{
+		capRegistry: &mockCapRegistry{descs: []aitypes.SkillDescriptor{
 			{ID: "enabled", Name: "Enabled", Description: "Active"},
 			{ID: "disabled", Name: "Disabled", Description: "Inactive"},
 		}},
@@ -362,7 +362,7 @@ func TestPhaseExecuteTasks_MultipleTasks(t *testing.T) {
 // --- Mock types for pipeline tests ---
 
 type mockCapRegistry struct {
-	descs []capability.CapabilityDescriptor
+	descs []aitypes.SkillDescriptor
 }
 
 func (m *mockCapRegistry) Register(_ context.Context, _ capability.Capability) error {
@@ -370,10 +370,10 @@ func (m *mockCapRegistry) Register(_ context.Context, _ capability.Capability) e
 }
 func (m *mockCapRegistry) Unregister(_ context.Context, _ string) error { return nil }
 func (m *mockCapRegistry) Get(_ string) (capability.Capability, error)  { return nil, nil }
-func (m *mockCapRegistry) List() []capability.CapabilityDescriptor {
+func (m *mockCapRegistry) List() []aitypes.SkillDescriptor {
 	return m.descs
 }
-func (m *mockCapRegistry) ListByKind(_ capability.CapabilityKind) []capability.CapabilityDescriptor {
+func (m *mockCapRegistry) ListByKind(_ capability.CapabilityKind) []aitypes.SkillDescriptor {
 	return m.descs
 }
 

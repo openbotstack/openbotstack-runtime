@@ -12,6 +12,9 @@ import (
 
 // InitAgent creates either a HarnessAgent or DefaultAgent based on config.
 func (b *ServerBuilder) InitAgent() *ServerBuilder {
+	b.requireInit("exec", "InitAgent")
+	b.requireInit("modelRouter", "InitAgent")
+	b.requireInit("auditLogger", "InitAgent")
 	art := &assistant.AssistantRuntime{AssistantID: "default"}
 
 	var apiAgent agent.Agent
@@ -55,6 +58,7 @@ func (b *ServerBuilder) InitAgent() *ServerBuilder {
 			HookManager:        hookMgr,
 			LLMGenerator:       b.buildLLMGenerator(),
 			LLMStreamGenerator: b.buildLLMStreamGenerator(),
+			AuditEmitter:       b.auditEmitter,
 			AuditLogger:        b.auditLogger,
 			MCPRunner:          b.mcpRunner,
 			BuiltinRunner:      b.builtinRunner,

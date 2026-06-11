@@ -12,6 +12,7 @@ import (
 // InitCapabilities creates the CapabilityRegistry, registers skills and builtins,
 // then sets up MCPManager and MCPToolRunner.
 func (b *ServerBuilder) InitCapabilities() *ServerBuilder {
+	b.requireInit("exec", "InitCapabilities")
 	capRegistry := capability.NewMemoryCapabilityRegistry()
 	ctx := context.Background()
 

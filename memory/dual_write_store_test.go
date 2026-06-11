@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -112,7 +113,7 @@ func TestDualWrite_AppendMessage_WritesToBoth(t *testing.T) {
 	}
 }
 
-func TestDualWrite_AppendMessage_SQLiteFailureGraceful(t *testing.T) {
+func TestDualWrite_AppendMessage_SQLiteFailure_ReturnsError(t *testing.T) {
 	mdDir := t.TempDir()
 	mdStore, _ := NewMarkdownMemoryStore(mdDir)
 	mockState := newMockSessionStateStore()
@@ -129,12 +130,16 @@ func TestDualWrite_AppendMessage_SQLiteFailureGraceful(t *testing.T) {
 		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
 	}
 
-	// Should NOT fail — SQLite failure is best-effort
-	if err := dw.AppendMessage(ctx, msg); err != nil {
-		t.Fatalf("AppendMessage should not fail on SQLite error: %v", err)
+	// SQLite metadata failure MUST be returned to the caller
+	err := dw.AppendMessage(ctx, msg)
+	if err == nil {
+		t.Fatal("AppendMessage should return error when SQLite metadata update fails")
+	}
+	if !strings.Contains(err.Error(), "sqlite down") {
+		t.Errorf("error = %q, want containing %q", err.Error(), "sqlite down")
 	}
 
-	// Markdown should still have the message
+	// Markdown should still have the message (write happened before SQLite)
 	history, _ := mdStore.GetHistory(ctx, "tenant-a", "user-1", "sess-1", 10)
 	if len(history) != 1 {
 		t.Errorf("Markdown should have 1 message despite SQLite failure, got %d", len(history))

@@ -15,6 +15,8 @@ import (
 
 // InitExecution creates Wasm runtime, executor, host functions, and planner.
 func (b *ServerBuilder) InitExecution() *ServerBuilder {
+	b.requireInit("pdb", "InitExecution")
+	b.requireInit("modelRouter", "InitExecution")
 	wasmRuntime, err := wasm.NewRuntime()
 	if err != nil {
 		slog.Error("failed to initialize wasm runtime", "error", err)

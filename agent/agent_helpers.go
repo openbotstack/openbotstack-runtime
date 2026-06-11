@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"github.com/openbotstack/openbotstack-core/capability"
 	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
 	"github.com/openbotstack/openbotstack-core/registry/skills"
 )
@@ -10,9 +9,9 @@ import (
 const defaultMemoryRetrievalLimit = 5
 
 // skillToDescriptor extracts descriptor fields from a Skill using the canonical
-// capability.SkillToDescriptor conversion (ADR-019 Capability Plane).
+// skills.GetDescriptor (ADR-019 Capability Plane).
 func skillToDescriptor(id string, s skills.Skill) aitypes.SkillDescriptor {
-	return aitypes.SkillDescriptor(capability.SkillToDescriptor(s))
+	return skills.GetDescriptor(s)
 }
 
 // skillIDsFromDescriptors extracts skill IDs from descriptors.

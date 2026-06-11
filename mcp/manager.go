@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
 	"github.com/openbotstack/openbotstack-core/capability"
 	mcpcore "github.com/openbotstack/openbotstack-core/mcp"
 	"github.com/openbotstack/openbotstack-runtime/mcp/jsonrpc"
@@ -74,7 +75,9 @@ func (m *MCPManager) Shutdown() {
 		}
 		for _, tool := range srv.tools {
 			toolID := fmt.Sprintf("mcp.%s.%s", id, tool.Name)
-			_ = m.registry.Unregister(context.Background(), toolID)
+			if err := m.registry.Unregister(context.Background(), toolID); err != nil {
+				slog.Warn("mcp: failed to unregister tool during shutdown", "toolID", toolID, "error", err)
+			}
 		}
 	}
 	m.servers = make(map[string]*managedServer)
@@ -114,7 +117,9 @@ func (m *MCPManager) disconnectServer(ctx context.Context, serverID string) {
 		}
 		for _, tool := range srv.tools {
 			toolID := fmt.Sprintf("mcp.%s.%s", serverID, tool.Name)
-			_ = m.registry.Unregister(ctx, toolID)
+			if err := m.registry.Unregister(ctx, toolID); err != nil {
+				slog.WarnContext(ctx, "mcp: failed to unregister tool during disconnect", "toolID", toolID, "error", err)
+			}
 		}
 		delete(m.servers, serverID)
 	}
@@ -200,8 +205,8 @@ func (m *MCPManager) ReconnectServer(ctx context.Context, serverID string) error
 	return m.connectServer(ctx, cfg)
 }
 
-// ToolDescriptors returns all MCP tools as CapabilityDescriptors.
-func (m *MCPManager) ToolDescriptors() []capability.CapabilityDescriptor {
+// ToolDescriptors returns all MCP tools as SkillDescriptors.
+func (m *MCPManager) ToolDescriptors() []aitypes.SkillDescriptor {
 	return m.registry.ListByKind(capability.CapabilityKindMCP)
 }
 
@@ -262,7 +267,9 @@ func (m *MCPManager) connectServer(ctx context.Context, cfg mcpcore.ServerConfig
 	for _, tool := range tools {
 		toolID := fmt.Sprintf("mcp.%s.%s", cfg.ID, tool.Name)
 		// Unregister first in case of reconnection (idempotent)
-		_ = m.registry.Unregister(ctx, toolID)
+		if err := m.registry.Unregister(ctx, toolID); err != nil {
+			slog.WarnContext(ctx, "mcp: failed to unregister tool during reconnect", "toolID", toolID, "error", err)
+		}
 		adapter := capability.NewFromMCP(cfg.ID, tool)
 		if err := m.registry.Register(ctx, adapter); err != nil {
 			slog.Warn("mcp: failed to register tool", "tool", tool.Name, "server", cfg.ID, "error", err)

@@ -4,11 +4,13 @@ package wasm
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tetratelabs/wazero"
@@ -39,12 +41,38 @@ func DefaultLimits() Limits {
 	}
 }
 
+// requestBuffers holds per-request input/output buffers, stored in context.
+type requestBuffers struct {
+	input  []byte
+	output []byte
+}
+
+// contextKey is an unexported type for context keys defined in this package.
+type contextKey int
+
+const buffersKey contextKey = iota
+
+// withBuffers returns a new context carrying per-request buffers.
+func withBuffers(ctx context.Context, buf *requestBuffers) context.Context {
+	return context.WithValue(ctx, buffersKey, buf)
+}
+
+// buffersFromContext retrieves per-request buffers from context.
+func buffersFromContext(ctx context.Context) *requestBuffers {
+	if buf, ok := ctx.Value(buffersKey).(*requestBuffers); ok {
+		return buf
+	}
+	return nil
+}
+
 // Runtime wraps wazero for sandboxed Wasm execution.
 type Runtime struct {
-	engine wazero.Runtime
-	mu     sync.Mutex
-	hf     *HostFunctions
-	limits Limits
+	engine          wazero.Runtime
+	compileMu       sync.Mutex // protects module compilation
+	compiledModules sync.Map   // map[[sha256.Size]byte]wazero.CompiledModule
+	hf              *HostFunctions
+	limits          Limits
+	moduleCounter   uint64 // atomically incremented for unique module names
 }
 
 // NewRuntime creates a new Wasm runtime.
@@ -87,9 +115,7 @@ func (r *Runtime) RegisterHostFunctions(ctx context.Context, hf *HostFunctions) 
 	if err := RegisterHostFunctions(ctx, r.engine, hf); err != nil {
 		return err
 	}
-	r.mu.Lock()
 	r.hf = hf
-	r.mu.Unlock()
 	return nil
 }
 
@@ -98,12 +124,42 @@ func (r *Runtime) GetEngine() wazero.Runtime {
 	return r.engine
 }
 
-// LoadModule compiles and caches a Wasm module.
-func (r *Runtime) LoadModule(ctx context.Context, name string, wasmBytes []byte) (api.Module, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+// moduleHash computes a SHA-256 hash of wasm bytes for cache key.
+func moduleHash(wasmBytes []byte) [sha256.Size]byte {
+	return sha256.Sum256(wasmBytes)
+}
+
+// getOrCompileModule returns a compiled module, using the cache if available.
+// Compilation is serialized via compileMu; cache lookups are lock-free.
+func (r *Runtime) getOrCompileModule(ctx context.Context, wasmBytes []byte) (wazero.CompiledModule, error) {
+	hash := moduleHash(wasmBytes)
+
+	// Fast path: check cache without lock.
+	if cached, ok := r.compiledModules.Load(hash); ok {
+		return cached.(wazero.CompiledModule), nil
+	}
+
+	// Slow path: compile under lock.
+	r.compileMu.Lock()
+	defer r.compileMu.Unlock()
+
+	// Double-check after acquiring lock (another goroutine may have compiled).
+	if cached, ok := r.compiledModules.Load(hash); ok {
+		return cached.(wazero.CompiledModule), nil
+	}
 
 	compiled, err := r.engine.CompileModule(ctx, wasmBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	r.compiledModules.Store(hash, compiled)
+	return compiled, nil
+}
+
+// LoadModule compiles and caches a Wasm module.
+func (r *Runtime) LoadModule(ctx context.Context, name string, wasmBytes []byte) (api.Module, error) {
+	compiled, err := r.getOrCompileModule(ctx, wasmBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -123,6 +179,9 @@ func (r *Runtime) LoadModule(ctx context.Context, name string, wasmBytes []byte)
 //   - Reactor pattern (TinyGo): module exports "execute", uses host API get_input/set_output.
 //
 // The runtime auto-detects the pattern by checking for exported functions.
+//
+// Execute is safe for concurrent use. Module compilation is cached and shared;
+// per-request state (input/output buffers) is isolated per call.
 func (r *Runtime) Execute(ctx context.Context, wasmBytes []byte, input []byte, limits Limits) ([]byte, error) {
 	// Apply timeout
 	if limits.MaxExecutionTime > 0 {
@@ -131,20 +190,17 @@ func (r *Runtime) Execute(ctx context.Context, wasmBytes []byte, input []byte, l
 		defer cancel()
 	}
 
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	// Set execution-specific input in the shared Host API state (Reactor pattern).
-	if r.hf != nil {
-		r.hf.ClearBuffers()
-		r.hf.SetInput(input)
-	}
-
-	// Compile
-	compiled, err := r.engine.CompileModule(ctx, wasmBytes)
+	// Get or compile module (cached after first call; no global lock on hot path).
+	compiled, err := r.getOrCompileModule(ctx, wasmBytes)
 	if err != nil {
 		return nil, err
 	}
+
+	// Allocate per-request buffers for Host API isolation.
+	// Host functions (get_input, set_output) read/write via context,
+	// so concurrent executions do not interfere with each other.
+	reqBuf := &requestBuffers{input: input}
+	ctx = withBuffers(ctx, reqBuf)
 
 	// Capture stdout for Command-pattern modules (stdin/stdout I/O).
 	var stdoutBuf bytes.Buffer
@@ -157,8 +213,10 @@ func (r *Runtime) Execute(ctx context.Context, wasmBytes []byte, input []byte, l
 	// InstantiateModule, which prevents clock_time_get nil pointer crashes
 	// with Go wasip1 runtime initialization.
 	// Memory limit is enforced at the Runtime level via WithMemoryLimitPages.
+	// Each instantiation gets a unique name to allow concurrent execution.
+	instanceName := fmt.Sprintf("skill-%d", atomic.AddUint64(&r.moduleCounter, 1))
 	config := wazero.NewModuleConfig().
-		WithName("skill").
+		WithName(instanceName).
 		WithStdin(stdinReader).
 		WithStdout(&stdoutBuf).
 		WithStderr(os.Stderr).
@@ -166,7 +224,7 @@ func (r *Runtime) Execute(ctx context.Context, wasmBytes []byte, input []byte, l
 		WithSysNanotime().
 		WithStartFunctions() // disable auto _start
 
-	// Instantiate module (no auto-start).
+	// Instantiate module (no auto-start). No global lock held here.
 	mod, err := r.engine.InstantiateModule(ctx, compiled, config)
 	if err != nil {
 		return nil, fmt.Errorf("wasm: instantiation failed: %w", err)
@@ -194,6 +252,10 @@ func (r *Runtime) Execute(ctx context.Context, wasmBytes []byte, input []byte, l
 			if stdoutBuf.Len() > 0 {
 				return stdoutBuf.Bytes(), nil
 			}
+			// Check per-request buffer first, then shared HostFunctions.
+			if reqBuf.output != nil {
+				return reqBuf.output, nil
+			}
 			if r.hf != nil && len(r.hf.GetOutput()) > 0 {
 				return r.hf.GetOutput(), nil
 			}
@@ -207,8 +269,13 @@ func (r *Runtime) Execute(ctx context.Context, wasmBytes []byte, input []byte, l
 	}
 
 	// Collect output:
-	// 1. If host functions were used (Reactor: set_output), prefer that.
-	// 2. Otherwise use stdout capture (Command: stdin/stdout).
+	// 1. Per-request buffer (context-isolated, takes priority).
+	// 2. Shared host functions buffer (backward compat).
+	// 3. Stdout capture (Command: stdin/stdout).
+	if reqBuf.output != nil {
+		return reqBuf.output, nil
+	}
+
 	if r.hf != nil && len(r.hf.GetOutput()) > 0 {
 		return r.hf.GetOutput(), nil
 	}
@@ -222,6 +289,13 @@ func (r *Runtime) Execute(ctx context.Context, wasmBytes []byte, input []byte, l
 
 // Close releases all resources.
 func (r *Runtime) Close() error {
+	// Clean up cached compiled modules.
+	r.compiledModules.Range(func(key, value any) bool {
+		if cm, ok := value.(wazero.CompiledModule); ok {
+			_ = cm.Close(context.Background()) //nolint:errcheck // cleanup
+		}
+		return true
+	})
 	return r.engine.Close(context.Background())
 }
 

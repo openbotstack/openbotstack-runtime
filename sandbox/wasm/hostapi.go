@@ -27,10 +27,10 @@ type HostFunctions struct {
 
 	mu sync.Mutex
 
-	// inputBuffer holds input data for the skill
+	// inputBuffer holds input data for the skill (shared, for backward compat)
 	inputBuffer []byte
 
-	// outputBuffer holds output data from the skill
+	// outputBuffer holds output data from the skill (shared, for backward compat)
 	outputBuffer []byte
 }
 
@@ -56,31 +56,56 @@ func (hf *HostFunctions) ClearBuffers() {
 	hf.outputBuffer = nil
 }
 
+// getInput retrieves the input buffer. It checks per-request context buffers
+// first, then falls back to the shared buffer.
+func (hf *HostFunctions) getInput(ctx context.Context) []byte {
+	if buf := buffersFromContext(ctx); buf != nil && buf.input != nil {
+		return buf.input
+	}
+	hf.mu.Lock()
+	defer hf.mu.Unlock()
+	return hf.inputBuffer
+}
+
+// setOutput stores output data. When per-request context buffers are
+// available (concurrent Execute path), it writes only to the per-request
+// buffer. Otherwise it falls back to the shared buffer for backward compat.
+func (hf *HostFunctions) setOutput(ctx context.Context, data []byte) {
+	if buf := buffersFromContext(ctx); buf != nil {
+		buf.output = make([]byte, len(data))
+		copy(buf.output, data)
+		return
+	}
+	// Fallback: write to shared buffer (single-threaded / backward compat).
+	hf.mu.Lock()
+	hf.outputBuffer = make([]byte, len(data))
+	copy(hf.outputBuffer, data)
+	hf.mu.Unlock()
+}
+
 // RegisterHostFunctions binds host functions to the Wasm runtime.
 func RegisterHostFunctions(ctx context.Context, r wazero.Runtime, hf *HostFunctions) error {
 	_, err := r.NewHostModuleBuilder("env").
 		// get_input_len returns the length of input data
 		NewFunctionBuilder().
 		WithFunc(func(ctx context.Context) uint32 {
-			hf.mu.Lock()
-			defer hf.mu.Unlock()
-			return uint32(len(hf.inputBuffer))
+			input := hf.getInput(ctx)
+			return uint32(len(input))
 		}).
 		Export("get_input_len").
 		// get_input copies input data to guest memory
 		NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, m api.Module, ptr uint32) uint32 {
-			hf.mu.Lock()
-			defer hf.mu.Unlock()
-			if len(hf.inputBuffer) == 0 {
+			input := hf.getInput(ctx)
+			if len(input) == 0 {
 				return 0
 			}
 			memSize := m.Memory().Size()
-			n := uint32(len(hf.inputBuffer))
+			n := uint32(len(input))
 			if ptr >= memSize || ptr+n < ptr || ptr+n > memSize {
 				return 0xFFFFFFFF
 			}
-			if ok := m.Memory().Write(ptr, hf.inputBuffer); !ok {
+			if ok := m.Memory().Write(ptr, input); !ok {
 				return 0xFFFFFFFF
 			}
 			return n
@@ -91,10 +116,7 @@ func RegisterHostFunctions(ctx context.Context, r wazero.Runtime, hf *HostFuncti
 		WithFunc(func(ctx context.Context, m api.Module, ptr, len uint32) {
 			data, ok := m.Memory().Read(ptr, len)
 			if ok {
-				hf.mu.Lock()
-				hf.outputBuffer = make([]byte, len)
-				copy(hf.outputBuffer, data)
-				hf.mu.Unlock()
+				hf.setOutput(ctx, data)
 			}
 		}).
 		Export("set_output").
@@ -237,7 +259,7 @@ func RegisterHostFunctions(ctx context.Context, r wazero.Runtime, hf *HostFuncti
 				return (uint32(statusCode&0xFFFF) << 16) | uint32(len(respBody)&0xFFFF)
 			}).
 			Export("http_fetch").
-			Instantiate(ctx)
+		Instantiate(ctx)
 
 	return err
 }

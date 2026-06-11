@@ -30,7 +30,7 @@ func (h *ExecutionHarness) attemptReplan(
 
 	prevResults := h.buildPrevResults(result.StepResults)
 
-	pCtx, _ := ec.PlannerContext().(*planner.PlannerContext)
+	pCtx := ec.PlannerContext()
 	if pCtx == nil {
 		return nil, fmt.Errorf("replan: no planner context available")
 	}

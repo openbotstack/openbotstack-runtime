@@ -302,26 +302,32 @@ func (rl *DefaultReasoningLoop) Run(ctx context.Context, step *execution.Executi
 			break
 		}
 
-			// Update PlannerContext with structured turn results for the next turn.
-			// Uses TurnToolResult (structured) instead of legacy XML <observation> injection.
-			if pCtx != nil && len(turnResult.Actions) > 0 {
-				for _, action := range turnResult.Actions {
-					tr := execution.TurnToolResult{
-						StepName: action.StepName,
-						StepType: action.StepType,
-						Success:  action.Error == "",
-						Error:    action.Error,
-					}
-					if action.Output != nil {
-						outputStr := FormatOutput(action.Output)
-						if len(outputStr) > 200 {
-							outputStr = outputStr[:200] + "..."
-						}
-						tr.Summary = outputStr
-					}
-					pCtx.TurnResults = append(pCtx.TurnResults, tr)
+		// Update PlannerContext with structured turn results for the next turn.
+		// Uses TurnToolResult (structured) instead of legacy XML <observation> injection.
+		// Also backfills MemoryContext for planner context enrichment.
+		if pCtx != nil && len(turnResult.Actions) > 0 {
+			for _, action := range turnResult.Actions {
+				tr := execution.TurnToolResult{
+					StepName: action.StepName,
+					StepType: action.StepType,
+					Success:  action.Error == "",
+					Error:    action.Error,
 				}
+				if action.Output != nil {
+					outputStr := FormatOutput(action.Output)
+					if len(outputStr) > 200 {
+						outputStr = outputStr[:200] + "..."
+					}
+					tr.Summary = outputStr
+					// Backfill MemoryContext for backward compatibility and planner context enrichment.
+					pCtx.MemoryContext = append(pCtx.MemoryContext, planner.SearchResult{
+						Content: []byte(outputStr),
+						Score:   1.0,
+					})
+				}
+				pCtx.TurnResults = append(pCtx.TurnResults, tr)
 			}
+		}
 
 		// Context compaction between turns
 		if rl.compactor != nil && len(turnResults) > 2 {

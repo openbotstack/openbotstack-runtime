@@ -30,6 +30,14 @@ type skillLister interface {
 	Get(id string) (skills.Skill, error)
 }
 
+// ConversationConfigurable is an optional interface for agents that support
+// conversation manager injection. Defined here because it references a
+// runtime-specific type (*rtmemory.ConversationManager) and therefore
+// cannot live in the core package.
+type ConversationConfigurable interface {
+	SetConversationManager(cm *rtmemory.ConversationManager)
+}
+
 // HarnessAgentConfig holds all dependencies for constructing a HarnessAgent.
 type HarnessAgentConfig struct {
 	// Execution pipeline

@@ -46,7 +46,7 @@ func (m *mockRouter) List() []string                           { return []string
 // --- Test: CompactMessages compresses messages into TurnSummaries ---
 
 func TestSessionCompactor_CompactMessages(t *testing.T) {
-	turnJSON := `[{"topic":"Auth discussion","summary":"Decided on JWT.","decisions":["Use JWT"],"facts":["15-min expiry"]}]`
+	turnJSON := `{"summaries":[{"topic":"Auth discussion","summary":"Decided on JWT.","decisions":["Use JWT"],"facts":["15-min expiry"]}]}`
 	router := &mockRouter{provider: &mockProvider{response: turnJSON}}
 	compactor := memory.NewSessionCompactor(router)
 
@@ -140,7 +140,7 @@ func TestSessionCompactor_ArchiveTurns(t *testing.T) {
 // --- Test: TokensSaved is positive after compression ---
 
 func TestSessionCompactor_TokensSaved(t *testing.T) {
-	turnJSON := `[{"topic":"Auth","summary":"Decided on JWT.","decisions":null,"facts":null}]`
+	turnJSON := `{"summaries":[{"topic":"Auth","summary":"Decided on JWT.","decisions":null,"facts":null}]}`
 	router := &mockRouter{provider: &mockProvider{response: turnJSON}}
 	compactor := memory.NewSessionCompactor(router)
 
@@ -192,7 +192,7 @@ func TestSessionCompactor_InvalidLLMResponse(t *testing.T) {
 // --- Test: JSON response parsing ---
 
 func TestSessionCompactor_JSONResponseParsing(t *testing.T) {
-	turnJSON := `[{"topic":"API Design","summary":"Chose REST over GraphQL.","decisions":["Use REST","Version with /v1/"],"facts":["Team has REST experience"]}]`
+	turnJSON := `{"summaries":[{"topic":"API Design","summary":"Chose REST over GraphQL.","decisions":["Use REST","Version with /v1/"],"facts":["Team has REST experience"]}]}`
 	router := &mockRouter{provider: &mockProvider{response: turnJSON}}
 	compactor := memory.NewSessionCompactor(router)
 

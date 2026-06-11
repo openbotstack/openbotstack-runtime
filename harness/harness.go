@@ -37,27 +37,41 @@ type HarnessDeps struct {
 	ReasoningLoop      ReasoningLoop
 	LLMGenerator       LLMGenerator
 	LLMStreamGenerator LLMStreamGenerator // optional; preferred for respond steps
-	AuditLogger        execution_logs.AuditLogger
-	MCPRunner          toolrunner.ToolRunner
-	BuiltinRunner      toolrunner.ToolRunner
-	HookManager        *HookManager
-	FailureHandler     *FailureHandler
-	PermChecker        *PermissionChecker
-	ApprovalGateway    execution.ApprovalGateway
-	ProgressCB         ProgressCallback
-	Replanner          planner.Replanner
+
+	// AuditEmitter is the unified pub/sub audit seam (ADR-023).
+	// When set, it takes precedence over AuditLogger for emitting events.
+	AuditEmitter *audit.AuditEmitter
+
+	// AuditLogger is the legacy audit interface.
+	// Deprecated: Use AuditEmitter instead. Kept for backward compatibility.
+	AuditLogger execution_logs.AuditLogger
+
+	MCPRunner       toolrunner.ToolRunner
+	BuiltinRunner   toolrunner.ToolRunner
+	HookManager     *HookManager
+	FailureHandler  *FailureHandler
+	PermChecker     *PermissionChecker
+	ApprovalGateway execution.ApprovalGateway
+	ProgressCB      ProgressCallback
+	Replanner       planner.Replanner
 }
 
 // ExecutionHarness orchestrates plan execution sequentially.
 // It is a pure executor: it does NOT hold a planner and cannot generate plans.
 // All planning decisions must be made before calling Run().
 type ExecutionHarness struct {
-	config              HarnessConfig
-	stepExecutor        *StepExecutor
-	reasoningLoop       ReasoningLoop
-	llmGenerator        LLMGenerator
-	llmStreamGenerator  LLMStreamGenerator
-	auditLogger         execution_logs.AuditLogger
+	config        HarnessConfig
+	stepExecutor  *StepExecutor
+	llmStepRunner *LLMStepRunner
+
+	// auditEmitter is the unified audit emission point (ADR-023).
+	// When non-nil, all audit events flow through the pub/sub emitter.
+	auditEmitter *audit.AuditEmitter
+
+	// auditLogger is the legacy fallback when no emitter is configured.
+	// Deprecated: use auditEmitter instead.
+	auditLogger execution_logs.AuditLogger
+
 	hookManager     *HookManager
 	failureHandler  *FailureHandler
 	permChecker     *PermissionChecker
@@ -80,9 +94,8 @@ func NewExecutionHarness(
 	h := &ExecutionHarness{
 		config:             config,
 		stepExecutor:       NewStepExecutor(toolRunner, skillExecutor, StepExecutorDeps{MCPRunner: deps.MCPRunner, BuiltinRunner: deps.BuiltinRunner}),
-		reasoningLoop:      deps.ReasoningLoop,
-		llmGenerator:       deps.LLMGenerator,
-		llmStreamGenerator: deps.LLMStreamGenerator,
+		llmStepRunner:      NewLLMStepRunner(deps.LLMGenerator, deps.LLMStreamGenerator, deps.ReasoningLoop),
+		auditEmitter:       deps.AuditEmitter,
 		auditLogger:        deps.AuditLogger,
 		hookManager:        deps.HookManager,
 		failureHandler:     deps.FailureHandler,
@@ -391,112 +404,20 @@ func (h *ExecutionHarness) executeStep(
 	return stepResult, execErr
 }
 
-// executeLLMStep handles LLM-type steps.
-// For "respond" steps, calls LLM directly. For complex reasoning, uses the ReasoningLoop.
+// executeLLMStep handles LLM-type steps by delegating to LLMStepRunner.
 func (h *ExecutionHarness) executeLLMStep(ctx context.Context, step execution.ExecutionStep, ec *execution.ExecutionContext, result *HarnessResult) (*execution.StepResult, error) {
-	startTime := time.Now()
-
-	// Resolve step result interpolation templates in arguments before use.
 	prevResults := h.buildPrevResults(result.StepResults)
-	step.ResolveArguments(prevResults)
-
-	// Derive user request: prefer ExpectedOutput, fall back to arguments.prompt.
-	userRequest := step.ExpectedOutput
-	if userRequest == "" {
-		if prompt, ok := step.Arguments["prompt"].(string); ok && prompt != "" {
-			userRequest = prompt
-		}
+	sr, metrics, turnData, err := h.llmStepRunner.Run(ctx, step, ec, prevResults)
+	if err != nil {
+		return sr, err
 	}
-
-	// Recover the original PlannerContext (with Skills, Soul, etc.)
-	// that was set on ExecutionContext via PlanAndRun.
-	var origCtx *planner.PlannerContext
-	if ec.PlannerContext() != nil {
-		var ok bool
-		origCtx, ok = ec.PlannerContext().(*planner.PlannerContext)
-		if !ok {
-			slog.Warn("harness: planner context type mismatch",
-				"type", fmt.Sprintf("%T", ec.PlannerContext()))
-		}
+	if metrics != nil {
+		result.Metrics.TotalLLMTurns += metrics.TotalLLMTurns
 	}
-
-	// "respond" steps: direct LLM generation (no iterative planning loop needed).
-	// Prefer streaming LLM generator when available — emits per-token progress events.
-	if step.Name == "respond" && (h.llmGenerator != nil || h.llmStreamGenerator != nil) {
-		systemPrompt := ""
-		var history []aitypes.Message
-		if origCtx != nil {
-			systemPrompt = origCtx.Soul.SystemPrompt
-			history = origCtx.ConversationHistory
-		}
-
-		// Token callback: forward individual tokens via the execution context progress function.
-		tokenFn := func(token string) {
-			if ec.ProgressFn != nil {
-				ec.ProgressFn("token", token, 0, "")
-			}
-		}
-
-		var response string
-		var err error
-
-		if h.llmStreamGenerator != nil {
-			response, err = h.llmStreamGenerator(ctx, systemPrompt, userRequest, history, tokenFn)
-		} else {
-			response, err = h.llmGenerator(ctx, systemPrompt, userRequest, history)
-		}
-
-		if err != nil {
-			return &execution.StepResult{
-				StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
-				Error: err, Duration: time.Since(startTime),
-			}, err
-		}
-		return &execution.StepResult{
-			StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
-			Output: response, Duration: time.Since(startTime),
-		}, nil
+	for k, v := range turnData {
+		result.TurnData[k] = v
 	}
-
-	// Complex LLM steps: delegate to ReasoningLoop for iterative tool-calling.
-	if h.reasoningLoop == nil {
-		err := fmt.Errorf("step %q is LLM type but no reasoning loop configured", step.Name)
-		return &execution.StepResult{
-			StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
-			Error: err, Duration: 0,
-		}, err
-	}
-
-	pCtx := &planner.PlannerContext{UserRequest: userRequest}
-	if origCtx != nil {
-		pCtx = &planner.PlannerContext{
-			UserRequest:         userRequest,
-			Skills:              origCtx.Skills,
-			Soul:                origCtx.Soul,
-			AssistantID:         origCtx.AssistantID,
-			MemoryContext:       origCtx.MemoryContext,
-			ConversationHistory: origCtx.ConversationHistory,
-		}
-	}
-
-	rlResult, rlErr := h.reasoningLoop.Run(ctx, &step, pCtx, ec)
-	if rlErr != nil {
-		return &execution.StepResult{
-			StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
-			Error: rlErr,
-		}, rlErr
-	}
-	result.Metrics.TotalLLMTurns += rlResult.TurnCount
-
-	// Save turn data for trace visualization.
-	if len(rlResult.TurnResults) > 0 {
-		result.TurnData[step.StepID] = rlResult.TurnResults
-	}
-
-	return &execution.StepResult{
-		StepID: step.StepID, StepName: step.Name, Type: string(step.Type),
-		Output: rlResult.Output, Duration: rlResult.Duration,
-	}, nil
+	return sr, nil
 }
 
 // handleStepFailure delegates to the failure handler for retry/fallback.
@@ -609,7 +530,7 @@ func PlanAndRun(ctx context.Context, pl planner.ExecutionPlanner, h *ExecutionHa
 	var plan *execution.ExecutionPlan
 
 	// Fast path: skip planner for simple respond requests
-	if isSimpleRespondRequest(task.PlannerContext.UserRequest) && h.llmGenerator != nil {
+	if isSimpleRespondRequest(task.PlannerContext.UserRequest) && h.llmStepRunner.HasGenerator() {
 		plan = &execution.ExecutionPlan{
 			Steps: []execution.ExecutionStep{
 				{Name: "respond", Type: execution.StepTypeLLM, Arguments: map[string]any{"prompt": task.PlannerContext.UserRequest}},
@@ -752,7 +673,7 @@ func snapshotStep(s execution.ExecutionStep) execution.ExecutionStep {
 
 // emitStepAudit records a step-level audit event with full step context.
 func (h *ExecutionHarness) emitStepAudit(ctx context.Context, step execution.ExecutionStep, sr *execution.StepResult, ec *execution.ExecutionContext) {
-	if h.auditLogger == nil || ec == nil {
+	if ec == nil {
 		return
 	}
 
@@ -786,7 +707,16 @@ func (h *ExecutionHarness) emitStepAudit(ctx context.Context, step execution.Exe
 		event.ToolOutput = sr.Output
 	}
 
-	if err := h.auditLogger.Log(ctx, event); err != nil {
-		slog.WarnContext(ctx, "harness: failed to emit step audit", "step", step.Name, "error", err)
+	// Prefer the unified emitter (ADR-023). Fall back to legacy logger.
+	if h.auditEmitter != nil {
+		if err := h.auditEmitter.Emit(ctx, event); err != nil {
+			slog.WarnContext(ctx, "harness: failed to emit step audit via emitter", "step", step.Name, "error", err)
+		}
+		return
+	}
+	if h.auditLogger != nil {
+		if err := h.auditLogger.Log(ctx, event); err != nil {
+			slog.WarnContext(ctx, "harness: failed to emit step audit", "step", step.Name, "error", err)
+		}
 	}
 }

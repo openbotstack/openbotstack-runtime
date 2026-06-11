@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"log/slog"
@@ -132,28 +133,10 @@ func (se *StepExecutor) ExecuteTool(
 	// Try the default toolRunner.
 	if se.toolRunner != nil {
 		result, err := runToolWithTimeout(ctx, se.toolRunner, cloned, ec, stepTimeout)
-		if err == nil {
-			if result != nil {
-				result.Duration = time.Since(start)
-			}
-			return result, nil
-		}
-		// If toolRunner failed with 404, fall through to skill executor.
-		// This handles the case where the planner marks a skill as type "tool".
-		if se.skillExecutor != nil {
-			slog.DebugContext(ctx, "step_executor: tool runner failed, falling back to skill executor",
-				"step", cloned.Name, "error", err)
-			return se.ExecuteSkill(ctx, step, ec, prevResults, stepTimeout)
-		}
 		if result != nil {
 			result.Duration = time.Since(start)
 		}
 		return result, err
-	}
-
-	// No toolRunner: fall back to skill executor for unrecognized tool names.
-	if se.skillExecutor != nil {
-		return se.ExecuteSkill(ctx, step, ec, prevResults, stepTimeout)
 	}
 
 	return &execution.StepResult{
@@ -220,11 +203,6 @@ func (se *StepExecutor) ExecuteSkill(
 	prevResults map[string]any,
 	stepTimeout time.Duration,
 ) (*execution.StepResult, error) {
-	// Handler-routed steps (mcp.*, builtin.*) are handled as tool steps.
-	if handler := se.lookupHandler(step); handler != nil {
-		return se.ExecuteTool(ctx, step, ec, prevResults, stepTimeout)
-	}
-
 	cloned := step.Clone()
 	if n := cloned.CoerceStringNumbers(); n > 0 {
 		slog.DebugContext(ctx, "step_executor: coerced argument types", "step", cloned.Name, "count", n)
@@ -232,6 +210,16 @@ func (se *StepExecutor) ExecuteSkill(
 	cloned.ResolveArguments(prevResults)
 
 	start := time.Now()
+
+	// Route to registered handler first (e.g. if a skill name happens to
+	// match a registered prefix). Handlers handle their own timeout/execution.
+	if handler := se.lookupHandler(cloned); handler != nil {
+		result, err := handler.Handle(ctx, cloned, ec, prevResults, stepTimeout)
+		if result != nil {
+			result.Duration = time.Since(start)
+		}
+		return result, err
+	}
 
 	if se.skillExecutor == nil {
 		return &execution.StepResult{
@@ -336,17 +324,25 @@ type prefixHandler struct {
 
 // CanHandle returns true if the step name starts with this handler's prefix.
 func (h *prefixHandler) CanHandle(step *execution.ExecutionStep) bool {
-	return len(step.Name) >= len(h.prefix) && step.Name[:len(h.prefix)] == h.prefix
+	return strings.HasPrefix(step.Name, h.prefix)
 }
 
-// Handle delegates to the shared runToolWithTimeout helper, avoiding duplication
-// with the default runner path in ExecuteTool.
+// Handle resolves arguments from previous step results, then delegates to
+// the shared runToolWithTimeout helper, avoiding duplication with the default
+// runner path in ExecuteTool.
 func (h *prefixHandler) Handle(
 	ctx context.Context,
 	step *execution.ExecutionStep,
 	ec *execution.ExecutionContext,
-	_ map[string]any,
+	prevResults map[string]any,
 	stepTimeout time.Duration,
 ) (*execution.StepResult, error) {
+	// Resolve {{step_name}} references from previous results.
+	// The caller (ExecuteTool/ExecuteSkill) already cloned the step and
+	// ran CoerceStringNumbers, but we still need ResolveArguments here
+	// because prefixHandler is also invoked directly from Dispatch.
+	if prevResults != nil && len(prevResults) > 0 {
+		step.ResolveArguments(prevResults)
+	}
 	return runToolWithTimeout(ctx, h.runner, step, ec, stepTimeout)
 }

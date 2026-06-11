@@ -1,8 +1,10 @@
 package memory
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -253,6 +255,37 @@ func TestConversationManager_StoreMessage_NilStore_NoPanic(t *testing.T) {
 	err := cm.StoreMessage(context.Background(), "sess-1", "t1", "u1", "user", "hello", "")
 	if err != nil {
 		t.Fatalf("StoreMessage should return nil with nil store: %v", err)
+	}
+}
+
+func TestConversationManager_StoreMessage_NilStore_LogsWarning(t *testing.T) {
+	var buf bytes.Buffer
+	original := slog.Default()
+	defer slog.SetDefault(original)
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+
+	cm := NewConversationManager(nil, nil, 50)
+	_ = cm.StoreMessage(context.Background(), "sess-1", "t1", "u1", "user", "hello", "")
+
+	logOutput := buf.String()
+	if logOutput == "" {
+		t.Error("StoreMessage with nil store should log a warning")
+	}
+}
+
+func TestConversationManager_StoreMessage_EmptySessionID_LogsWarning(t *testing.T) {
+	var buf bytes.Buffer
+	original := slog.Default()
+	defer slog.SetDefault(original)
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+
+	convStore := &mockConvStoreForCM{}
+	cm := NewConversationManager(convStore, nil, 50)
+	_ = cm.StoreMessage(context.Background(), "", "t1", "u1", "user", "hello", "")
+
+	logOutput := buf.String()
+	if logOutput == "" {
+		t.Error("StoreMessage with empty sessionID should log a warning")
 	}
 }
 

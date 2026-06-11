@@ -56,19 +56,34 @@ type ConversationManager struct {
 	memoryManager abstraction.MemoryManager
 	maxMessages   int
 	maxTokens     int
+
+	// Capabilities resolved once at construction from convStore.
+	// Eliminates runtime type assertion sniffing on every GetConversationContext call.
+	zonedProvider       ZonedHistoryProvider  // nil = legacy flat-history path
+	summaryMetaProvider SummaryMetaProvider    // nil = no summary-based skip
 }
 
 // NewConversationManager creates a ConversationManager.
+// Capabilities (ZonedHistoryProvider, SummaryMetaProvider) are resolved once
+// from the convStore at construction time — not sniffed on every call.
 func NewConversationManager(convStore coreagent.ConversationStore, memoryManager abstraction.MemoryManager, maxMessages int) *ConversationManager {
 	if maxMessages <= 0 {
 		maxMessages = 50
 	}
-	return &ConversationManager{
+
+	cm := &ConversationManager{
 		convStore:     convStore,
 		memoryManager: memoryManager,
 		maxMessages:   maxMessages,
 		maxTokens:     16000,
 	}
+
+	// Resolve optional capabilities once at construction.
+	caps := ResolveCapabilities(convStore)
+	cm.zonedProvider = caps.ZonedProvider
+	cm.summaryMetaProvider = caps.SummaryMeta
+
+	return cm
 }
 
 // GetConversationContext loads conversation context for a single turn.
@@ -76,9 +91,9 @@ func (cm *ConversationManager) GetConversationContext(ctx context.Context, sessi
 	result := &ConversationContext{}
 
 	if cm.convStore != nil && sessionID != "" {
-		// Try zone-aware path first
-		if zoned, ok := cm.convStore.(ZonedHistoryProvider); ok {
-			return cm.getZonedContext(ctx, zoned, result, sessionID, message, tenantID, userID)
+		// Use zone-aware path if capability was resolved at construction.
+		if cm.zonedProvider != nil {
+			return cm.getZonedContext(ctx, cm.zonedProvider, result, sessionID, message, tenantID, userID)
 		}
 
 		// Legacy path: flat history + summary
@@ -103,12 +118,10 @@ func (cm *ConversationManager) loadLegacyContext(ctx context.Context, result *Co
 	}
 
 	skipCount := 0
-	if result.Summary != "" {
-		if provider, ok := cm.convStore.(SummaryMetaProvider); ok {
-			meta, metaErr := provider.GetSummaryMeta(ctx, tenantID, userID, sessionID)
-			if metaErr == nil && meta != nil && meta.SourceMessageCount > 0 {
-				skipCount = meta.SourceMessageCount
-			}
+	if result.Summary != "" && cm.summaryMetaProvider != nil {
+		meta, metaErr := cm.summaryMetaProvider.GetSummaryMeta(ctx, tenantID, userID, sessionID)
+		if metaErr == nil && meta != nil && meta.SourceMessageCount > 0 {
+			skipCount = meta.SourceMessageCount
 		}
 	}
 
@@ -236,6 +249,8 @@ func TruncateZonedMessages(msgs []ZonedMessage, maxTokens int) []ZonedMessage {
 // StoreMessage persists a single message via the conversation store.
 func (cm *ConversationManager) StoreMessage(ctx context.Context, sessionID, tenantID, userID, role, content, executionID string) error {
 	if cm.convStore == nil || sessionID == "" {
+		slog.WarnContext(ctx, "conversation manager: message dropped, no store configured",
+			"session_id", sessionID, "has_store", cm.convStore != nil)
 		return nil
 	}
 	return cm.convStore.AppendMessage(ctx, coreagent.SessionMessage{

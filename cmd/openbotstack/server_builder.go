@@ -15,6 +15,7 @@ import (
 	"github.com/openbotstack/openbotstack-core/control/agent"
 	plannerpkg "github.com/openbotstack/openbotstack-core/planner"
 	"github.com/openbotstack/openbotstack-runtime/api"
+	coreaudit "github.com/openbotstack/openbotstack-core/audit"
 	rtAudit "github.com/openbotstack/openbotstack-runtime/audit"
 	"github.com/openbotstack/openbotstack-runtime/config"
 	executor "github.com/openbotstack/openbotstack-runtime/executor/skill_executor"
@@ -57,10 +58,42 @@ type ServerBuilder struct {
 	sessionStore    memory.SessionStateStore
 	telemetry       *api.TelemetryHandler
 	auditLogger     *audit.SQLiteAuditLogger
+	auditEmitter    *coreaudit.AuditEmitter
 	skillWatcher    *SkillWatcher
 }
 
 func NewServerBuilder() *ServerBuilder { return &ServerBuilder{} }
+
+// requireInit panics with a descriptive message when a prerequisite phase hasn't run.
+// This turns silent nil-pointer dereferences into actionable error messages.
+func (b *ServerBuilder) requireInit(field string, caller string) {
+	switch field {
+	case "cfg":
+		if b.cfg == nil {
+			panic(fmt.Sprintf("ServerBuilder: %s requires InitInfrastructure() to run first", caller))
+		}
+	case "pdb":
+		if b.pdb == nil {
+			panic(fmt.Sprintf("ServerBuilder: %s requires InitInfrastructure() to run first", caller))
+		}
+	case "modelRouter":
+		if b.modelRouter == nil {
+			panic(fmt.Sprintf("ServerBuilder: %s requires InitAI() to run first", caller))
+		}
+	case "exec":
+		if b.exec == nil {
+			panic(fmt.Sprintf("ServerBuilder: %s requires InitExecution() to run first", caller))
+		}
+	case "auditLogger":
+		if b.auditLogger == nil {
+			panic(fmt.Sprintf("ServerBuilder: %s requires InitAudit() to run first", caller))
+		}
+	case "apiAgent":
+		if b.apiAgent == nil {
+			panic(fmt.Sprintf("ServerBuilder: %s requires InitAgent() to run first", caller))
+		}
+	}
+}
 
 // Config returns the loaded configuration.
 func (b *ServerBuilder) Config() *config.Config { return b.cfg }

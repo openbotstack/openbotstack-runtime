@@ -22,12 +22,9 @@ func TestExecutionContext_PlannerContext_Explicit(t *testing.T) {
 		t.Fatal("PlannerContext should not be nil")
 	}
 
-	pCtxTyped, ok := retrieved.(*planner.PlannerContext)
-	if !ok {
-		t.Fatalf("PlannerContext type = %T, want *planner.PlannerContext", retrieved)
-	}
-	if pCtxTyped.AssistantID != "test-assistant" {
-		t.Errorf("AssistantID = %q, want %q", pCtxTyped.AssistantID, "test-assistant")
+	// No type assertion needed — PlannerContext() returns *planning.PlannerContext directly.
+	if retrieved.AssistantID != "test-assistant" {
+		t.Errorf("AssistantID = %q, want %q", retrieved.AssistantID, "test-assistant")
 	}
 }
 

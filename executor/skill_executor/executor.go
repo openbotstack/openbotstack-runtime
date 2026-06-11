@@ -56,6 +56,17 @@ type VisionTextGenerator interface {
 	GenerateStreamWithImage(ctx context.Context, prompt string, imageURL string, tokenFn func(string)) (string, error)
 }
 
+// ExecutorConfig holds all optional dependencies for constructing a DefaultExecutor.
+// Fields may be zero; dependencies not provided at construction time can be
+// injected later via their corresponding Set* methods (e.g. SetAuditLogger).
+type ExecutorConfig struct {
+	Runtime        *wasm.Runtime
+	Tools          toolrunner.ToolRunner
+	TextGenerator  TextGenerator
+	AuditLogger    execution_logs.AuditLogger
+	StepDispatcher toolrunner.StepDispatcher
+}
+
 // DefaultExecutor implements SkillExecutor with real Wasm execution.
 type DefaultExecutor struct {
 	mu             sync.RWMutex
@@ -81,6 +92,21 @@ func NewDefaultExecutorWithRuntime(rt *wasm.Runtime, tools toolrunner.ToolRunner
 		wasm:    make(map[string][]byte),
 		runtime: rt,
 		tools:   tools,
+	}
+}
+
+// NewDefaultExecutorWithConfig creates a DefaultExecutor with all provided
+// dependencies injected at construction time. Nil fields are left unset and
+// can be configured later via Set* methods.
+func NewDefaultExecutorWithConfig(cfg ExecutorConfig) *DefaultExecutor {
+	return &DefaultExecutor{
+		skills:         make(map[string]skills.Skill),
+		wasm:           make(map[string][]byte),
+		runtime:        cfg.Runtime,
+		tools:          cfg.Tools,
+		textGenerator:  cfg.TextGenerator,
+		auditLogger:    cfg.AuditLogger,
+		stepDispatcher: cfg.StepDispatcher,
 	}
 }
 
