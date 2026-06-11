@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
@@ -185,5 +186,63 @@ func TestLLMStepRunner_WithPlannerContext(t *testing.T) {
 	}
 	if capturedPrompt != "You are helpful." {
 		t.Errorf("systemPrompt = %q, want %q", capturedPrompt, "You are helpful.")
+	}
+}
+
+func TestInjectPrevResults_AddsResultsWhenMissing(t *testing.T) {
+	prev := map[string]any{
+		"vision_analyze": map[string]any{
+			"description": "Image shows a wound with blood.",
+			"tokens_used": float64(1464),
+		},
+	}
+	result := injectPrevResults("Summarize the results.", prev)
+	if !strings.Contains(result, "Previous step results") {
+		t.Error("should inject previous results section")
+	}
+	if !strings.Contains(result, "Image shows a wound with blood") {
+		t.Error("should contain vision analysis description")
+	}
+}
+
+func TestHasTemplateMarkers_ReturnsTrue(t *testing.T) {
+	step := &execution.ExecutionStep{
+		Arguments: map[string]any{"prompt": "Here: {{data_tool}}"},
+	}
+	if !hasTemplateMarkers(step) {
+		t.Error("should detect {{...}} in prompt argument")
+	}
+}
+
+func TestHasTemplateMarkers_ReturnsFalse(t *testing.T) {
+	step := &execution.ExecutionStep{
+		Arguments: map[string]any{"prompt": "No templates here."},
+	}
+	if hasTemplateMarkers(step) {
+		t.Error("should not detect templates when absent")
+	}
+}
+
+func TestHasTemplateMarkers_NilArgs(t *testing.T) {
+	step := &execution.ExecutionStep{}
+	if hasTemplateMarkers(step) {
+		t.Error("should return false for nil arguments")
+	}
+}
+
+func TestInjectPrevResults_EmptyPrevResults(t *testing.T) {
+	result := injectPrevResults("Hello", map[string]any{})
+	if result != "Hello" {
+		t.Error("should return unchanged with no prev results")
+	}
+}
+
+func TestFormatPrevResult_ExtractsDescription(t *testing.T) {
+	result := formatPrevResult(map[string]any{
+		"description": "test desc",
+		"tokens_used": float64(100),
+	})
+	if result != "test desc" {
+		t.Errorf("should extract description, got %q", result)
 	}
 }
