@@ -21,7 +21,7 @@ body {
   background: var(--bg-primary);
   color: var(--text-primary);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  line-height: 1.5;
+  line-height: 1.4;
 }
 
 /* App Layout */
@@ -642,13 +642,18 @@ body {
 
 .message .content.markdown-body {
   font-size: 14px;
-  line-height: 1.7;
+  line-height: 1.3;
+  /* Override .content's pre-wrap: markdown rendering must use normal white-space
+     so react-markdown collapses single newlines per the markdown spec. pre-wrap
+     here would force every \n into a physical line break and visually stretch
+     list/heading content. */
+  white-space: normal;
 }
 
 .message .content.markdown-body h1,
 .message .content.markdown-body h2,
 .message .content.markdown-body h3 {
-  margin: 12px 0 6px;
+  margin: 8px 0 4px;
   color: var(--text-primary);
 }
 
@@ -657,17 +662,23 @@ body {
 .message .content.markdown-body h3 { font-size: 15px; }
 
 .message .content.markdown-body p {
-  margin: 4px 0;
+  margin: 2px 0;
 }
 
 .message .content.markdown-body ul,
 .message .content.markdown-body ol {
-  margin: 4px 0;
+  margin: 2px 0;
   padding-left: 20px;
 }
 
+/* Loose lists (items separated by blank lines) render <li><p>…</p></li>;
+   collapse the inner paragraph margin so items stay tight. */
+.message .content.markdown-body li > p {
+  margin: 0;
+}
+
 .message .content.markdown-body li {
-  margin: 2px 0;
+  margin: 0;
 }
 
 .message .content.markdown-body strong {

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/openbotstack/openbotstack-core/execution"
+	"github.com/openbotstack/openbotstack-runtime/persistence"
 )
 
 const (
@@ -178,7 +179,26 @@ func TestFullSystem(t *testing.T) {
 
 	absRepoRoot, _ := filepath.Abs(repoRoot)
 
-	// Write a temp config that only uses the openai provider pointed at the mock.
+	// Pre-seed the SQLite DB with the mock provider. Provider config is runtime
+	// state loaded from provider_config at startup (InitAI/loadProvidersFromDB),
+	// not from config.yaml or env vars. Create+migrate the DB, insert the provider
+	// row pointing at the mock LLM, then close it so the server opens it fresh.
+	dbPath := filepath.Join(t.TempDir(), "openbotstack.db")
+	seedDB, err := persistence.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open seed DB: %v", err)
+	}
+	if err := seedDB.Migrate(); err != nil {
+		t.Fatalf("Migrate seed DB: %v", err)
+	}
+	if _, err := seedDB.Exec(`INSERT INTO provider_config (id, provider, name, base_url, api_key, model, is_default, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, '')`,
+		"seed-openai", "openai", "openai", mockLLM.URL, "dummy-key", "gpt-4o", 1); err != nil {
+		t.Fatalf("insert provider seed row: %v", err)
+	}
+	_ = seedDB.Close()
+
+	// Minimal config — provider config lives in the DB now, not config.yaml.
 	tmpConfig, err := os.CreateTemp("", "obs-test-config-*.yaml")
 	if err != nil {
 		t.Fatalf("Failed to create temp config: %v", err)
@@ -187,16 +207,9 @@ func TestFullSystem(t *testing.T) {
 	configContent := fmt.Sprintf(`
 server:
   addr: ":%d"
-providers:
-  llm:
-    default: openai
-    openai:
-      base_url: %s
-      api_key: dummy-key
-      model: gpt-4o
 memory:
   data_dir: "%s/data"
-`, addr.Port, mockLLM.URL, absRepoRoot)
+`, addr.Port, absRepoRoot)
 	if _, err := tmpConfig.WriteString(configContent); err != nil {
 		t.Fatalf("Failed to write temp config: %v", err)
 	}
@@ -208,6 +221,7 @@ memory:
 	cmd.Stderr = os.Stderr
 
 	env := os.Environ()
+	env = append(env, "OBS_DATABASE_PATH="+dbPath)
 	cmd.Env = env
 
 	if err := cmd.Start(); err != nil {

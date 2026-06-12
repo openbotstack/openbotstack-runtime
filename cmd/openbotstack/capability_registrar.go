@@ -53,11 +53,14 @@ func (r *CapabilityRegistrar) RegisterBuiltins() *builtintools.BuiltinToolRunner
 	runner.ConfigureFileTools(allowedDirs, maxBytes)
 	slog.Info("file tools configured", "allowed_dirs", allowedDirs, "max_bytes", maxBytes)
 
-	// Configure vision tool: allow private network IPs for development.
+	// Configure vision tool. SSRF protection (blocking private/loopback addresses)
+	// is ON by default — the safe posture for a governance-focused stack. Allow
+	// private networks only when explicitly opted in, e.g. for internal-only
+	// deployments where image/document hosts live on a private network.
 	allowPrivateNetworks := os.Getenv("OBS_VISION_ALLOW_PRIVATE_NETWORKS") == "true"
 	runner.ConfigureVisionTool(allowPrivateNetworks)
 	if allowPrivateNetworks {
-		slog.Warn("vision tool: private network access enabled (development mode)")
+		slog.Warn("vision tool: SSRF protection DISABLED — private/loopback network access allowed (OBS_VISION_ALLOW_PRIVATE_NETWORKS=true)")
 	}
 
 	for _, tool := range runner.Tools() {

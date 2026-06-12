@@ -26,13 +26,6 @@ services:
     environment:
       # Server
       - OBS_SERVER_ADDR=:8080
-      # LLM provider (REQUIRED - set your API key)
-      - OBS_LLM_PROVIDER=openai
-      - OBS_LLM_API_KEY=${OPENAI_API_KEY:-}
-      # Override model (optional)
-      # - OBS_LLM_MODEL=gpt-4o
-      # Override base URL (optional, for self-hosted providers)
-      # - OBS_LLM_URL=https://api.openai.com/v1
       # Logging
       - OBS_LOG_LEVEL=info
       # Database
@@ -43,14 +36,20 @@ services:
       - OBS_SKILLS_PATH=/app/data/skills
       # Auth (see DEPLOYMENT.md for details)
       - OBS_AUTH_STRICT=false
-      # Set JWT_SECRET to enable JWT authentication alongside API keys
-      # - JWT_SECRET=your-secure-random-secret
+      # Set JWT_SECRET (>=32 chars) to enable JWT auth + audit-chain signing +
+      # at-rest encryption of provider API keys in SQLite.
+      # - JWT_SECRET=your-secure-random-secret-min-32-chars
       # - JWT_STRICT=false
-      # Seed default admin on first run (set to "false" to disable)
+      # Seed default admin on first run (set to "false" to disable).
+      # The admin API key is printed once on first start; use it to configure
+      # the LLM provider via POST /v1/admin/providers.
       - OBS_SEED_DEFAULTS=true
       # TLS (optional - see DEPLOYMENT.md for reverse proxy setup)
       # - OBS_TLS_CERT_FILE=/etc/tls/tls.crt
       # - OBS_TLS_KEY_FILE=/etc/tls/tls.key
+      # NOTE: LLM providers (OBS_LLM_PROVIDER/API_KEY/URL/MODEL) are NO LONGER
+      # read from the environment. They are runtime-mutable config stored in
+      # SQLite and managed via the Admin API (POST /v1/admin/providers).
     volumes:
       # Persist SQLite database and memory data
       - openbotstack-data:/app/data

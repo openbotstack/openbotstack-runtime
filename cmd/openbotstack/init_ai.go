@@ -2,46 +2,36 @@ package main
 
 import (
 	"log/slog"
+	"os"
 
 	"github.com/openbotstack/openbotstack-core/ai/providers"
 	"github.com/openbotstack/openbotstack-core/ai/router"
-	"github.com/openbotstack/openbotstack-runtime/config"
 )
 
-// InitAI creates the model router and registers the configured provider.
+// InitAI creates the model router and registers providers configured in the
+// database. Providers are runtime-mutable configuration managed via the Admin
+// API (POST /v1/admin/providers), not environment variables — env vars are
+// reserved for static, deploy-time settings. On a fresh database no providers
+// are registered; configure them after startup.
 func (b *ServerBuilder) InitAI() *ServerBuilder {
-	b.requireInit("cfg", "InitAI")
+	b.requireInit("pdb", "InitAI")
+
 	modelRouter := router.NewDefaultRouter()
-	providerName := b.cfg.Providers.LLM.Default
-	var providerConfig config.LLMProviderConfig
-
-	switch providerName {
-	case "modelscope":
-		providerConfig = b.cfg.Providers.LLM.ModelScope
-	case "claude":
-		providerConfig = b.cfg.Providers.LLM.Claude
-	default:
-		providerConfig = b.cfg.Providers.LLM.OpenAI
-	}
-
 	providerFactory := providers.NewProviderFactory()
 
-	if providerConfig.APIKey != "" {
-		llmProvider := providerFactory.Create(providerName, providerConfig.BaseURL, providerConfig.APIKey, providerConfig.Model)
-		if err := modelRouter.Register(llmProvider); err != nil {
-			slog.Error("failed to register provider", "error", err)
-		} else {
-			slog.Info("llm provider registered", "provider", providerName, "model", providerConfig.Model, "base_url", providerConfig.BaseURL)
-		}
-	} else {
-		slog.Warn("LLM API key not set, LLM features will be disabled")
+	n, err := loadProvidersFromDB(b.pdb, providerFactory, modelRouter)
+	if err != nil {
+		slog.Error("failed to load providers from database", "error", err)
+		os.Exit(1)
 	}
-
-	seedProviderConfig(b.pdb, providerName, providerConfig, true)
+	if n == 0 {
+		slog.Warn("no providers configured — LLM features disabled. " +
+			"Configure a provider via the Admin API: POST /v1/admin/providers")
+	} else {
+		slog.Info("providers loaded from database", "count", n)
+	}
 
 	b.modelRouter = modelRouter
 	b.providerFactory = providerFactory
-	b.providerName = providerName
-	b.providerConfig = providerConfig
 	return b
 }

@@ -510,8 +510,10 @@ func isSimpleRespondRequest(msg string) bool {
 }
 
 // PlanAndRun creates a plan via the given planner and executes it on this harness.
-// For simple requests (short, no tool keywords), skips the planner and creates
-// a single "respond" step directly.
+// The planner owns ALL routing decisions (ADR-021: planner is a pure function);
+// the harness does not short-circuit "simple" messages, since a heuristic cannot
+// reliably tell whether a request needs a skill (e.g. "summarize this") and
+// skipping the planner would break skill routing.
 func PlanAndRun(ctx context.Context, pl planner.ExecutionPlanner, h *ExecutionHarness, task TaskInput, ec *execution.ExecutionContext) (*HarnessResult, error) {
 	if pl == nil {
 		return nil, fmt.Errorf("harness.PlanAndRun: planner is nil")
@@ -525,33 +527,17 @@ func PlanAndRun(ctx context.Context, pl planner.ExecutionPlanner, h *ExecutionHa
 		task.PlannerContext.UserRequest = task.TaskDescription
 	}
 
-	var plan *execution.ExecutionPlan
-
-	// Fast path: skip planner for simple respond requests
-	if isSimpleRespondRequest(task.PlannerContext.UserRequest) && h.llmStepRunner.HasGenerator() {
-		plan = &execution.ExecutionPlan{
-			Steps: []execution.ExecutionStep{
-				{Name: "respond", Type: execution.StepTypeLLM, Arguments: map[string]any{"prompt": task.PlannerContext.UserRequest}},
-			},
-		}
-		if err := plan.Validate(); err != nil {
-			return nil, fmt.Errorf("harness.PlanAndRun: fast-path plan validation: %w", err)
-		}
-		slog.DebugContext(ctx, "harness: fast path — skipped planner for simple request")
-	} else {
-		var err error
-		plan, err = pl.Plan(ctx, task.PlannerContext)
-		if err != nil {
-			return nil, fmt.Errorf("harness.PlanAndRun: planning failed: %w", err)
-		}
-		if plan == nil || len(plan.Steps) == 0 {
-			return &HarnessResult{
-				StopCondition: StopCondition{Stopped: true, Reason: StopReasonPlannerStopped},
-			}, nil
-		}
-		if err := plan.Validate(); err != nil {
-			return nil, fmt.Errorf("harness.PlanAndRun: plan validation failed: %w", err)
-		}
+	plan, err := pl.Plan(ctx, task.PlannerContext)
+	if err != nil {
+		return nil, fmt.Errorf("harness.PlanAndRun: planning failed: %w", err)
+	}
+	if plan == nil || len(plan.Steps) == 0 {
+		return &HarnessResult{
+			StopCondition: StopCondition{Stopped: true, Reason: StopReasonPlannerStopped},
+		}, nil
+	}
+	if err := plan.Validate(); err != nil {
+		return nil, fmt.Errorf("harness.PlanAndRun: plan validation failed: %w", err)
 	}
 
 	// Set PlannerContext on ExecutionContext so LLM steps can access

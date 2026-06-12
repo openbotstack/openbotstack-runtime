@@ -3,6 +3,8 @@ package persistence
 import (
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	_ "modernc.org/sqlite"
@@ -16,6 +18,16 @@ type DB struct {
 // Open creates a SQLite connection at dbPath.
 // Use ":memory:" for an in-memory database.
 func Open(dbPath string) (*DB, error) {
+	// Ensure the parent directory exists so a relative path like
+	// "data/openbotstack.db" does not fail with SQLITE_CANTOPEN(14) on first run.
+	if dbPath != ":memory:" {
+		if dir := filepath.Dir(dbPath); dir != "" && dir != "." {
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				return nil, fmt.Errorf("create db dir %s: %w", dir, err)
+			}
+		}
+	}
+
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite %s: %w", dbPath, err)

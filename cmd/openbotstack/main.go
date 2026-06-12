@@ -33,7 +33,6 @@ import (
 	rtAudit "github.com/openbotstack/openbotstack-runtime/audit"
 	executor "github.com/openbotstack/openbotstack-runtime/executor/skill_executor"
 	reasoningpkg "github.com/openbotstack/openbotstack-runtime/harness/reasoning"
-	"github.com/openbotstack/openbotstack-runtime/internal/crypto"
 	audit "github.com/openbotstack/openbotstack-runtime/logging/execution_logs"
 	"github.com/openbotstack/openbotstack-runtime/memory"
 	"github.com/openbotstack/openbotstack-runtime/observability"
@@ -266,42 +265,4 @@ func (s *Server) ListenAndServe() {
 	}
 
 	fmt.Println("openbotstack stopped")
-}
-
-// seedProviderConfig persists provider credentials from config/env to SQLite.
-func seedProviderConfig(pdb *persistence.DB, providerName string, providerConfig config.LLMProviderConfig, isDefault bool) {
-	if providerConfig.APIKey == "" {
-		return
-	}
-	var existing int
-	_ = pdb.QueryRow("SELECT COUNT(*) FROM provider_config WHERE provider = ?", providerName).Scan(&existing)
-	if existing > 0 {
-		return
-	}
-
-	seedNow := time.Now().UTC().Format(time.RFC3339Nano)
-	seedKey := providerConfig.APIKey
-	if encKey := crypto.EncryptionKey(); encKey != nil {
-		enc, err := crypto.Encrypt(encKey, seedKey)
-		if err != nil {
-			slog.Warn("failed to encrypt provider api key for storage", "error", err)
-		} else {
-			seedKey = enc
-		}
-	}
-
-	isDefaultInt := 0
-	if isDefault {
-		isDefaultInt = 1
-	}
-
-	id := "seed-" + providerName
-	_, err := pdb.Exec(`INSERT INTO provider_config (id, provider, name, base_url, api_key, model, is_default, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, providerName, providerName, providerConfig.BaseURL, seedKey, providerConfig.Model, isDefaultInt, seedNow)
-	if err != nil {
-		slog.Warn("failed to seed provider config into SQLite", "provider", providerName, "error", err)
-	} else {
-		slog.Info("seeded provider config into SQLite", "provider", providerName)
-	}
 }

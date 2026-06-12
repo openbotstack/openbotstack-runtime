@@ -162,20 +162,23 @@ func TestSkillsEndpointMethodNotAllowed(t *testing.T) {
 func TestExecutionsEndpoint(t *testing.T) {
 	logger := execution_logs.NewInMemoryAuditLogger()
 
-	// Add some execution events
+	// Insert audit events matching the real harness output format:
+	// Source=executor, Action=harness.step, one per step.
 	_ = logger.Log(context.Background(), coreaudit.AuditEvent{
 		ID:       "exec-1",
-		Action:   "skills.execute",
+		Source:   coreaudit.SourceExecutor,
+		Action:   "harness.step",
 		Resource: "math-add",
-		Outcome:  "success",
+		Outcome:  "completed",
 		Duration: 42 * time.Millisecond,
 		Metadata: map[string]string{"session_id": "sess-1"},
 	})
 	_ = logger.Log(context.Background(), coreaudit.AuditEvent{
 		ID:       "exec-2",
-		Action:   "skills.execute",
+		Source:   coreaudit.SourceExecutor,
+		Action:   "harness.step",
 		Resource: "wordcount",
-		Outcome:  "failure",
+		Outcome:  "error", // maps to aggregated status "error" + Error field
 		Duration: 100 * time.Millisecond,
 		Metadata: map[string]string{"session_id": "sess-2", "error": "timeout"},
 	})
@@ -212,8 +215,8 @@ func TestExecutionsEndpoint(t *testing.T) {
 			if e.DurationMs != 42 {
 				t.Errorf("Expected 42ms, got %d", e.DurationMs)
 			}
-			if e.Status != "success" {
-				t.Errorf("Expected success, got %s", e.Status)
+			if e.Status != "completed" {
+				t.Errorf("Expected completed, got %s", e.Status)
 			}
 			if e.SessionID != "sess-1" {
 				t.Errorf("Expected sess-1, got %s", e.SessionID)

@@ -9,15 +9,10 @@ interface MessageContentProps {
 }
 
 export function MessageContent({ content, streaming }: MessageContentProps) {
-  if (streaming) {
-    return (
-      <div className="content">
-        {content}
-        <span className="streaming-cursor" />
-      </div>
-    )
-  }
-
+  // Always render through markdown so streaming and final states share the same
+  // layout (line-height, paragraph spacing) — avoids the "wide jump" when
+  // switching from plain text to markdown at stream end, and shows structured
+  // content (headings/lists/code) live during streaming instead of raw chars.
   const segments = useMemo(() => parseChartBlocks(content), [content])
 
   return (
@@ -28,6 +23,7 @@ export function MessageContent({ content, streaming }: MessageContentProps) {
         }
         return <Markdown key={i}>{segment.content}</Markdown>
       })}
+      {streaming && <span className="streaming-cursor" />}
     </div>
   )
 }

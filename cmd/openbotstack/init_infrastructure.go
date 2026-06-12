@@ -44,7 +44,6 @@ func (b *ServerBuilder) InitInfrastructure() *ServerBuilder {
 	slog.Info("starting openbotstack",
 		"addr", cfg.Server.Addr,
 		"mode", *runMode,
-		"llm_provider", cfg.Providers.LLM.Default,
 	)
 
 	dbPath := os.Getenv("OBS_DATABASE_PATH")

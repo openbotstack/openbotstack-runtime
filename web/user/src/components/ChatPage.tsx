@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useAuth } from './AuthProvider'
 import { useExecutionViewer } from './ExecutionViewerContext'
-import { listSessions, deleteSession, getSessionHistory, authHeaders, checkAuthStatus, type ServerSession } from '../lib/api'
+import { listSessions, deleteSession, getSessionHistory, authHeaders, checkAuthStatus, uuid, type ServerSession } from '../lib/api'
 import { MessageContent } from './MessageContent'
 
 interface Message {
@@ -198,7 +198,11 @@ export function ChatPage() {
                     status = progContent ? `审批通过: ${progContent}` : '审批通过'
                     break
                   default:
-                    status = progContent || progType
+                    // Unknown event types (e.g. internal planning tokens carrying
+                    // raw plan JSON) are not user-facing. Do not surface their raw
+                    // content — it would flash unreadable JSON fragments in the
+                    // status line. Known step/planning types are handled above.
+                    break
                 }
                 if (status) {
                   setProgressText(status)
@@ -357,12 +361,12 @@ export function ChatPage() {
     if (!input.trim() || loading) return
 
     const userMessage: Message = {
-      id: crypto.randomUUID(),
+      id: uuid(),
       role: 'user',
       content: input,
     }
 
-    const assistantMsgId = crypto.randomUUID()
+    const assistantMsgId = uuid()
     const assistantMessage: Message = {
       id: assistantMsgId,
       role: 'assistant',

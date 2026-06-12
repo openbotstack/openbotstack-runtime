@@ -39,6 +39,19 @@ func spaHandler(embedFS embed.FS, subDir string) http.Handler {
 		if path == "" {
 			path = "index.html"
 		}
+
+		// Cache strategy:
+		// - index.html (and the SPA root): never cached, so a new deploy's
+		//   hashed asset URLs are always discovered.
+		// - hashed assets under /assets/: immutable, browser-cached forever
+		//   (their filename changes when content changes).
+		isIndex := path == "index.html" || path == ""
+		if isIndex {
+			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		} else if strings.HasPrefix(path, "assets/") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		}
+
 		if f, err := sub.Open(path); err == nil {
 			_ = f.Close()
 			fileServer.ServeHTTP(w, r)
@@ -46,6 +59,10 @@ func spaHandler(embedFS embed.FS, subDir string) http.Handler {
 		}
 		// SPA fallback: serve index.html for all non-file routes
 		r.URL.Path = "/"
+		// Fallback also serves index.html → must not be cached.
+		if !isIndex {
+			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		}
 		fileServer.ServeHTTP(w, r)
 	})
 }

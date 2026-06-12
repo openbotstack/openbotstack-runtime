@@ -141,6 +141,7 @@ func (r *Router) registerRoutes() {
 	// Register v1 routes on v1Mux
 	r.v1Mux.HandleFunc("/v1/chat", r.handleChat)
 	r.v1Mux.HandleFunc("/v1/chat/stream", r.handleChatStream)
+	r.v1Mux.HandleFunc("/v1/chat/completions", r.handleChatCompletions)
 	r.v1Mux.HandleFunc("/v1/skills", r.handleSkills)
 	r.v1Mux.HandleFunc("/v1/executions", r.handleExecutions)
 	r.v1Mux.HandleFunc("/v1/sessions", r.handleListSessions)

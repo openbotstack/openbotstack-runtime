@@ -112,6 +112,13 @@ type ServerConfig struct {
 	Addr string `yaml:"addr"`
 }
 
+// ProvidersConfig is parsed from config.yaml for backward compatibility only.
+// It does NOT drive provider registration — providers are runtime-mutable
+// config stored in SQLite (provider_config table), loaded at startup by
+// InitAI/loadProvidersFromDB, and managed via the Admin API
+// (POST /v1/admin/providers). Environment variables (OBS_LLM_*) are not read.
+// If a non-empty providers section is present here, Load logs a warning so
+// operators know it is ignored.
 type ProvidersConfig struct {
 	LLM LLMConfig `yaml:"llm"`
 }
@@ -217,30 +224,11 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
-	// Override with Environment Variables
+	// Override with Environment Variables (static, deploy-time config only).
+	// Provider/API-key configuration is runtime-mutable and lives in SQLite,
+	// managed via the Admin API — see ADR-011 and InitAI's loadProvidersFromDB.
 	if val := os.Getenv("OBS_SERVER_ADDR"); val != "" {
 		cfg.Server.Addr = val
-	}
-
-	// LLM Overrides
-	if val := os.Getenv("OBS_LLM_PROVIDER"); val != "" {
-		cfg.Providers.LLM.Default = val
-	}
-
-	// OpenAI specific overrides (used as default or fallback)
-	if val := os.Getenv("OBS_LLM_API_KEY"); val != "" {
-		cfg.Providers.LLM.OpenAI.APIKey = val
-		cfg.Providers.LLM.ModelScope.APIKey = val
-		cfg.Providers.LLM.Claude.APIKey = val
-		cfg.Providers.LLM.SiliconFlow.APIKey = val
-	}
-	if val := os.Getenv("OBS_LLM_URL"); val != "" {
-		cfg.Providers.LLM.OpenAI.BaseURL = val
-		cfg.Providers.LLM.ModelScope.BaseURL = val
-	}
-	if val := os.Getenv("OBS_LLM_MODEL"); val != "" {
-		cfg.Providers.LLM.OpenAI.Model = val
-		cfg.Providers.LLM.ModelScope.Model = val
 	}
 
 	// Observability overrides

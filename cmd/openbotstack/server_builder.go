@@ -41,8 +41,6 @@ type ServerBuilder struct {
 	// Phase outputs
 	modelRouter     *router.DefaultRouter
 	providerFactory *providers.ProviderFactory
-	providerName    string
-	providerConfig  config.LLMProviderConfig
 	hostFuncs       *wasm.HostFunctions
 	exec            *executor.DefaultExecutor
 	dualPlanner     *plannerpkg.LLMPlanner

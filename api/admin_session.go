@@ -13,7 +13,10 @@ func (ar *AdminRouter) handleAdminSessions(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	query := `SELECT session_id, tenant_id, message_count as entry_count,
+	// The `sessions` table is the conversation-session summary table,
+	// maintained by DualWriteConversationStore.AppendMessage → UpsertSession on
+	// every turn. Query it directly for the admin cross-tenant view.
+	query := `SELECT session_id, tenant_id, message_count AS entry_count,
 		created_at, updated_at, last_message_preview
 		FROM sessions ORDER BY updated_at DESC`
 
@@ -46,14 +49,9 @@ func (ar *AdminRouter) handleAdminSessions(w http.ResponseWriter, r *http.Reques
 	var result []AdminSession
 	for rows.Next() {
 		var s AdminSession
-		if err := rows.Scan(&s.SessionID, &s.TenantID, &s.EntryCount, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		if err := rows.Scan(&s.SessionID, &s.TenantID, &s.EntryCount, &s.CreatedAt, &s.UpdatedAt, &s.LastEntry); err != nil {
 			continue
 		}
-		// Get last entry content
-		_ = ar.db.QueryRow(
-			"SELECT content FROM session_entries WHERE session_id = ? AND tenant_id = ? ORDER BY created_at DESC LIMIT 1",
-			s.SessionID, s.TenantID,
-		).Scan(&s.LastEntry)
 		result = append(result, s)
 	}
 	if result == nil {

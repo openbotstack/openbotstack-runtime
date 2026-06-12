@@ -5,6 +5,31 @@ export class AuthError extends Error {
   }
 }
 
+// uuid returns a RFC4122 v4 UUID. crypto.randomUUID() is only available in
+// secure contexts (HTTPS or localhost); when served over plain HTTP from a
+// remote host it is undefined and throws. Fall back to crypto.getRandomValues
+// (which IS available in non-secure contexts), then to Math.random.
+export function uuid(): string {
+  const c = (globalThis as { crypto?: Crypto }).crypto
+  if (c && typeof c.randomUUID === 'function') return c.randomUUID()
+  if (c && typeof c.getRandomValues === 'function') {
+    const b = c.getRandomValues(new Uint8Array(16))
+    b[6] = (b[6] & 0x0f) | 0x40
+    b[8] = (b[8] & 0x3f) | 0x80
+    const h = (n: number) => n.toString(16).padStart(2, '0')
+    return (
+      h(b[0]) + h(b[1]) + h(b[2]) + h(b[3]) + '-' +
+      h(b[4]) + h(b[5]) + '-' + h(b[6]) + h(b[7]) + '-' +
+      h(b[8]) + h(b[9]) + '-' +
+      h(b[10]) + h(b[11]) + h(b[12]) + h(b[13]) + h(b[14]) + h(b[15])
+    )
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, ch => {
+    const r = (Math.random() * 16) | 0
+    return (ch === 'x' ? r : (r & 0x3) | 0x8).toString(16)
+  })
+}
+
 export interface MeResponse {
   user_id: string
   tenant_id: string

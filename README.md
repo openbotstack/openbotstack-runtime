@@ -86,17 +86,46 @@ System-default skills in `skills/`. Example skills in `openbotstack-apps/example
 
 ## Configuration
 
-```bash
-# Minimal (API key only)
-OBS_LLM_API_KEY=sk-... ./openbotstack
+Configuration is split into **static** (deploy-time, environment variables) and
+**runtime-mutable** (stored in SQLite, managed via the Admin API) — per the
+12-factor guidance that env vars hold deploy-time config while values that
+change without a redeploy live in a data store.
 
-# With self-hosted provider
-OBS_LLM_PROVIDER=openai \
-OBS_LLM_URL=https://my-llm.example.com/v1 \
-OBS_LLM_API_KEY=sk-... \
-OBS_LLM_MODEL=Qwen3.6-35B \
+### Static config (environment variables)
+
+```bash
+# Minimal — start the server, then configure the LLM provider via the Admin API.
+OBS_SERVER_ADDR=:8080 \
+OBS_DATABASE_PATH=data/openbotstack.db \
+JWT_SECRET=$(openssl rand -hex 32) \
 ./openbotstack
 ```
+
+| Variable | Purpose |
+|----------|---------|
+| `OBS_SERVER_ADDR` | HTTP listen address (default `:8080`) |
+| `OBS_DATABASE_PATH` | SQLite DB path, parent dir auto-created |
+| `JWT_SECRET` | JWT signing secret (≥32 chars recommended) |
+| `OBS_LOG_LEVEL` | `debug` / `info` / `warn` / `error` |
+| `OBS_DB_ENCRYPTION_KEY` | AES-GCM key for provider API keys at rest (optional) |
+| `OBS_FILE_ALLOWED_DIRS` | Comma-separated dirs for builtin read/write tools |
+
+### Runtime-mutable config (Admin API)
+
+LLM providers (provider, base URL, API key, model) are **not** environment
+variables — they live in SQLite and are managed at runtime. On first start the
+server prints a one-time default admin API key; use it to register a provider:
+
+```bash
+# Register a provider (API key is encrypted at rest when OBS_DB_ENCRYPTION_KEY/JWT_SECRET is set)
+curl -X POST http://localhost:8080/v1/admin/providers \
+  -H "Authorization: Bearer obs_<admin-key-from-startup>" \
+  -H "Content-Type: application/json" \
+  -d '{"provider":"openai","base_url":"https://api.openai.com/v1","api_key":"sk-...","model":"gpt-4o","is_default":true}'
+```
+
+> **Breaking change:** `OBS_LLM_PROVIDER` / `OBS_LLM_API_KEY` / `OBS_LLM_URL` /
+> `OBS_LLM_MODEL` are no longer read. Configure providers via the Admin API instead.
 
 See the [Configuration Reference](https://github.com/openbotstack/openbotstack-docs/blob/main/config/README.md) for all options.
 
@@ -105,7 +134,8 @@ See the [Configuration Reference](https://github.com/openbotstack/openbotstack-d
 | Endpoint | Description |
 |----------|-------------|
 | `POST /v1/chat` | Chat (JSON response) |
-| `POST /v1/chat/stream` | Chat (SSE streaming) |
+| `POST /v1/chat/stream` | Chat (SSE streaming, rich progress events) |
+| `POST /v1/chat/completions` | **OpenAI-compatible** chat (stream + non-stream). Use any OpenAI SDK. |
 | `GET /v1/skills` | List skills |
 | `GET /v1/sessions` | List sessions |
 | `GET /v1/sessions/{id}/history` | Session history |
@@ -118,6 +148,26 @@ See the [Configuration Reference](https://github.com/openbotstack/openbotstack-d
 | `GET /metrics` | Prometheus metrics |
 
 Full API reference: [openbotstack-docs/api/README.md](https://github.com/openbotstack/openbotstack-docs/blob/main/api/README.md)
+
+### OpenAI-compatible endpoint (`/v1/chat/completions`)
+
+For third-party integration, use the OpenAI-compatible endpoint with any stock
+OpenAI SDK — point `base_url` at this server and pass your API key. The last
+`user` message drives the agent; internal planning/step events are **not**
+exposed on this wire, only assistant content deltas (standard OpenAI shape).
+
+```python
+from openai import OpenAI
+client = OpenAI(base_url="http://localhost:8080/v1", api_key="obs_<admin-key>")
+resp = client.chat.completions.create(
+    model="openbotstack",
+    messages=[{"role": "user", "content": "Summarize this document"}],
+)
+print(resp.choices[0].message.content)
+```
+
+Streaming (`stream=True`) emits `chat.completion.chunk` deltas terminated by
+`data: [DONE]`, identical to OpenAI's streaming contract.
 
 ## Documentation
 
