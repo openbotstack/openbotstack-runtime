@@ -81,14 +81,10 @@ func (r *LLMStepRunner) Run(ctx context.Context, step execution.ExecutionStep, e
 
 	pCtx := &planner.PlannerContext{UserRequest: userRequest}
 	if origCtx != nil {
-		pCtx = &planner.PlannerContext{
-			UserRequest:         userRequest,
-			Skills:              origCtx.Skills,
-			Soul:                origCtx.Soul,
-			AssistantID:         origCtx.AssistantID,
-			MemoryContext:       origCtx.MemoryContext,
-			ConversationHistory: origCtx.ConversationHistory,
-		}
+		// WithRequest copies every field (incl. TurnResults, ProgressFn) and
+		// replaces only UserRequest — avoids the fragile manual field-by-field
+		// copy that previously dropped TurnResults and ProgressFn.
+		pCtx = origCtx.WithRequest(userRequest)
 	}
 
 	rlResult, rlErr := r.reasoningLoop.Run(ctx, &step, pCtx, ec)

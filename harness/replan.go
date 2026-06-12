@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,14 +22,13 @@ func (h *ExecutionHarness) attemptReplan(
 	result *HarnessResult,
 	ec *execution.ExecutionContext,
 	checkResult ReplanCheckResult,
+	prevResults map[string]any,
 ) (newPlan *execution.ExecutionPlan, retErr error) {
 	defer func() {
 		if r := recover(); r != nil {
 			retErr = fmt.Errorf("replan panicked: %v", r)
 		}
 	}()
-
-	prevResults := h.buildPrevResults(result.StepResults)
 
 	pCtx := ec.PlannerContext()
 	if pCtx == nil {
@@ -74,7 +74,7 @@ func (h *ExecutionHarness) emitReplanAudit(
 	checkResult ReplanCheckResult,
 	ec *execution.ExecutionContext,
 ) {
-	if h.auditLogger == nil {
+	if ec == nil {
 		return
 	}
 
@@ -100,7 +100,17 @@ func (h *ExecutionHarness) emitReplanAudit(
 			"failed_step":      failedStep.Name,
 		},
 	}
-	if err := h.auditLogger.Log(ctx, event); err != nil {
-		h.emitProgress(ec, ProgressEvent{Type: "replan_audit_error", Content: err.Error()})
+
+	// Prefer the unified emitter (ADR-023). Fall back to legacy logger.
+	if h.auditEmitter != nil {
+		if err := h.auditEmitter.Emit(ctx, event); err != nil {
+			slog.WarnContext(ctx, "harness: failed to emit replan audit via emitter", "step", failedStep.Name, "error", err)
+		}
+		return
+	}
+	if h.auditLogger != nil {
+		if err := h.auditLogger.Log(ctx, event); err != nil {
+			h.emitProgress(ec, ProgressEvent{Type: "replan_audit_error", Content: err.Error()})
+		}
 	}
 }

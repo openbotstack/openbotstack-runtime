@@ -208,38 +208,37 @@ func (h *ExecutionHarness) Run(ctx context.Context, plan *execution.ExecutionPla
 		}
 
 		// Controlled Replan: after failure handler, check if replanning should occur.
-		stepStillFailed := stepResult != nil && stepResult.Error != nil
-		explicitSignal := hasExplicitReplanSignal(stepResult)
-		if h.replanner != nil && (execErr != nil || stepStillFailed || explicitSignal) {
-			checkResult := ShouldReplan(stepResult, execErr, replanCount, h.replanConfig, true)
-			if checkResult.ShouldReplan {
-				h.setState(HarnessReplan)
-				newPlan, replanErr := h.attemptReplan(ctx, plan, step, stepResult, execErr, result, ec, checkResult)
-				if replanErr == nil && newPlan != nil && len(newPlan.Steps) > 0 {
-					// Append the failed step result for audit trail before replacing.
-					if stepResult != nil {
-						result.StepResults = append(result.StepResults, *stepResult)
-						result.Metrics.TotalSteps++
-						if stepResult.Type == string(execution.StepTypeTool) || stepResult.Type == string(execution.StepTypeSkill) {
-							result.Metrics.TotalToolCalls++
-						}
-						h.emitStepAudit(ctx, step, stepResult, ec)
+		// ShouldReplan is the single source of truth — it gates on config, replanner
+		// availability, replan caps, and inspects the step result for errors or
+		// explicit replan signals. No need to pre-compute those conditions here.
+		checkResult := ShouldReplan(stepResult, execErr, replanCount, h.replanConfig, h.replanner != nil)
+		if checkResult.ShouldReplan {
+			h.setState(HarnessReplan)
+			newPlan, replanErr := h.attemptReplan(ctx, plan, step, stepResult, execErr, result, ec, checkResult, prevResults)
+			if replanErr == nil && newPlan != nil && len(newPlan.Steps) > 0 {
+				// Append the failed step result for audit trail before replacing.
+				if stepResult != nil {
+					result.StepResults = append(result.StepResults, *stepResult)
+					result.Metrics.TotalSteps++
+					if stepResult.Type == string(execution.StepTypeTool) || stepResult.Type == string(execution.StepTypeSkill) {
+						result.Metrics.TotalToolCalls++
 					}
-					// Replace remaining steps (from i+1 onwards) with new plan steps.
-					executed := activeSteps[:i+1]
-					activeSteps = make([]execution.ExecutionStep, len(executed)+len(newPlan.Steps))
-					copy(activeSteps, executed)
-					copy(activeSteps[len(executed):], newPlan.Steps)
-					replanCount++
-					result.ReplanCount = replanCount
-					result.PlanIDs = append(result.PlanIDs, newPlan.ID)
-					h.emitReplanAudit(ctx, plan, newPlan, step, checkResult, ec)
-					h.emitProgress(ec, ProgressEvent{Type: "step_replanned", Content: newPlan.ID})
-					// Continue loop — next iteration will execute first step of new plan.
-					continue
+					h.emitStepAudit(ctx, step, stepResult, ec)
 				}
-				// Replan failed; fall through to normal error/result handling.
+				// Replace remaining steps (from i+1 onwards) with new plan steps.
+				executed := activeSteps[:i+1]
+				activeSteps = make([]execution.ExecutionStep, len(executed)+len(newPlan.Steps))
+				copy(activeSteps, executed)
+				copy(activeSteps[len(executed):], newPlan.Steps)
+				replanCount++
+				result.ReplanCount = replanCount
+				result.PlanIDs = append(result.PlanIDs, newPlan.ID)
+				h.emitReplanAudit(ctx, plan, newPlan, step, checkResult, ec)
+				h.emitProgress(ec, ProgressEvent{Type: "step_replanned", Content: newPlan.ID})
+				// Continue loop — next iteration will execute first step of new plan.
+				continue
 			}
+			// Replan failed; fall through to normal error/result handling.
 		}
 
 		if stepResult != nil {
@@ -358,7 +357,7 @@ func (h *ExecutionHarness) dispatchStep(
 	case execution.StepTypeTool, execution.StepTypeSkill:
 		return h.executeStep(ctx, step, stepIndex, plan, ec, prevResults, stepTimeout)
 	case execution.StepTypeLLM:
-		return h.executeLLMStep(ctx, step, ec, result)
+		return h.executeLLMStep(ctx, step, ec, prevResults, result)
 	default:
 		err := fmt.Errorf("unknown step type: %s", step.Type)
 		return &execution.StepResult{
@@ -405,8 +404,7 @@ func (h *ExecutionHarness) executeStep(
 }
 
 // executeLLMStep handles LLM-type steps by delegating to LLMStepRunner.
-func (h *ExecutionHarness) executeLLMStep(ctx context.Context, step execution.ExecutionStep, ec *execution.ExecutionContext, result *HarnessResult) (*execution.StepResult, error) {
-	prevResults := h.buildPrevResults(result.StepResults)
+func (h *ExecutionHarness) executeLLMStep(ctx context.Context, step execution.ExecutionStep, ec *execution.ExecutionContext, prevResults map[string]any, result *HarnessResult) (*execution.StepResult, error) {
 	sr, metrics, turnData, err := h.llmStepRunner.Run(ctx, step, ec, prevResults)
 	if err != nil {
 		return sr, err
@@ -652,23 +650,11 @@ func (h *ExecutionHarness) waitForApproval(ctx context.Context, step execution.E
 	}
 }
 
-// snapshotStep creates a shallow copy of an ExecutionStep with a cloned Arguments map.
-// snapshotStepPtr wraps it and returns a pointer. Both prevent hooks from mutating
-// the frozen plan's step data.
+// snapshotStepPtr returns a defensive copy of the step so hooks cannot mutate the
+// frozen plan's step data. It delegates to execution.ExecutionStep.Clone(), which
+// shallow-copies the step and clones the Arguments map.
 func snapshotStepPtr(s execution.ExecutionStep) *execution.ExecutionStep {
-	cp := snapshotStep(s)
-	return &cp
-}
-
-func snapshotStep(s execution.ExecutionStep) execution.ExecutionStep {
-	cp := s
-	if s.Arguments != nil {
-		cp.Arguments = make(map[string]any, len(s.Arguments))
-		for k, v := range s.Arguments {
-			cp.Arguments[k] = v
-		}
-	}
-	return cp
+	return s.Clone()
 }
 
 // emitStepAudit records a step-level audit event with full step context.
