@@ -29,17 +29,38 @@ info()  { echo "$(ts) $*"; }
 warn()  { echo "$(ts) [WARN] $*" >&2; }
 
 bootstrap_info() {
+    local addr="${OBS_SERVER_ADDR:-:8080}"
+    # Expand :8080 → http://127.0.0.1:8080 for curl.
+    local base_url
+    if echo "${addr}" | grep -q '^:'; then
+        base_url="http://127.0.0.1${addr}"
+    elif echo "${addr}" | grep -q '^0\.0\.0\.0'; then
+        base_url="http://127.0.0.1:$(echo "${addr}" | cut -d: -f2-)"
+    else
+        base_url="http://${addr}"
+    fi
+
+    # Fetch version info from the running server.
+    local ver_info
+    ver_info=$(curl -s "${base_url}/version" 2>/dev/null || true)
+
     echo ""
     echo "══════════════════════════════════════════════════════════"
     echo "  OpenBotStack"
-    echo "  Version : $(./openbotstack version 2>/dev/null || echo unknown)"
+    if [ -n "${ver_info}" ]; then
+        echo "  Version : $(echo "${ver_info}" | grep -o '"version":"[^"]*"' | cut -d'"' -f4 || echo unknown)"
+        echo "  Commit  : $(echo "${ver_info}" | grep -o '"commit":"[^"]*"' | cut -d'"' -f4 || echo -)"
+        echo "  Go      : $(echo "${ver_info}" | grep -o '"go_version":"[^"]*"' | cut -d'"' -f4 || echo -)"
+    else
+        echo "  Version : unknown (server not reachable yet)"
+    fi
     echo "  PID     : $(cat "${PID_FILE}")"
-    echo "  Addr    : ${OBS_SERVER_ADDR:-:8080}"
+    echo "  Addr    : ${addr}"
     echo "  Log     : ${LOG_FILE}"
     echo "══════════════════════════════════════════════════════════"
 
     # On first run the binary prints a default admin API key to stdout.
-    # Capture it so the operator can save it.
+    # Capture it from the startup log so the operator can save it.
     local boot_log
     boot_log=$(head -100 "${LOG_FILE}" 2>/dev/null || true)
     local key_line
