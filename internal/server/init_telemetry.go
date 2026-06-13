@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"log/slog"
@@ -15,7 +15,11 @@ import (
 
 // InitTelemetry creates telemetry stores and wires instrumentor into harness hooks.
 func (b *ServerBuilder) InitTelemetry() *ServerBuilder {
+	if b.err != nil {
+		return b
+	}
 	b.requireInit("pdb", "InitTelemetry")
+
 	spanStore := store.NewRingBufferSpanStore(1000)
 	eventStore := store.NewRingBufferEventStore(500)
 	meter := coretelemetry.NewMemoryMeter()

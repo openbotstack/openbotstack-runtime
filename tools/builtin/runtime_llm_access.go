@@ -1,4 +1,4 @@
-package main
+package builtin
 
 import (
 	"context"
@@ -21,6 +21,7 @@ type RuntimeLLMAccess struct {
 	timeout   time.Duration
 }
 
+// NewRuntimeLLMAccess builds a production LLMAccess backed by the model router.
 func NewRuntimeLLMAccess(r *router.DefaultRouter, maxTokens int, timeout time.Duration) *RuntimeLLMAccess {
 	return &RuntimeLLMAccess{router: r, maxTokens: maxTokens, timeout: timeout}
 }

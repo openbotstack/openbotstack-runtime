@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"fmt"
@@ -10,7 +10,7 @@ import (
 	"github.com/openbotstack/openbotstack-runtime/persistence"
 )
 
-// loadProvidersFromDB reads provider_config rows from SQLite, decrypts API keys
+// LoadProvidersFromDB reads provider_config rows from SQLite, decrypts API keys
 // (when an encryption key is configured), and registers each provider that has a
 // non-empty key into the router. Returns the number of providers registered.
 //
@@ -19,7 +19,7 @@ import (
 // for static, deploy-time config (listen address, DB path, JWT secret). On a
 // fresh database the table is empty and no providers are registered; the
 // operator configures them after startup via POST /v1/admin/providers.
-func loadProvidersFromDB(pdb *persistence.DB, factory *providers.ProviderFactory, rtr *router.DefaultRouter) (int, error) {
+func LoadProvidersFromDB(pdb *persistence.DB, factory *providers.ProviderFactory, rtr *router.DefaultRouter) (int, error) {
 	rows, err := pdb.Query(`SELECT id, provider, base_url, api_key, model FROM provider_config ORDER BY is_default DESC, provider`)
 	if err != nil {
 		return 0, fmt.Errorf("query provider_config: %w", err)

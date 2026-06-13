@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"log/slog"
@@ -13,8 +13,12 @@ import (
 // seam for all audit events. The legacy AuditLogger is kept as a backward-compatible
 // field for the API layer's query/count operations.
 func (b *ServerBuilder) InitAudit() *ServerBuilder {
+	if b.err != nil {
+		return b
+	}
 	b.requireInit("pdb", "InitAudit")
 	b.requireInit("exec", "InitAudit")
+
 	// Create the SQLite-backed logger (provides both write and query)
 	sqliteLogger := audit.NewSQLiteAuditLogger(b.pdb.DB)
 	b.auditLogger = sqliteLogger

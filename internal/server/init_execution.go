@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"context"
@@ -9,18 +9,23 @@ import (
 	"github.com/openbotstack/openbotstack-core/ai/types"
 	plannerpkg "github.com/openbotstack/openbotstack-core/planner"
 	executor "github.com/openbotstack/openbotstack-runtime/executor/skill_executor"
+	"github.com/openbotstack/openbotstack-runtime/internal/skillutil"
 	"github.com/openbotstack/openbotstack-runtime/sandbox/wasm"
 	"github.com/openbotstack/openbotstack-runtime/toolrunner"
 )
 
 // InitExecution creates Wasm runtime, executor, host functions, and planner.
 func (b *ServerBuilder) InitExecution() *ServerBuilder {
+	if b.err != nil {
+		return b
+	}
 	b.requireInit("pdb", "InitExecution")
 	b.requireInit("modelRouter", "InitExecution")
+
 	wasmRuntime, err := wasm.NewRuntime()
 	if err != nil {
-		slog.Error("failed to initialize wasm runtime", "error", err)
-		os.Exit(1)
+		b.fail("failed to initialize wasm runtime", err)
+		return b
 	}
 
 	hostFuncs := &wasm.HostFunctions{
@@ -47,8 +52,8 @@ func (b *ServerBuilder) InitExecution() *ServerBuilder {
 	exec.SetTextGenerator(&executor.LLMTextGenerator{Router: b.modelRouter})
 
 	if err := wasmRuntime.RegisterHostFunctions(context.Background(), hostFuncs); err != nil {
-		slog.Error("failed to register host functions", "error", err)
-		os.Exit(1)
+		b.fail("failed to register host functions", err)
+		return b
 	}
 
 	skillsPath := os.Getenv("OBS_SKILLS_PATH")
@@ -59,7 +64,7 @@ func (b *ServerBuilder) InitExecution() *ServerBuilder {
 	if err := os.MkdirAll(skillsPath, 0755); err != nil {
 		slog.Warn("failed to create skills directory", "path", skillsPath, "error", err)
 	}
-	if err := loadSkills(context.Background(), exec, skillsPath); err != nil {
+	if err := skillutil.LoadSkills(context.Background(), exec, skillsPath); err != nil {
 		slog.Error("failed to load skills", "error", err)
 	}
 
@@ -77,7 +82,7 @@ func (b *ServerBuilder) InitExecution() *ServerBuilder {
 	b.registryClient = toolrunner.NewRegistryClient(b.cfg.Sandbox.ToolRegistryURL)
 
 	// Start skill watcher for hot-reload
-	skillWatcher := NewSkillWatcher(exec, skillsPath)
+	skillWatcher := skillutil.NewSkillWatcher(exec, skillsPath)
 	if err := skillWatcher.Start(context.Background()); err != nil {
 		slog.Warn("skill watcher failed to start, hot-reload disabled", "error", err)
 		skillWatcher = nil

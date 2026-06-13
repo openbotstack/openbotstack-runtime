@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"context"
@@ -17,16 +17,20 @@ var _ agentpkg.ConversationConfigurable = (*agentpkg.HarnessAgent)(nil)
 
 // InitMemory sets up Markdown store, conversation store, memory bridge, and context assembler.
 func (b *ServerBuilder) InitMemory() *ServerBuilder {
+	if b.err != nil {
+		return b
+	}
 	b.requireInit("pdb", "InitMemory")
 	b.requireInit("apiAgent", "InitMemory")
+
 	sessionStateStore := memory.NewSQLiteSessionStateStore(b.pdb.DB,
 		memory.WithStrictTenant(os.Getenv("OBS_AUTH_STRICT") == "true"),
 	)
 
 	markdownStore, err := memory.NewMarkdownMemoryStore(b.cfg.Memory.DataDir)
 	if err != nil {
-		slog.Error("failed to create markdown memory store", "error", err)
-		os.Exit(1)
+		b.fail("failed to create markdown memory store", err)
+		return b
 	}
 	slog.Info("markdown memory store initialized", "data_dir", b.cfg.Memory.DataDir)
 
@@ -72,19 +76,19 @@ func (b *ServerBuilder) InitMemory() *ServerBuilder {
 func (b *ServerBuilder) initVectorSearch(markdownStore *memory.MarkdownMemoryStore, memoryBridge *memory.MarkdownMemoryBridge, summarizingStore *memory.SummarizingConversationStore) {
 	pgPool, err := pgxpool.New(context.Background(), b.cfg.Vector.DatabaseURL)
 	if err != nil {
-		slog.Error("failed to parse vector database URL", "error", err)
-		os.Exit(1)
+		b.fail("failed to parse vector database URL", err)
+		return
 	}
 	if err := pgPool.Ping(context.Background()); err != nil {
-		slog.Error("failed to connect to vector database", "error", err)
 		pgPool.Close()
-		os.Exit(1)
+		b.fail("failed to connect to vector database", err)
+		return
 	}
 
 	vectorStore := memory.NewPgVectorStore(pgPool, b.cfg.Vector.Dimensions)
 	if err := vectorStore.Migrate(context.Background()); err != nil {
-		slog.Error("failed to migrate vector store", "error", err)
-		os.Exit(1)
+		b.fail("failed to migrate vector store", err)
+		return
 	}
 
 	embeddingSvc := memory.NewEmbeddingService(b.modelRouter, b.cfg.Vector.Model, b.cfg.Vector.Dimensions)

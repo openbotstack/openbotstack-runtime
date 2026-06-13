@@ -5,12 +5,19 @@
 package archguard
 
 import (
+	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// cmdDir is the runtime entrypoint package, relative to this test file.
+// It must stay thin: flag parsing plus a single call into the composition root.
+const cmdDir = "../cmd/openbotstack"
 
 // Core packages are at ../../openbotstack-core/ relative to this file.
 const coreRoot = "../../openbotstack-core"
@@ -210,5 +217,48 @@ func TestContract8_CoreNeverImportsRuntime(t *testing.T) {
 		coreRoot).Output()
 	if err == nil && len(out) > 0 {
 		t.Errorf("core package imports runtime — dependency violation:\n%s", string(out))
+	}
+}
+
+// =============================================================================
+// Contract 9: The cmd entrypoint (package main) declares no types.
+//
+// package main is non-importable, so any type trapped here is denied a seam —
+// it can be neither reused nor tested through its own interface. The entrypoint
+// must contain only flag parsing and a call into the composition root
+// (internal/server). This guard stops domain adapters and services from
+// accumulating in package main again.
+// =============================================================================
+
+func TestContract9_CmdEntrypointDeclaresNoTypes(t *testing.T) {
+	fset := token.NewFileSet()
+	// Full parse (not ImportsOnly) so type declarations are visible.
+	pkgs, err := parser.ParseDir(fset, cmdDir, func(fi os.FileInfo) bool {
+		return strings.HasSuffix(fi.Name(), ".go") && !strings.HasSuffix(fi.Name(), "_test.go")
+	}, 0)
+	if err != nil {
+		t.Fatalf("parse %s: %v", cmdDir, err)
+	}
+	if len(pkgs) == 0 {
+		t.Fatalf("no Go packages found in %s", cmdDir)
+	}
+	for _, pkg := range pkgs {
+		for fname, file := range pkg.Files {
+			for _, decl := range file.Decls {
+				genDecl, ok := decl.(*ast.GenDecl)
+				if !ok || genDecl.Tok != token.TYPE {
+					continue
+				}
+				for _, spec := range genDecl.Specs {
+					ts, ok := spec.(*ast.TypeSpec)
+					if !ok {
+						continue
+					}
+					t.Errorf("package main declares type %q in %s — "+
+						"domain types belong in an importable package, not the entrypoint",
+						ts.Name.Name, filepath.Base(fname))
+				}
+			}
+		}
 	}
 }

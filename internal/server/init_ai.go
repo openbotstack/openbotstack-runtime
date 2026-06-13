@@ -1,8 +1,7 @@
-package main
+package server
 
 import (
 	"log/slog"
-	"os"
 
 	"github.com/openbotstack/openbotstack-core/ai/providers"
 	"github.com/openbotstack/openbotstack-core/ai/router"
@@ -14,15 +13,18 @@ import (
 // reserved for static, deploy-time settings. On a fresh database no providers
 // are registered; configure them after startup.
 func (b *ServerBuilder) InitAI() *ServerBuilder {
+	if b.err != nil {
+		return b
+	}
 	b.requireInit("pdb", "InitAI")
 
 	modelRouter := router.NewDefaultRouter()
 	providerFactory := providers.NewProviderFactory()
 
-	n, err := loadProvidersFromDB(b.pdb, providerFactory, modelRouter)
+	n, err := LoadProvidersFromDB(b.pdb, providerFactory, modelRouter)
 	if err != nil {
-		slog.Error("failed to load providers from database", "error", err)
-		os.Exit(1)
+		b.fail("failed to load providers from database", err)
+		return b
 	}
 	if n == 0 {
 		slog.Warn("no providers configured — LLM features disabled. " +

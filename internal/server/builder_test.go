@@ -1,6 +1,8 @@
-package main
+package server
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/openbotstack/openbotstack-runtime/config"
@@ -21,7 +23,7 @@ func TestServerBuilder_RequireInit_Infrastructure(t *testing.T) {
 			t.Errorf("unexpected panic message: %s", msg)
 		}
 	}()
-	b := NewServerBuilder()
+	b := NewServerBuilder(Options{})
 	b.InitAI() // should panic: cfg is nil
 }
 
@@ -35,14 +37,11 @@ func TestServerBuilder_RequireInit_Execution(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected string panic, got %T: %v", r, r)
 		}
-		// Should complain about modelRouter (set by InitAI)
 		if msg != "ServerBuilder: InitExecution requires InitAI() to run first" {
 			t.Errorf("unexpected panic message: %s", msg)
 		}
 	}()
-	// Can't easily test partial init without real infrastructure,
-	// so test the requireInit function directly
-	b := NewServerBuilder()
+	b := NewServerBuilder(Options{})
 	b.requireInit("modelRouter", "InitExecution") // should panic
 }
 
@@ -60,12 +59,12 @@ func TestServerBuilder_RequireInit_Capabilities(t *testing.T) {
 			t.Errorf("unexpected panic message: %s", msg)
 		}
 	}()
-	b := NewServerBuilder()
+	b := NewServerBuilder(Options{})
 	b.requireInit("exec", "InitCapabilities")
 }
 
 func TestServerBuilder_RequireInit_NoPanicWhenSet(t *testing.T) {
-	b := NewServerBuilder()
+	b := NewServerBuilder(Options{})
 	// Simulate infrastructure init
 	b.cfg = &config.Config{}
 	b.pdb = &persistence.DB{}
@@ -93,6 +92,21 @@ func TestServerBuilder_RequireInit_DualPlanner(t *testing.T) {
 			t.Errorf("unexpected panic message: %s", msg)
 		}
 	}()
-	b := NewServerBuilder()
+	b := NewServerBuilder(Options{})
 	b.requireInit("dualPlanner", "InitAgent")
+}
+
+// TestBuild_MalformedConfigReturnsError pins Candidate 4: a startup failure
+// (here, malformed config) surfaces from Build as an error rather than
+// terminating the process. This makes the startup path testable.
+func TestBuild_MalformedConfigReturnsError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bad.yaml")
+	// Unterminated quoted scalar — a definite YAML scan error.
+	if err := os.WriteFile(path, []byte("server: \"unterminated"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Build(Options{ConfigPath: path})
+	if err == nil {
+		t.Fatal("expected error for malformed config, got nil")
+	}
 }

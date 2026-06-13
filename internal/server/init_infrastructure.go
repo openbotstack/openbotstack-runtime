@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"context"
@@ -13,10 +13,14 @@ import (
 
 // InitInfrastructure loads config, sets up logging, OpenTelemetry, and SQLite.
 func (b *ServerBuilder) InitInfrastructure() *ServerBuilder {
-	cfg, err := config.Load(*configPath)
+	if b.err != nil {
+		return b
+	}
+
+	cfg, err := config.Load(b.opts.ConfigPath)
 	if err != nil {
-		slog.Error("failed to load config", "error", err)
-		os.Exit(1)
+		b.fail("failed to load config", err)
+		return b
 	}
 
 	logLevel := parseLogLevel(cfg.Observability.LogLevel)
@@ -25,25 +29,25 @@ func (b *ServerBuilder) InitInfrastructure() *ServerBuilder {
 
 	otelCleanup, err := observability.Setup(context.Background(), cfg.Observability, "dev")
 	if err != nil {
-		slog.Error("failed to initialize OpenTelemetry", "error", err)
-		os.Exit(1)
+		b.fail("failed to initialize OpenTelemetry", err)
+		return b
 	}
 	if err := observability.InitMetrics(); err != nil {
-		slog.Error("failed to initialize OTel metrics", "error", err)
-		os.Exit(1)
+		b.fail("failed to initialize OTel metrics", err)
+		return b
 	}
 	if err := observability.InitAppMetrics(); err != nil {
-		slog.Error("failed to initialize app metrics", "error", err)
-		os.Exit(1)
+		b.fail("failed to initialize app metrics", err)
+		return b
 	}
 
-	if *listenAddr != ":8080" {
-		cfg.Server.Addr = *listenAddr
+	if b.opts.ListenAddr != ":8080" {
+		cfg.Server.Addr = b.opts.ListenAddr
 	}
 
 	slog.Info("starting openbotstack",
 		"addr", cfg.Server.Addr,
-		"mode", *runMode,
+		"mode", b.opts.RunMode,
 	)
 
 	dbPath := os.Getenv("OBS_DATABASE_PATH")
@@ -52,37 +56,39 @@ func (b *ServerBuilder) InitInfrastructure() *ServerBuilder {
 	}
 	pdb, err := persistence.Open(dbPath)
 	if err != nil {
-		slog.Error("failed to open database", "error", err)
-		os.Exit(1)
+		b.fail("failed to open database", err)
+		return b
 	}
 	if err := pdb.Migrate(); err != nil {
-		slog.Error("failed to migrate database", "error", err)
-		os.Exit(1)
+		b.fail("failed to migrate database", err)
+		return b
 	}
 	if err := pdb.MigrateSignatureColumn(); err != nil {
-		slog.Error("failed to migrate signature column", "error", err)
-		os.Exit(1)
+		b.fail("failed to migrate signature column", err)
+		return b
 	}
 	if err := pdb.MigrateStepContextColumns(); err != nil {
-		slog.Error("failed to migrate step context columns", "error", err)
-		os.Exit(1)
+		b.fail("failed to migrate step context columns", err)
+		return b
 	}
 	if err := pdb.MigrateAPIKeyRoleColumn(); err != nil {
-		slog.Error("failed to migrate api key role column", "error", err)
-		os.Exit(1)
+		b.fail("failed to migrate api key role column", err)
+		return b
 	}
 	slog.Info("sqlite database initialized", "path", dbPath)
 
 	if os.Getenv("OBS_SEED_DEFAULTS") != "false" {
 		seedKey, err := pdb.SeedDefaults()
 		if err != nil {
-			slog.Error("failed to seed defaults", "error", err)
-			os.Exit(1)
+			b.fail("failed to seed defaults", err)
+			return b
 		}
 		if seedKey != "" {
+			slog.Warn("default admin API key generated (save it, it won't be shown again)",
+				"tenant", "default", "user", "admin", "role", "admin")
+			// Printed to stdout so first-run operators can capture it.
 			fmt.Println("warning: Default admin API Key (save this, it won't be shown again):")
-			fmt.Printf("    %s\n", seedKey)
-			fmt.Println()
+			fmt.Println("    " + seedKey)
 			fmt.Println("    Tenant: default  User: admin  Role: admin")
 		}
 	}

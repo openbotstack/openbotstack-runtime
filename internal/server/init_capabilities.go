@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"context"
@@ -7,12 +7,17 @@ import (
 
 	"github.com/openbotstack/openbotstack-core/capability"
 	mcppkg "github.com/openbotstack/openbotstack-runtime/mcp"
+	builtintools "github.com/openbotstack/openbotstack-runtime/tools/builtin"
 )
 
 // InitCapabilities creates the CapabilityRegistry, registers skills and builtins,
 // then sets up MCPManager and MCPToolRunner.
 func (b *ServerBuilder) InitCapabilities() *ServerBuilder {
+	if b.err != nil {
+		return b
+	}
 	b.requireInit("exec", "InitCapabilities")
+
 	capRegistry := capability.NewMemoryCapabilityRegistry()
 	ctx := context.Background()
 
@@ -21,7 +26,7 @@ func (b *ServerBuilder) InitCapabilities() *ServerBuilder {
 
 	// Inject LLM access for vision_analyze and future LLMAwareTools.
 	if b.modelRouter != nil {
-		llmAccess := NewRuntimeLLMAccess(b.modelRouter, 2048, 60*time.Second)
+		llmAccess := builtintools.NewRuntimeLLMAccess(b.modelRouter, 2048, 60*time.Second)
 		builtinRunner.SetLLMAccess(llmAccess)
 		slog.Info("builtin tools: LLM access injected for vision-capable tools")
 	}

@@ -1,4 +1,4 @@
-package main
+package skillutil
 
 import (
 	"context"
@@ -91,12 +91,12 @@ func (w *SkillWatcher) Stop() {
 
 // Rescan performs a full rescan of the skills directory.
 func (w *SkillWatcher) Rescan(ctx context.Context) error {
-	return loadSkills(ctx, w.executor, w.skillsDir)
+	return LoadSkills(ctx, w.executor, w.skillsDir)
 }
 
 // RescanDir reloads a single skill directory.
 func (w *SkillWatcher) RescanDir(ctx context.Context, skillDir string) error {
-	skillID, err := loadSkillFromDir(ctx, w.executor, skillDir)
+	skillID, err := LoadSkillFromDir(ctx, w.executor, skillDir)
 	if err != nil {
 		return err
 	}
@@ -122,7 +122,7 @@ func (w *SkillWatcher) ReloadSkillByID(ctx context.Context, skillID string) erro
 		slog.Warn("skill reload: skill ID not found in watcher", "id", skillID)
 		return nil
 	}
-	newID, err := loadSkillFromDir(ctx, w.executor, skillDir)
+	newID, err := LoadSkillFromDir(ctx, w.executor, skillDir)
 	if err != nil {
 		return err
 	}
@@ -230,7 +230,7 @@ func (w *SkillWatcher) scheduleReload(skillDir string) {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		skillID, err := loadSkillFromDir(ctx, w.executor, skillDir)
+		skillID, err := LoadSkillFromDir(ctx, w.executor, skillDir)
 		if err != nil {
 			slog.Warn("skill hot-reload failed", "dir", skillDir, "error", err)
 		} else {
@@ -253,7 +253,7 @@ func (w *SkillWatcher) handleRemoval(skillDir string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if err := unloadSkillByDir(ctx, w.executor, skillDir); err != nil {
+	if err := UnloadSkillByDir(ctx, w.executor, skillDir); err != nil {
 		slog.Debug("skill hot-unload: skill not in executor (expected for untracked dirs)", "dir", skillDir)
 	} else {
 		slog.Info("skill hot-unloaded", "id", skillID, "dir", skillDir)

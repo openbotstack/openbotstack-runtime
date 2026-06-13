@@ -1,4 +1,6 @@
-package main
+// Package skillutil holds runtime-side skill plumbing: disk loading,
+// the in-process Skill implementation, and skill-type classification.
+package skillutil
 
 import (
 	"context"
@@ -13,9 +15,9 @@ import (
 	executor "github.com/openbotstack/openbotstack-runtime/executor/skill_executor"
 )
 
-// loadSkills scans the directory and loads skills into the executor.
+// LoadSkills scans the directory and loads skills into the executor.
 // SKILL.md is the primary file; manifest.yaml is optional.
-func loadSkills(ctx context.Context, exec *executor.DefaultExecutor, dir string) error {
+func LoadSkills(ctx context.Context, exec *executor.DefaultExecutor, dir string) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -29,16 +31,16 @@ func loadSkills(ctx context.Context, exec *executor.DefaultExecutor, dir string)
 			continue
 		}
 		skillDir := filepath.Join(dir, entry.Name())
-		if _, err := loadSkillFromDir(ctx, exec, skillDir); err != nil {
+		if _, err := LoadSkillFromDir(ctx, exec, skillDir); err != nil {
 			slog.Warn("failed to load skill", "dir", skillDir, "error", err)
 		}
 	}
 	return nil
 }
 
-// loadSkillFromDir loads a single skill from its directory into the executor.
+// LoadSkillFromDir loads a single skill from its directory into the executor.
 // Returns the skill ID on success.
-func loadSkillFromDir(ctx context.Context, exec *executor.DefaultExecutor, skillDir string) (string, error) {
+func LoadSkillFromDir(ctx context.Context, exec *executor.DefaultExecutor, skillDir string) (string, error) {
 	entryName := filepath.Base(skillDir)
 
 	smd, err := registry.ParseSkillMD(skillDir)
@@ -146,8 +148,8 @@ func loadSkillFromDir(ctx context.Context, exec *executor.DefaultExecutor, skill
 	return skillID, nil
 }
 
-// unloadSkillByDir unloads a skill identified by its directory path.
-func unloadSkillByDir(ctx context.Context, exec *executor.DefaultExecutor, skillDir string) error {
+// UnloadSkillByDir unloads a skill identified by its directory path.
+func UnloadSkillByDir(ctx context.Context, exec *executor.DefaultExecutor, skillDir string) error {
 	skillID := registry.DeriveSkillID(skillDir)
 	if err := exec.UnloadSkill(ctx, skillID); err != nil {
 		return fmt.Errorf("failed to unload skill %s: %w", skillID, err)
@@ -156,7 +158,7 @@ func unloadSkillByDir(ctx context.Context, exec *executor.DefaultExecutor, skill
 	return nil
 }
 
-// simpleSkill adapts parsed data to Skill interface
+// simpleSkill adapts parsed data to the Skill interface.
 type simpleSkill struct {
 	id            string
 	name          string

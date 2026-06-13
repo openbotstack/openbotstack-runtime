@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"path/filepath"
@@ -39,9 +39,9 @@ func TestLoadProvidersFromDB_Empty(t *testing.T) {
 	factory := providers.NewProviderFactory()
 	r := router.NewDefaultRouter()
 
-	n, err := loadProvidersFromDB(db, factory, r)
+	n, err := LoadProvidersFromDB(db, factory, r)
 	if err != nil {
-		t.Fatalf("loadProvidersFromDB: %v", err)
+		t.Fatalf("LoadProvidersFromDB: %v", err)
 	}
 	if n != 0 {
 		t.Fatalf("expected 0 providers from empty DB, got %d", n)
@@ -58,9 +58,9 @@ func TestLoadProvidersFromDB_PlaintextKey(t *testing.T) {
 	factory := providers.NewProviderFactory()
 	r := router.NewDefaultRouter()
 
-	n, err := loadProvidersFromDB(db, factory, r)
+	n, err := LoadProvidersFromDB(db, factory, r)
 	if err != nil {
-		t.Fatalf("loadProvidersFromDB: %v", err)
+		t.Fatalf("LoadProvidersFromDB: %v", err)
 	}
 	if n != 1 {
 		t.Fatalf("expected 1 provider registered, got %d", n)
@@ -78,9 +78,9 @@ func TestLoadProvidersFromDB_SkipsEmptyKey(t *testing.T) {
 	factory := providers.NewProviderFactory()
 	r := router.NewDefaultRouter()
 
-	n, err := loadProvidersFromDB(db, factory, r)
+	n, err := LoadProvidersFromDB(db, factory, r)
 	if err != nil {
-		t.Fatalf("loadProvidersFromDB: %v", err)
+		t.Fatalf("LoadProvidersFromDB: %v", err)
 	}
 	if n != 0 {
 		t.Fatalf("expected 0 providers (empty key skipped), got %d", n)
@@ -110,9 +110,9 @@ func TestLoadProvidersFromDB_DecryptsEncryptedKey(t *testing.T) {
 	factory := providers.NewProviderFactory()
 	r := router.NewDefaultRouter()
 
-	n, err := loadProvidersFromDB(db, factory, r)
+	n, err := LoadProvidersFromDB(db, factory, r)
 	if err != nil {
-		t.Fatalf("loadProvidersFromDB: %v", err)
+		t.Fatalf("LoadProvidersFromDB: %v", err)
 	}
 	if n != 1 {
 		t.Fatalf("expected 1 provider decrypted+registered, got %d", n)
@@ -127,9 +127,9 @@ func TestLoadProvidersFromDB_MultipleProviders(t *testing.T) {
 	factory := providers.NewProviderFactory()
 	r := router.NewDefaultRouter()
 
-	n, err := loadProvidersFromDB(db, factory, r)
+	n, err := LoadProvidersFromDB(db, factory, r)
 	if err != nil {
-		t.Fatalf("loadProvidersFromDB: %v", err)
+		t.Fatalf("LoadProvidersFromDB: %v", err)
 	}
 	if n != 2 {
 		t.Fatalf("expected 2 providers registered, got %d", n)

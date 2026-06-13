@@ -1,4 +1,7 @@
-package main
+// Package server is the OpenBotStack composition root: it owns phased
+// initialization of the runtime and wires the HTTP server. The package main
+// entrypoint is a thin shell that parses flags and calls Build.
+package server
 
 import (
 	"context"
@@ -14,8 +17,8 @@ import (
 	"github.com/openbotstack/openbotstack-core/capability"
 	"github.com/openbotstack/openbotstack-core/control/agent"
 	plannerpkg "github.com/openbotstack/openbotstack-core/planner"
-	"github.com/openbotstack/openbotstack-runtime/api"
 	coreaudit "github.com/openbotstack/openbotstack-core/audit"
+	"github.com/openbotstack/openbotstack-runtime/api"
 	rtAudit "github.com/openbotstack/openbotstack-runtime/audit"
 	"github.com/openbotstack/openbotstack-runtime/config"
 	executor "github.com/openbotstack/openbotstack-runtime/executor/skill_executor"
@@ -27,13 +30,33 @@ import (
 	"github.com/openbotstack/openbotstack-runtime/persistence"
 	"github.com/openbotstack/openbotstack-runtime/ratelimit"
 	"github.com/openbotstack/openbotstack-runtime/sandbox/wasm"
+	"github.com/openbotstack/openbotstack-runtime/internal/skillutil"
 	"github.com/openbotstack/openbotstack-runtime/toolrunner"
 	builtintools "github.com/openbotstack/openbotstack-runtime/tools/builtin"
 )
 
+// Options carries the deploy-time inputs the composition root needs. These are
+// the only values package main contributes; everything else is constructed here.
+type Options struct {
+	ConfigPath string
+	ListenAddr string
+	RunMode    string
+
+	// Build metadata injected via -ldflags.
+	Version   string
+	Commit    string
+	Branch    string
+	BuildTime string
+}
+
 // ServerBuilder encapsulates phased initialization of the OpenBotStack runtime.
-// Each Init* method stores outputs for later phases. Call Build() to produce ServerDeps.
+// Each Init* method stores outputs for later phases; any error is captured in
+// err and surfaces from BuildDeps. This replaces os.Exit-in-the-interface: the
+// chain is fully exercisable from tests.
 type ServerBuilder struct {
+	opts Options
+	err  error
+
 	cfg         *config.Config
 	pdb         *persistence.DB
 	otelCleanup func()
@@ -57,10 +80,20 @@ type ServerBuilder struct {
 	telemetry       *api.TelemetryHandler
 	auditLogger     *audit.SQLiteAuditLogger
 	auditEmitter    *coreaudit.AuditEmitter
-	skillWatcher    *SkillWatcher
+	skillWatcher    *skillutil.SkillWatcher
 }
 
-func NewServerBuilder() *ServerBuilder { return &ServerBuilder{} }
+// NewServerBuilder creates a builder seeded with the given options.
+func NewServerBuilder(opts Options) *ServerBuilder { return &ServerBuilder{opts: opts} }
+
+// fail records the first error and logs it. Subsequent failures are ignored so
+// the first root cause is what BuildDeps reports.
+func (b *ServerBuilder) fail(msg string, err error) {
+	if b.err == nil {
+		slog.Error(msg, "error", err)
+		b.err = fmt.Errorf("%s: %w", msg, err)
+	}
+}
 
 // requireInit panics with a descriptive message when a prerequisite phase hasn't run.
 // This turns silent nil-pointer dereferences into actionable error messages.
@@ -116,8 +149,13 @@ func (b *ServerBuilder) Cleanup() {
 	}
 }
 
-// Build assembles all phase outputs into ServerDeps.
-func (b *ServerBuilder) Build() ServerDeps {
+// BuildDeps assembles all phase outputs into ServerDeps. It returns the first
+// error captured by any init phase (instead of terminating the process).
+func (b *ServerBuilder) BuildDeps() (*ServerDeps, error) {
+	if b.err != nil {
+		return nil, b.err
+	}
+
 	// Compliance & governance
 	complianceSigningKey := os.Getenv("JWT_SECRET")
 	if len(complianceSigningKey) >= 32 {
@@ -140,7 +178,7 @@ func (b *ServerBuilder) Build() ServerDeps {
 		mcpAdminIfc = b.mcpManager
 	}
 
-	return ServerDeps{
+	return &ServerDeps{
 		Agent:               b.apiAgent,
 		Exec:                b.exec,
 		ModelRouter:         b.modelRouter,
@@ -158,7 +196,7 @@ func (b *ServerBuilder) Build() ServerDeps {
 		MCPAdmin:            mcpAdminIfc,
 		SkillWatcher:        b.skillWatcher,
 		CapRegistry:         b.capRegistry,
-	}
+	}, nil
 }
 
 // SkillAdmin returns a SkillAdminService for the admin API.
