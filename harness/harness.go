@@ -179,7 +179,11 @@ func (h *ExecutionHarness) Run(ctx context.Context, plan *execution.ExecutionPla
 			resolved := make(map[string]any, len(step.Arguments))
 			for k, v := range step.Arguments {
 				if s, ok := v.(string); ok {
-					resolved[k] = template.Resolve(s, prevResults)
+					if r, err := template.Resolve(s, prevResults); err == nil {
+						resolved[k] = r
+					} else {
+						resolved[k] = s
+					}
 				} else {
 					resolved[k] = v
 				}
