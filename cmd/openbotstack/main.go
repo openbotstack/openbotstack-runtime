@@ -19,7 +19,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -57,12 +56,6 @@ var (
 
 func main() {
 	flag.Parse()
-
-	// Load .env from the working directory so os.Getenv picks up values
-	// defined there. This is a development convenience; in production, env
-	// should be set by the process manager (systemd EnvironmentFile, docker
-	// --env-file, or a wrapper script like deploy/start.sh).
-	loadDotEnv(".env")
 
 	builder := NewServerBuilder()
 	builder.
@@ -272,36 +265,4 @@ func (s *Server) ListenAndServe() {
 	}
 
 	fmt.Println("openbotstack stopped")
-}
-
-// loadDotEnv reads a simple KEY=VALUE .env file and calls os.Setenv for each
-// line. Lines starting with # and empty lines are skipped. The file is silently
-// skipped if it doesn't exist. Values may be quoted with single or double quotes.
-func loadDotEnv(path string) {
-	f, err := os.ReadFile(path)
-	if err != nil {
-		return // file not found is fine
-	}
-	for _, line := range strings.Split(string(f), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		// Split on first = only (values may contain =).
-		idx := strings.IndexByte(line, '=')
-		if idx < 1 {
-			continue
-		}
-		key := strings.TrimSpace(line[:idx])
-		val := strings.TrimSpace(line[idx+1:])
-		// Strip surrounding quotes if present.
-		if len(val) >= 2 {
-			if (val[0] == '"' && val[len(val)-1] == '"') || (val[0] == '\'' && val[len(val)-1] == '\'') {
-				val = val[1 : len(val)-1]
-			}
-		}
-		if key != "" {
-			os.Setenv(key, val)
-		}
-	}
 }

@@ -1,116 +1,156 @@
 #!/usr/bin/env bash
-# start.sh — OpenBotStack production launcher
+# ctl.sh — OpenBotStack service controller
 #
 # Usage:
-#   ./start.sh              # start in foreground (default)
-#   ./start.sh --daemon      # start in background via nohup
-#   ./start.sh --status      # check if running
-#   ./start.sh --stop        # stop running instance
+#   ./ctl.sh start        Start in background, print bootstrap info
+#   ./ctl.sh stop         Graceful shutdown (SIGTERM → SIGKILL after 15s)
+#   ./ctl.sh status       Print running/stopped + pid
+#   ./ctl.sh restart      stop + start
+#   ./ctl.sh fg           Start in foreground (for debugging)
 #
-# Environment:
-#   Sources .env from the script directory before starting.
-#   Set OBS_PID_FILE to override the pid file location.
+# On first run (no database), the admin API key is extracted and displayed.
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-APP_DIR="${SCRIPT_DIR}/.."
-cd "${APP_DIR}"
+cd "$(dirname "$0")"
 
-PID_FILE="${OBS_PID_FILE:-/var/run/openbotstack.pid}"
-LOG_FILE="${OBS_LOG_FILE:-./logs/openbotstack.log}"
+PID_FILE="./openbotstack.pid"
+LOG_FILE="./logs/openbotstack.log"
 BINARY="./openbotstack"
 
 # ---- helpers ----------------------------------------------------------
 
 is_running() {
-    if [ -f "${PID_FILE}" ]; then
-        local pid
-        pid=$(cat "${PID_FILE}" 2>/dev/null || true)
-        if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
-            return 0
-        fi
-    fi
-    return 1
+    [ -f "${PID_FILE}" ] && kill -0 "$(cat "${PID_FILE}")" 2>/dev/null
 }
 
-log_msg() { printf '[%(%Y-%m-%d %H:%M:%S)T] %s\n' -1 "$*"; }
+ts() { printf '[%(%m-%d %H:%M:%S)T] ' -1; }
+info()  { echo "$(ts) $*"; }
+warn()  { echo "$(ts) [WARN] $*" >&2; }
 
-# ---- commands ---------------------------------------------------------
+bootstrap_info() {
+    echo ""
+    echo "══════════════════════════════════════════════════════════"
+    echo "  OpenBotStack"
+    echo "  Version : $(./openbotstack version 2>/dev/null || echo unknown)"
+    echo "  PID     : $(cat "${PID_FILE}")"
+    echo "  Addr    : ${OBS_SERVER_ADDR:-:8080}"
+    echo "  Log     : ${LOG_FILE}"
+    echo "══════════════════════════════════════════════════════════"
 
-do_start() {
+    # On first run the binary prints a default admin API key to stdout.
+    # Capture it so the operator can save it.
+    local boot_log
+    boot_log=$(head -100 "${LOG_FILE}" 2>/dev/null || true)
+    local key_line
+    key_line=$(echo "${boot_log}" | grep -o 'obs_[a-f0-9]\{32\}' | head -1 || true)
+    if [ -n "${key_line}" ]; then
+        echo ""
+        echo "  ╔════════════════════════════════════════════════════╗"
+        echo "  ║  FIRST RUN — Default Admin API Key               ║"
+        echo "  ║  ${key_line}              ║"
+        echo "  ║  Tenant: default  User: admin  Role: admin       ║"
+        echo "  ║  SAVE THIS KEY — it will not be shown again.     ║"
+        echo "  ╚════════════════════════════════════════════════════╝"
+        echo ""
+    fi
+}
+
+# ---- commands ----------------------------------------------------------
+
+cmd_start() {
     if is_running; then
-        log_msg "openbotstack is already running (pid $(cat "${PID_FILE}"))"
+        warn "already running (pid $(cat "${PID_FILE}"))"
         exit 1
     fi
 
-    # Source .env from the app directory (exports vars for the binary).
+    # Source .env if present.
     if [ -f .env ]; then
-        set -a
-        # shellcheck source=/dev/null
-        source .env
-        set +a
+        set -a; source .env; set +a
     fi
 
-    # Ensure runtime directories exist.
+    # Ensure runtime directories.
     mkdir -p logs data/skills
 
-    if [ "${1:-}" = "--daemon" ]; then
-        log_msg "Starting openbotstack in background..."
-        nohup "${BINARY}" >> "${LOG_FILE}" 2>&1 &
-        echo $! > "${PID_FILE}"
-        sleep 1
-        if is_running; then
-            log_msg "openbotstack started (pid $(cat "${PID_FILE}"))"
-        else
-            log_msg "FAILED to start openbotstack — check ${LOG_FILE}"
-            exit 1
-        fi
-    else
-        log_msg "Starting openbotstack (foreground)..."
-        exec "${BINARY}"
+    info "starting..."
+    nohup "${BINARY}" >> "${LOG_FILE}" 2>&1 &
+    echo $! > "${PID_FILE}"
+
+    # Wait for the binary to either bind its port or crash.
+    sleep 2
+    if ! is_running; then
+        warn "FAILED — check ${LOG_FILE}"
+        tail -20 "${LOG_FILE}"
+        rm -f "${PID_FILE}"
+        exit 1
     fi
+
+    info "started (pid $(cat "${PID_FILE}"))"
+    bootstrap_info
 }
 
-do_stop() {
+cmd_stop() {
     if ! is_running; then
-        log_msg "openbotstack is not running"
+        info "not running"
         rm -f "${PID_FILE}"
         return 0
     fi
-    local pid
-    pid=$(cat "${PID_FILE}")
-    log_msg "Stopping openbotstack (pid ${pid})..."
+    local pid; pid=$(cat "${PID_FILE}")
+    info "stopping (pid ${pid})..."
     kill "${pid}" 2>/dev/null || true
-    # Wait up to 15s for graceful shutdown.
     for _ in $(seq 1 15); do
-        if ! kill -0 "${pid}" 2>/dev/null; then
-            rm -f "${PID_FILE}"
-            log_msg "openbotstack stopped"
-            return 0
-        fi
+        kill -0 "${pid}" 2>/dev/null || { rm -f "${PID_FILE}"; info "stopped"; return 0; }
         sleep 1
     done
-    # Force kill if still alive.
-    log_msg "Force killing openbotstack..."
+    warn "force-killing (pid ${pid})"
     kill -9 "${pid}" 2>/dev/null || true
     rm -f "${PID_FILE}"
-    log_msg "openbotstack force-stopped"
+    info "force-stopped"
 }
 
-do_status() {
+cmd_status() {
     if is_running; then
-        log_msg "openbotstack is running (pid $(cat "${PID_FILE}"))"
+        local pid; pid=$(cat "${PID_FILE}")
+        info "running (pid ${pid})"
+        # Show recent log tail for quick health check.
+        echo "  --- last 5 log lines ---"
+        tail -5 "${LOG_FILE}" 2>/dev/null | sed 's/^/  /' || true
     else
-        log_msg "openbotstack is NOT running"
+        info "stopped"
     fi
+}
+
+cmd_restart() {
+    cmd_stop
+    sleep 1
+    cmd_start
+}
+
+cmd_fg() {
+    if [ -f .env ]; then
+        set -a; source .env; set +a
+    fi
+    mkdir -p logs data/skills
+    info "starting in foreground..."
+    exec "${BINARY}"
 }
 
 # ---- main -------------------------------------------------------------
 
 case "${1:-}" in
-    --stop)     do_stop ;;
-    --status)   do_status ;;
-    --help|-h)  sed -n '2,/^$/p' "$0" ;;
-    *)          do_start "${1:-}" ;;
+    start)    cmd_start ;;
+    stop)     cmd_stop ;;
+    status)   cmd_status ;;
+    restart)  cmd_restart ;;
+    fg)       cmd_fg ;;
+    *)
+        echo "Usage: $0 {start|stop|status|restart|fg}"
+        echo ""
+        echo "  start    Start in background, print bootstrap info"
+        echo "  stop     Graceful shutdown"
+        echo "  status   Show running/stopped + recent logs"
+        echo "  restart  stop + start"
+        echo "  fg       Foreground mode (for debugging)"
+        exit 1
+        ;;
 esac
