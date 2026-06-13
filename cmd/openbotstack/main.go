@@ -58,10 +58,10 @@ var (
 func main() {
 	flag.Parse()
 
-	// Load .env files at startup so os.Getenv picks up values from them.
-	// Priority: /opt/obs/.env first, then ./.env (latter wins on conflict).
-	// This is a minimal inline parser — no third-party dependency.
-	loadDotEnv("/opt/obs/.env")
+	// Load .env from the working directory so os.Getenv picks up values
+	// defined there. This is a development convenience; in production, env
+	// should be set by the process manager (systemd EnvironmentFile, docker
+	// --env-file, or a wrapper script like deploy/start.sh).
 	loadDotEnv(".env")
 
 	builder := NewServerBuilder()
