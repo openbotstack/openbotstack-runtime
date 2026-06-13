@@ -148,6 +148,23 @@ func TestChatCompletions_Streaming_OpenAISSEFormat(t *testing.T) {
 	}
 }
 
+// TestChatCompletions_AgentNotConfigured verifies the 503 path on the
+// OpenAI-compatible endpoint. The C1 refactor routed this endpoint through the
+// shared agentRequest helper; without this test a nil-deref regression here
+// would go uncaught.
+func TestChatCompletions_AgentNotConfigured(t *testing.T) {
+	handler := api.NewRouter(api.RouterConfig{}) // no Agent
+	body := `{"model":"x","messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d (agent not configured)", rr.Code, http.StatusServiceUnavailable)
+	}
+}
+
 // TestChatCompletions_RequiresAuth verifies the OpenAI endpoint is gated by
 // the v1 auth middleware — a rejecting middleware must yield 401. This is the
 // endpoint third parties hit with stock SDKs, so an auth regression is

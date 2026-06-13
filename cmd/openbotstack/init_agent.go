@@ -14,6 +14,7 @@ import (
 func (b *ServerBuilder) InitAgent() *ServerBuilder {
 	b.requireInit("exec", "InitAgent")
 	b.requireInit("modelRouter", "InitAgent")
+	b.requireInit("dualPlanner", "InitAgent")
 	b.requireInit("auditLogger", "InitAgent")
 	art := &assistant.AssistantRuntime{AssistantID: "default"}
 

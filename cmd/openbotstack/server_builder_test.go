@@ -74,3 +74,25 @@ func TestServerBuilder_RequireInit_NoPanicWhenSet(t *testing.T) {
 	b.requireInit("cfg", "test")
 	b.requireInit("pdb", "test")
 }
+
+// TestServerBuilder_RequireInit_DualPlanner verifies the dualPlanner guard
+// exists. dualPlanner is set by InitExecution and consumed by InitAgent; the
+// requireInit mechanism exists precisely to catch reordering with an actionable
+// panic instead of a silent nil dereference.
+func TestServerBuilder_RequireInit_DualPlanner(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic when dualPlanner is nil, got none")
+		}
+		msg, ok := r.(string)
+		if !ok {
+			t.Fatalf("expected string panic, got %T: %v", r, r)
+		}
+		if msg != "ServerBuilder: InitAgent requires InitExecution() to run first" {
+			t.Errorf("unexpected panic message: %s", msg)
+		}
+	}()
+	b := NewServerBuilder()
+	b.requireInit("dualPlanner", "InitAgent")
+}

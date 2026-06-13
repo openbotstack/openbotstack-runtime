@@ -82,6 +82,10 @@ func (b *ServerBuilder) requireInit(field string, caller string) {
 		if b.exec == nil {
 			panic(fmt.Sprintf("ServerBuilder: %s requires InitExecution() to run first", caller))
 		}
+	case "dualPlanner":
+		if b.dualPlanner == nil {
+			panic(fmt.Sprintf("ServerBuilder: %s requires InitExecution() to run first", caller))
+		}
 	case "auditLogger":
 		if b.auditLogger == nil {
 			panic(fmt.Sprintf("ServerBuilder: %s requires InitAudit() to run first", caller))

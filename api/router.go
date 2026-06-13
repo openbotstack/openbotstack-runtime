@@ -157,6 +157,37 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("/", r.handleNotFound)
 }
 
+// agentRequest is the shared preamble for all three chat endpoints
+// (/v1/chat, /v1/chat/stream, /v1/chat/completions): it guards on agent
+// availability and assembles an agent.MessageRequest from the supplied
+// identity + message, with the authenticated context identity overriding
+// tenant/user. Each endpoint still does its own method guard (must precede
+// body decode so a GET yields 405, not 400) and its own request decoding.
+// Returns ok=false after writing a 503.
+func (r *Router) agentRequest(w http.ResponseWriter, req *http.Request, tenantID, userID, sessionID, message string) (agent.MessageRequest, bool) {
+	if r.agent == nil {
+		slog.ErrorContext(req.Context(), "handler error",
+			"method", req.Method,
+			"path", req.URL.Path,
+			"status", http.StatusServiceUnavailable,
+			"error", "agent not configured",
+		)
+		writeAPIError(w, http.StatusServiceUnavailable, ErrAgentNotConfigured, "agent not configured")
+		return agent.MessageRequest{}, false
+	}
+	ar := agent.MessageRequest{
+		TenantID:  tenantID,
+		UserID:    userID,
+		SessionID: sessionID,
+		Message:   message,
+	}
+	if user, ok := middleware.UserFromContext(req.Context()); ok {
+		ar.TenantID = user.TenantID
+		ar.UserID = user.ID
+	}
+	return ar, true
+}
+
 func (r *Router) handleChat(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {
 		slog.WarnContext(req.Context(), "request validation error",
@@ -195,28 +226,9 @@ func (r *Router) handleChat(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Delegate entirely to Agent - NO skill selection logic here
-	if r.agent == nil {
-		slog.ErrorContext(req.Context(), "handler error",
-			"method", req.Method,
-			"path", req.URL.Path,
-			"status", http.StatusServiceUnavailable,
-			"error", "agent not configured",
-		)
-		writeAPIError(w, http.StatusServiceUnavailable, ErrAgentNotConfigured, "agent not configured")
+	agentReq, ok := r.agentRequest(w, req, chatReq.TenantID, chatReq.UserID, chatReq.SessionID, chatReq.Message)
+	if !ok {
 		return
-	}
-
-	agentReq := agent.MessageRequest{
-		TenantID:  chatReq.TenantID,
-		UserID:    chatReq.UserID,
-		SessionID: chatReq.SessionID,
-		Message:   chatReq.Message,
-	}
-
-	// Authenticated identity overrides request body
-	if user, ok := middleware.UserFromContext(req.Context()); ok {
-		agentReq.TenantID = user.TenantID
-		agentReq.UserID = user.ID
 	}
 
 	agentResp, err := r.agent.HandleMessage(req.Context(), agentReq)
@@ -268,22 +280,9 @@ func (r *Router) handleChatStream(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if r.agent == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, ErrAgentNotConfigured, "agent not configured")
+	agentReq, ok := r.agentRequest(w, req, chatReq.TenantID, chatReq.UserID, chatReq.SessionID, chatReq.Message)
+	if !ok {
 		return
-	}
-
-	agentReq := agent.MessageRequest{
-		TenantID:  chatReq.TenantID,
-		UserID:    chatReq.UserID,
-		SessionID: chatReq.SessionID,
-		Message:   chatReq.Message,
-	}
-
-	// Authenticated identity overrides request body
-	if user, ok := middleware.UserFromContext(req.Context()); ok {
-		agentReq.TenantID = user.TenantID
-		agentReq.UserID = user.ID
 	}
 
 	// Create a single SSE handler for the entire stream lifecycle.

@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/openbotstack/openbotstack-core/control/agent"
-	"github.com/openbotstack/openbotstack-runtime/api/middleware"
 )
 
 // OpenAIChatRequest mirrors the OpenAI Chat Completions request shape so
@@ -39,11 +38,10 @@ func (r *Router) handleChatCompletions(w http.ResponseWriter, req *http.Request)
 		writeAPIError(w, http.StatusMethodNotAllowed, ErrMethodNotAllowed, "method not allowed")
 		return
 	}
-	if r.agent == nil {
-		writeAPIError(w, http.StatusServiceUnavailable, ErrAgentNotConfigured, "agent not configured")
-		return
-	}
 
+	// Decode precedes the agent-availability guard (in agentRequest below),
+	// matching /v1/chat and /v1/chat/stream. A malformed body on an
+	// agent-less server yields 400, not 503 — consistent across endpoints.
 	var body OpenAIChatRequest
 	req.Body = http.MaxBytesReader(w, req.Body, 1<<20)
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
@@ -56,10 +54,9 @@ func (r *Router) handleChatCompletions(w http.ResponseWriter, req *http.Request)
 		return
 	}
 
-	agentReq := agent.MessageRequest{Message: userMsg}
-	if user, ok := middleware.UserFromContext(req.Context()); ok {
-		agentReq.TenantID = user.TenantID
-		agentReq.UserID = user.ID
+	agentReq, ok := r.agentRequest(w, req, "", "", "", userMsg)
+	if !ok {
+		return
 	}
 
 	completionID := "chatcmpl-" + uuid.NewString()
