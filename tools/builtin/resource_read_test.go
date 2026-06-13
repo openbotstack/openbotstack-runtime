@@ -369,3 +369,33 @@ func TestResourceReadTool_MarkdownPreserved(t *testing.T) {
 		t.Errorf("markdown paragraph lost: %q", text)
 	}
 }
+
+func TestResourceReadTool_ContentAlias(t *testing.T) {
+	// Verify the "content" alias is present and mirrors "text".
+	// The planner uses {{builtin.resource_read.content}} — this must work.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte("alias test content"))
+	}))
+	defer srv.Close()
+
+	tool := &ResourceReadTool{
+		Timeout:         5 * time.Second,
+		MaxBytes:        1024 * 1024,
+		allowPrivateIPs: true,
+	}
+
+	result, err := tool.Execute(context.Background(), map[string]any{"url": srv.URL})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	text, _ := result["text"].(string)
+	content, _ := result["content"].(string)
+	if text != content {
+		t.Errorf("content alias must mirror text: text=%q content=%q", text, content)
+	}
+	if content != "alias test content" {
+		t.Errorf("content alias: got %q, want %q", content, "alias test content")
+	}
+}

@@ -30,7 +30,11 @@ type ResourceReadTool struct {
 }
 
 func (t *ResourceReadTool) Name() string        { return "resource_read" }
-func (t *ResourceReadTool) Description() string { return "Fetches a resource (URL) and returns a structured Document with extracted text, title, content type, and layout classification." }
+func (t *ResourceReadTool) Description() string {
+	return "Fetches a resource (URL) and returns a structured Document. " +
+		"Return fields: content (extracted text, alias for text), text, title, source, content_type, layout, images, metadata, truncated, note. " +
+		"Use {{builtin.resource_read.content}} or {{resource_read.text}} to access extracted text."
+}
 func (t *ResourceReadTool) Parameters() map[string]string {
 	return map[string]string{"url": "string"}
 }
@@ -85,7 +89,10 @@ func (t *ResourceReadTool) Execute(ctx context.Context, input map[string]any) (m
 	return documentToMap(doc)
 }
 
-// documentToMap converts a resource.Document to map[string]any via JSON.
+// documentToMap converts a resource.Document to map[string]any via JSON,
+// adding a "content" alias for "text" so that {{resource_read.content}}
+// works in planner templates (planner guesses field names; "content" matches
+// read_file and web_fetch conventions).
 func documentToMap(doc resource.Document) (map[string]any, error) {
 	b, err := json.Marshal(doc)
 	if err != nil {
@@ -94,6 +101,10 @@ func documentToMap(doc resource.Document) (map[string]any, error) {
 	var result map[string]any
 	if err := json.Unmarshal(b, &result); err != nil {
 		return nil, fmt.Errorf("resource_read: unmarshal document: %w", err)
+	}
+	// Alias: planner uses {{step.content}}, Document stores text under "text".
+	if text, ok := result["text"]; ok {
+		result["content"] = text
 	}
 	return result, nil
 }
