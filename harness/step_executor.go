@@ -121,7 +121,9 @@ func (se *StepExecutor) ExecuteTool(
 	if n := cloned.CoerceStringNumbers(); n > 0 {
 		slog.DebugContext(ctx, "step_executor: coerced argument types", "step", cloned.Name, "count", n)
 	}
-	cloned.ResolveArguments(prevResults)
+	if err := cloned.ResolveArguments(prevResults); err != nil {
+		return nil, fmt.Errorf("step %q: %w", cloned.Name, err)
+	}
 
 	start := time.Now()
 
@@ -207,7 +209,9 @@ func (se *StepExecutor) ExecuteSkill(
 	if n := cloned.CoerceStringNumbers(); n > 0 {
 		slog.DebugContext(ctx, "step_executor: coerced argument types", "step", cloned.Name, "count", n)
 	}
-	cloned.ResolveArguments(prevResults)
+	if err := cloned.ResolveArguments(prevResults); err != nil {
+		return nil, fmt.Errorf("step %q: %w", cloned.Name, err)
+	}
 
 	start := time.Now()
 
@@ -342,7 +346,9 @@ func (h *prefixHandler) Handle(
 	// ran CoerceStringNumbers, but we still need ResolveArguments here
 	// because prefixHandler is also invoked directly from Dispatch.
 	if prevResults != nil && len(prevResults) > 0 {
-		step.ResolveArguments(prevResults)
+		if err := step.ResolveArguments(prevResults); err != nil {
+			return nil, fmt.Errorf("step %q: %w", step.Name, err)
+		}
 	}
 	return runToolWithTimeout(ctx, h.runner, step, ec, stepTimeout)
 }

@@ -11,9 +11,9 @@ import (
 	"github.com/dslipak/pdf"
 )
 
-// pdfTextOpRe matches PDF text-showing operators: (string) Tj, (string) ',
-// and array-of-strings TJ.
-var pdfTextOpRe = regexp.MustCompile(`\(([^)]*)\)\s*Tj|\(([^)]*)\)\s*'`)
+// pdfTextOpRe matched PDF text-showing operators; retained for reference but
+// the fallback now uses a balanced-paren scanner (extractPDFStrings) that
+// correctly handles escaped parens — see extractPDFStreamsFallback.
 
 // extractPDF parses a PDF file and extracts its text content.
 // It also classifies the layout:
@@ -24,6 +24,10 @@ var pdfTextOpRe = regexp.MustCompile(`\(([^)]*)\)\s*Tj|\(([^)]*)\)\s*'`)
 // PDF limitations are explicitly surfaced via Document.Note:
 //   - two-column → "Possible two-column PDF. Extraction order may not be perfect."
 //   - scanned → "Scanned PDF. No extractable text. OCR/vision recommended."
+// pdfExtractionTimeout bounds how long the dslipak/pdf library may run. If it
+// exceeds this, we fall back to regex stream extraction.
+const pdfExtractionTimeout = 10 * time.Second
+
 func extractPDF(data []byte) Document {
 	doc := Document{
 		ContentType: ContentTypePDF,
@@ -32,15 +36,23 @@ func extractPDF(data []byte) Document {
 
 	slog.Debug("pdf: extracting", "size_bytes", len(data))
 
-	// dslipak/pdf can panic or hang on malformed input. Run it in a
-	// goroutine with a timeout; fall back to regex stream extraction
-	// if the library fails to produce a result in time.
-	result := &doc
+	// dslipak/pdf can panic or hang on malformed input. Run it in a goroutine
+	// with a timeout; fall back to regex stream extraction if it fails.
+	//
+	// Goroutine-leak note: dslipak/pdf takes an io.ReaderAt and has no context
+	// support, so on timeout the goroutine cannot be cancelled directly. To
+	// bound it, we wrap the bytes in a deadlineReaderAt: after the deadline,
+	// every ReadAt returns an error, which forces the library's internal reads
+	// to fail and the goroutine to exit — rather than spinning forever on a
+	// malformed file. Worst case is a brief tail until the next ReadAt fires.
+	deadline := time.Now().Add(pdfExtractionTimeout)
+	src := &deadlineReaderAt{data: data, deadline: deadline}
+
 	type pdfResult struct {
-		text      string
-		numPages  int
-		reader    *pdf.Reader
-		err       error
+		text     string
+		numPages int
+		reader   *pdf.Reader
+		err      error
 	}
 	ch := make(chan pdfResult, 1)
 	go func() {
@@ -49,7 +61,7 @@ func extractPDF(data []byte) Document {
 				ch <- pdfResult{err: fmt.Errorf("panic: %v", r)}
 			}
 		}()
-		r, err := pdf.NewReader(bytes.NewReader(data), int64(len(data)))
+		r, err := pdf.NewReader(src, int64(len(data)))
 		if err != nil {
 			ch <- pdfResult{err: err}
 			return
@@ -79,11 +91,11 @@ func extractPDF(data []byte) Document {
 			slog.Warn("pdf: library failed, trying fallback", "error", pr.err, "size_bytes", len(data))
 			text := extractPDFStreamsFallback(data)
 			if text != "" {
-				result.Text = text
-				result.Note = fmt.Sprintf("PDF library parse failed (%v); used stream text extraction — output may be incomplete", pr.err)
+				doc.Text = text
+				doc.Note = fmt.Sprintf("PDF library parse failed (%v); used stream text extraction — output may be incomplete", pr.err)
 				slog.Info("pdf: fallback succeeded", "text_len", len(text))
 			} else {
-				result.Note = fmt.Sprintf("PDF extraction failed: %v", pr.err)
+				doc.Note = fmt.Sprintf("PDF extraction failed: %v", pr.err)
 				slog.Warn("pdf: fallback also failed", "error", pr.err)
 			}
 			return doc
@@ -101,11 +113,11 @@ func extractPDF(data []byte) Document {
 		// Detect scanned PDF: little to no text, images present.
 		imageCount := countPDFImages(pr.reader, pr.numPages)
 		if len(pr.text) < 50 && imageCount > 0 {
-			result.Layout = LayoutScanned
-			result.Note = "Scanned PDF. No extractable text. OCR/vision recommended."
-			result.Images = make([]ImageRef, 0, imageCount)
+			doc.Layout = LayoutScanned
+			doc.Note = "Scanned PDF. No extractable text. OCR/vision recommended."
+			doc.Images = make([]ImageRef, 0, imageCount)
 			for i := 0; i < imageCount; i++ {
-				result.Images = append(result.Images, ImageRef{Page: i + 1})
+				doc.Images = append(doc.Images, ImageRef{Page: i + 1})
 			}
 			slog.Info("pdf: detected scanned", "pages", pr.numPages, "images", imageCount)
 			return doc
@@ -113,21 +125,21 @@ func extractPDF(data []byte) Document {
 
 		// Detect two-column layout.
 		if detectTwoColumn(pr.reader, pr.numPages) {
-			result.Layout = LayoutTwoColumn
-			result.Note = "Possible two-column PDF. Extraction order may not be perfect."
+			doc.Layout = LayoutTwoColumn
+			doc.Note = "Possible two-column PDF. Extraction order may not be perfect."
 			slog.Info("pdf: detected two-column layout", "pages", pr.numPages)
 		}
-		result.Text = pr.text
+		doc.Text = pr.text
 
-	case <-time.After(10 * time.Second):
+	case <-time.After(pdfExtractionTimeout):
 		slog.Warn("pdf: library timed out, trying fallback", "size_bytes", len(data))
 		text := extractPDFStreamsFallback(data)
 		if text != "" {
-			result.Text = text
-			result.Note = "PDF library timed out after 10s; used stream text extraction — output may be incomplete"
+			doc.Text = text
+			doc.Note = "PDF library timed out after 10s; used stream text extraction — output may be incomplete"
 			slog.Info("pdf: fallback succeeded after timeout", "text_len", len(text))
 		} else {
-			result.Note = "PDF extraction timed out"
+			doc.Note = "PDF extraction timed out"
 			slog.Warn("pdf: fallback also failed after timeout")
 		}
 	}
@@ -135,40 +147,138 @@ func extractPDF(data []byte) Document {
 	return doc
 }
 
-// extractPDFStreamsFallback extracts text from PDF stream blocks using regex
-// when the PDF library cannot parse the file. It handles Tj and ' operators.
-// This is intentionally simple — it covers the common "malformed but readable"
-// case without adding a second PDF parsing dependency.
+// deadlineReaderAt is an io.ReaderAt over a byte slice that starts returning
+// errors once the deadline passes. Used to bound the lifetime of a hung PDF
+// extraction goroutine (dslipak/pdf has no context support): after the
+// deadline, the library's ReadAt calls fail and the goroutine exits naturally.
+type deadlineReaderAt struct {
+	data     []byte
+	deadline time.Time
+}
+
+func (d *deadlineReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	if time.Now().After(d.deadline) {
+		return 0, fmt.Errorf("pdf: extraction deadline exceeded")
+	}
+	if off >= int64(len(d.data)) {
+		return 0, fmt.Errorf("pdf: read past end of data")
+	}
+	n := copy(p, d.data[off:])
+	if n < len(p) {
+		return n, fmt.Errorf("pdf: short read (end of data)")
+	}
+	return n, nil
+}
+
+// streamRe finds PDF stream blocks: "stream\n...\nendstream".
+var streamRe = regexp.MustCompile(`(?s)stream\r?\n(.*?)endstream`)
+
+// extractPDFStreamsFallback extracts text from PDF content streams using a
+// balanced-paren scanner when the PDF library cannot parse the file. Unlike a
+// naive regex, it correctly handles escaped parens (\( \)) and backslashes
+// inside PDF literal strings, and decodes the standard escape sequences.
 func extractPDFStreamsFallback(data []byte) string {
-	// Find stream…endstream blocks. (?s) makes . match newlines.
-	streamRe := regexp.MustCompile(`(?s)stream\r?\n(.*?)endstream`)
 	matches := streamRe.FindAllSubmatch(data, -1)
 	if len(matches) == 0 {
 		return ""
 	}
-
 	var lines []string
 	for _, m := range matches {
-		content := m[1]
-		// Extract parenthesized strings from Tj and ' operators.
-		for _, op := range pdfTextOpRe.FindAllSubmatch(content, -1) {
-			// op[1] is from the Tj pattern, op[2] from the ' pattern.
-			for _, g := range op[1:] {
-				if len(g) > 0 {
-					lines = append(lines, string(g))
-				}
-			}
-		}
-		// Also try TJ arrays: [(text1) -200 (text2)] TJ
-		tjRe := regexp.MustCompile(`(?s)\[(.*?)\]\s*TJ`)
-		for _, tj := range tjRe.FindAllSubmatch(content, -1) {
-			strRe := regexp.MustCompile(`\(([^)]*)\)`)
-			for _, s := range strRe.FindAllSubmatch(tj[1], -1) {
-				lines = append(lines, string(s[1]))
-			}
-		}
+		lines = append(lines, extractPDFStrings(m[1])...)
 	}
 	return strings.Join(lines, "\n")
+}
+
+// extractPDFStrings scans content for PDF literal strings "( ... )" and returns
+// each decoded. Parens balance via escape tracking, so "a (b\) c) d" yields one
+// string "b) c". Strings spanning the whole content stream are collected.
+func extractPDFStrings(content []byte) []string {
+	var out []string
+	var buf []byte
+	inStr := false
+	depth := 0
+	for i := 0; i < len(content); i++ {
+		c := content[i]
+		if !inStr {
+			if c == '(' {
+				inStr = true
+				depth = 1
+				buf = buf[:0]
+			}
+			continue
+		}
+		// Inside a string.
+		if c == '\\' && i+1 < len(content) {
+			next := content[i+1]
+			switch next {
+			case 'n':
+				buf = append(buf, '\n')
+				i++
+			case 'r':
+				buf = append(buf, '\r')
+				i++
+			case 't':
+				buf = append(buf, '\t')
+				i++
+			case 'b':
+				buf = append(buf, 0x08)
+				i++
+			case 'f':
+				buf = append(buf, 0x0C)
+				i++
+			case '(':
+				buf = append(buf, '(')
+				i++
+			case ')':
+				buf = append(buf, ')')
+				i++
+			case '\\':
+				buf = append(buf, '\\')
+				i++
+			case '\n':
+				// Line continuation: skip both backslash and newline.
+				i++
+			default:
+				// Octal escape \ddd (1-3 octal digits).
+				if next >= '0' && next <= '7' {
+				 octal := []byte{next}
+				 j := i + 2
+				 for len(octal) < 3 && j < len(content) && content[j] >= '0' && content[j] <= '7' {
+				 	octal = append(octal, content[j])
+				 	j++
+				 }
+				 var v byte
+				 for _, d := range octal {
+				 	v = v*8 + (d - '0')
+				 }
+				 buf = append(buf, v)
+				 i = j - 1
+				} else {
+				 // Unknown escape — keep the char literally.
+				 buf = append(buf, next)
+				 i++
+				}
+			}
+			continue
+		}
+		if c == '(' {
+			depth++
+			buf = append(buf, c)
+			continue
+		}
+		if c == ')' {
+			depth--
+			if depth == 0 {
+				out = append(out, string(buf))
+				inStr = false
+				continue
+			}
+			buf = append(buf, c)
+			continue
+		}
+		buf = append(buf, c)
+	}
+	return out
 }
 
 // countPDFImages counts how many image XObjects exist across all pages.

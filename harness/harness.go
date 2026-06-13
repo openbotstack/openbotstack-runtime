@@ -175,6 +175,10 @@ func (h *ExecutionHarness) Run(ctx context.Context, plan *execution.ExecutionPla
 		}
 
 		// Resolve templates in step arguments so the trace shows actual values.
+		// This mirrors dispatchStep's resolution for the trace only; the real
+		// execution re-resolves inside the executor and will fail the step if
+		// a template is unresolvable. Log a warning here so failed resolutions
+		// are visible in the trace even before the step is dispatched.
 		if step.Arguments != nil {
 			resolved := make(map[string]any, len(step.Arguments))
 			for k, v := range step.Arguments {
@@ -182,6 +186,8 @@ func (h *ExecutionHarness) Run(ctx context.Context, plan *execution.ExecutionPla
 					if r, err := template.Resolve(s, prevResults); err == nil {
 						resolved[k] = r
 					} else {
+						slog.Warn("harness: unresolvable template in step args",
+							"step", step.Name, "arg", k, "error", err)
 						resolved[k] = s
 					}
 				} else {

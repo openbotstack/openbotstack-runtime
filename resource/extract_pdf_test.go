@@ -238,3 +238,35 @@ startxref
 	t.Logf("text: %q", doc.Text)
 	t.Logf("note: %q", doc.Note)
 }
+
+func TestExtractPDFStrings_EscapedParensAndOctal(t *testing.T) {
+	// PDF literal strings escape parens as \( \) and support \ddd octal.
+	// The fallback scanner must balance parens correctly and decode escapes.
+	content := []byte(`(See Section \(3\) for details)Tj` + "\n" +
+		`(Copyright \251 2024)Tj` + "\n" + // \251 = © octal
+		`[(Hello) -200 (World)]TJ` + "\n" +
+		`(Line1\nLine2)Tj`) // \n escape → newline
+
+	strs := extractPDFStrings(content)
+	joined := strings.Join(strs, "|")
+	want := "See Section (3) for details|Copyright \251 2024|Hello|World|Line1\nLine2"
+	if joined != want {
+		t.Errorf("extractPDFStrings mismatch:\n got: %q\nwant: %q", joined, want)
+	}
+}
+
+func TestExtractPDFStreamsFallback_NestedParens(t *testing.T) {
+	// A string with nested balanced parens: outer ( ... (inner) ... )
+	stream := []byte("stream\n(Before (nested) after)Tj\nendstream")
+	got := extractPDFStreamsFallback(stream)
+	if got != "Before (nested) after" {
+		t.Errorf("nested parens: got %q, want %q", got, "Before (nested) after")
+	}
+}
+
+func TestExtractPDFStreamsFallback_NoStreams(t *testing.T) {
+	got := extractPDFStreamsFallback([]byte("not a pdf"))
+	if got != "" {
+		t.Errorf("expected empty for non-stream data: got %q", got)
+	}
+}

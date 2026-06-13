@@ -77,6 +77,50 @@ bootstrap_info() {
     fi
 }
 
+# load_env parses a .env file defensively and exports KEY=VALUE pairs.
+# Unlike `source .env`, this never executes the file as shell, so a line
+# like `X=$(rm -rf ~)` cannot run. Only lines matching ^KEY=VALUE$ are
+# accepted; anything else is skipped with a warning. Quoted values are
+# stripped of surrounding quotes.
+load_env() {
+    local file="$1"
+    [ -f "${file}" ] || return 0
+    local lineno=0
+    while IFS= read -r line || [ -n "${line}" ]; do
+        lineno=$((lineno + 1))
+        # Trim leading/trailing whitespace.
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        # Skip blank lines and comments.
+        case "${line}" in
+            ''|\#*) continue ;;
+        esac
+        # Must match KEY=VALUE. Key: [A-Za-z_][A-Za-z0-9_]*  Value: anything.
+        case "${line}" in
+            [A-Za-z_]*=*) ;;
+            *)
+                warn ".env:${lineno}: skipping non-assignment line: ${line}"
+                continue
+                ;;
+        esac
+        local key="${line%%=*}"
+        local val="${line#*=}"
+        # Validate key charset (no metacharacters).
+        case "${key}" in
+            *[!A-Za-z0-9_]*)
+                warn ".env:${lineno}: skipping bad key: ${key}"
+                continue
+                ;;
+        esac
+        # Strip surrounding quotes if present.
+        case "${val}" in
+            \"*\") val="${val#\"}"; val="${val%\"}" ;;
+            \'*\') val="${val#\'}"; val="${val%\'}" ;;
+        esac
+        export "${key}=${val}"
+    done < "${file}"
+}
+
 # ---- commands ----------------------------------------------------------
 
 cmd_start() {
@@ -85,10 +129,8 @@ cmd_start() {
         exit 1
     fi
 
-    # Source .env if present.
-    if [ -f .env ]; then
-        set -a; source .env; set +a
-    fi
+    # Load .env defensively (never executes the file as shell).
+    load_env .env
 
     # Ensure runtime directories.
     mkdir -p logs data/skills
@@ -148,9 +190,7 @@ cmd_restart() {
 }
 
 cmd_fg() {
-    if [ -f .env ]; then
-        set -a; source .env; set +a
-    fi
+    load_env .env
     mkdir -p logs data/skills
     info "starting in foreground..."
     exec "${BINARY}"

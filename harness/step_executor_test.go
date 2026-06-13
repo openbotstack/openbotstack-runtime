@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -58,6 +59,42 @@ func TestStepExecutor_ToolRunnerError(t *testing.T) {
 	}
 	if err.Error() != "tool execution failed" {
 		t.Errorf("error = %v, want 'tool execution failed'", err)
+	}
+}
+
+// TestStepExecutor_UnresolvableTemplateFailsStep guards the C1 fix: a step
+// argument containing an unresolvable {{...}} template (e.g. a field the
+// planner guessed that doesn't exist on the prior result) MUST fail the step
+// with a clear error, not dispatch it with the literal template string.
+func TestStepExecutor_UnresolvableTemplateFailsStep(t *testing.T) {
+	tr := newMockToolRunner()
+	tr.result["my-tool"] = "should-not-reach"
+	se := NewStepExecutor(tr, nil, StepExecutorDeps{})
+
+	step := &execution.ExecutionStep{
+		StepID: "step-1",
+		Name:   "my-tool",
+		Type:   execution.StepTypeTool,
+		// "content" does not exist on the prior result (it has "text").
+		Arguments: map[string]any{"input": "{{prev_step.content}}"},
+	}
+	ec := testEC()
+	prevResults := map[string]any{
+		"prev_step": map[string]any{"text": "the real content"},
+	}
+
+	_, err := se.ExecuteTool(context.Background(), step, ec, prevResults, 5*time.Second)
+	if err == nil {
+		t.Fatal("expected error for unresolvable template, got nil (literal would reach the tool)")
+	}
+	if !strings.Contains(err.Error(), "content") {
+		t.Errorf("error should name the missing field 'content': %v", err)
+	}
+	// The tool runner must NOT have been invoked.
+	for _, call := range tr.calls {
+		if call == "my-tool" {
+			t.Fatal("tool runner was invoked despite unresolvable template — step should have failed first")
+		}
 	}
 }
 

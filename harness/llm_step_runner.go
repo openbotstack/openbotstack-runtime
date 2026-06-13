@@ -46,7 +46,9 @@ func (r *LLMStepRunner) Run(ctx context.Context, step execution.ExecutionStep, e
 	hadTemplates := hasTemplateMarkers(&step)
 
 	// Resolve step result interpolation templates in arguments.
-	step.ResolveArguments(prevResults)
+	if err := step.ResolveArguments(prevResults); err != nil {
+		return nil, nil, nil, fmt.Errorf("step %q: %w", step.Name, err)
+	}
 
 	// Derive user request: prefer ExpectedOutput, fall back to arguments.prompt.
 	userRequest := step.ExpectedOutput
