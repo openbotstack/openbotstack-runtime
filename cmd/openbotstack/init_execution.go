@@ -55,6 +55,10 @@ func (b *ServerBuilder) InitExecution() *ServerBuilder {
 	if skillsPath == "" {
 		skillsPath = "data/skills"
 	}
+	// Ensure skills directory exists so the watcher can attach to it.
+	if err := os.MkdirAll(skillsPath, 0755); err != nil {
+		slog.Warn("failed to create skills directory", "path", skillsPath, "error", err)
+	}
 	if err := loadSkills(context.Background(), exec, skillsPath); err != nil {
 		slog.Error("failed to load skills", "error", err)
 	}
