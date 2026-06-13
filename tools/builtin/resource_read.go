@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -50,12 +51,15 @@ func (t *ResourceReadTool) Execute(ctx context.Context, input map[string]any) (m
 		return nil, fmt.Errorf("resource_read: url must start with http:// or https://")
 	}
 
+	startTime := time.Now()
 	timeout := t.Timeout
 	if timeout == 0 {
 		timeout = 30 * time.Second
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+
+	slog.Debug("resource_read: fetching", "url", rawURL, "timeout", timeout)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
@@ -66,6 +70,7 @@ func (t *ResourceReadTool) Execute(ctx context.Context, input map[string]any) (m
 	client := newSSRFClient(t.allowPrivateIPs)
 	resp, err := client.Do(req)
 	if err != nil {
+		slog.Warn("resource_read: fetch failed", "url", rawURL, "error", err, "duration_ms", time.Since(startTime).Milliseconds())
 		return nil, fmt.Errorf("resource_read: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -80,9 +85,33 @@ func (t *ResourceReadTool) Execute(ctx context.Context, input map[string]any) (m
 	}
 
 	contentType := resp.Header.Get("Content-Type")
+	fetchDuration := time.Since(startTime)
+
+	slog.Info("resource_read: fetched",
+		"url", rawURL,
+		"status", resp.StatusCode,
+		"content_type", contentType,
+		"content_length", resp.ContentLength,
+		"bytes_read", len(data),
+		"truncated", truncated,
+		"fetch_ms", fetchDuration.Milliseconds(),
+	)
 
 	doc := resource.ReadResource(rawURL, data, contentType)
 	doc.Truncated = truncated
+
+	slog.Info("resource_read: document ready",
+		"url", rawURL,
+		"type", doc.ContentType,
+		"text_len", len(doc.Text),
+		"layout", string(doc.Layout),
+		"truncated", doc.Truncated,
+		"has_images", len(doc.Images) > 0,
+		"total_ms", time.Since(startTime).Milliseconds(),
+	)
+	if doc.Note != "" {
+		slog.Warn("resource_read: document note", "url", rawURL, "note", doc.Note)
+	}
 
 	// Convert Document to map[string]any via JSON round-trip so the caller
 	// always sees a consistent structure.

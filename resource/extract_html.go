@@ -2,6 +2,7 @@ package resource
 
 import (
 	"bytes"
+	"log/slog"
 	"net/url"
 	"strings"
 
@@ -21,8 +22,7 @@ func extractHTML(data []byte) Document {
 	// resolution; a placeholder is fine when the source URL isn't known here.
 	article, err := readability.FromReader(bytes.NewReader(data), &url.URL{})
 	if err != nil {
-		// If readability fails, fall back to a naive tag strip so the caller
-		// still gets something usable rather than an empty Document.
+		slog.Debug("html: readability failed, using naive tag strip", "error", err)
 		doc.Text = stripHTMLTags(string(data))
 		doc.Note = "HTML readability parse failed; used naive tag stripping"
 		return doc
@@ -45,9 +45,16 @@ func extractHTML(data []byte) Document {
 	// If readability extracted nothing useful (e.g. the page is mostly app
 	// shell), fall back to tag stripping and warn.
 	if doc.Text == "" {
+		slog.Debug("html: readability returned empty, using tag strip")
 		doc.Text = stripHTMLTags(string(data))
 		doc.Note = "readability extracted no article text; used naive tag stripping"
 	}
+
+	slog.Debug("html: extracted",
+		"text_len", len(doc.Text),
+		"title", doc.Title,
+		"lang", doc.Language,
+	)
 	return doc
 }
 

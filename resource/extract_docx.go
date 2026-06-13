@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 )
 
@@ -50,6 +51,11 @@ func extractDOCX(data []byte) Document {
 		extractWMLText(f, &buf)
 	}
 	doc.Text = strings.TrimSpace(buf.String())
+
+	slog.Debug("docx: extracted",
+		"parts", len(parts),
+		"text_len", len(doc.Text),
+	)
 	return doc
 }
 

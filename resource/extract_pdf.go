@@ -3,6 +3,7 @@ package resource
 import (
 	"bytes"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 	"time"
@@ -28,6 +29,8 @@ func extractPDF(data []byte) Document {
 		ContentType: ContentTypePDF,
 		Layout:      LayoutSingleColumn,
 	}
+
+	slog.Debug("pdf: extracting", "size_bytes", len(data))
 
 	// dslipak/pdf can panic or hang on malformed input. Run it in a
 	// goroutine with a timeout; fall back to regex stream extraction
@@ -73,19 +76,27 @@ func extractPDF(data []byte) Document {
 	select {
 	case pr := <-ch:
 		if pr.err != nil {
-			// Library failed — fall back to regex stream extraction.
+			slog.Warn("pdf: library failed, trying fallback", "error", pr.err, "size_bytes", len(data))
 			text := extractPDFStreamsFallback(data)
 			if text != "" {
 				result.Text = text
 				result.Note = fmt.Sprintf("PDF library parse failed (%v); used stream text extraction — output may be incomplete", pr.err)
+				slog.Info("pdf: fallback succeeded", "text_len", len(text))
 			} else {
 				result.Note = fmt.Sprintf("PDF extraction failed: %v", pr.err)
+				slog.Warn("pdf: fallback also failed", "error", pr.err)
 			}
 			return doc
 		}
 		if pr.reader == nil || pr.numPages == 0 {
+			slog.Debug("pdf: empty document", "pages", pr.numPages)
 			return doc
 		}
+
+		slog.Debug("pdf: library extracted",
+			"pages", pr.numPages,
+			"text_len", len(pr.text),
+		)
 
 		// Detect scanned PDF: little to no text, images present.
 		imageCount := countPDFImages(pr.reader, pr.numPages)
@@ -96,6 +107,7 @@ func extractPDF(data []byte) Document {
 			for i := 0; i < imageCount; i++ {
 				result.Images = append(result.Images, ImageRef{Page: i + 1})
 			}
+			slog.Info("pdf: detected scanned", "pages", pr.numPages, "images", imageCount)
 			return doc
 		}
 
@@ -103,17 +115,20 @@ func extractPDF(data []byte) Document {
 		if detectTwoColumn(pr.reader, pr.numPages) {
 			result.Layout = LayoutTwoColumn
 			result.Note = "Possible two-column PDF. Extraction order may not be perfect."
+			slog.Info("pdf: detected two-column layout", "pages", pr.numPages)
 		}
 		result.Text = pr.text
 
 	case <-time.After(10 * time.Second):
-		// Library hung — fall back to regex extraction.
+		slog.Warn("pdf: library timed out, trying fallback", "size_bytes", len(data))
 		text := extractPDFStreamsFallback(data)
 		if text != "" {
 			result.Text = text
 			result.Note = "PDF library timed out after 10s; used stream text extraction — output may be incomplete"
+			slog.Info("pdf: fallback succeeded after timeout", "text_len", len(text))
 		} else {
 			result.Note = "PDF extraction timed out"
+			slog.Warn("pdf: fallback also failed after timeout")
 		}
 	}
 

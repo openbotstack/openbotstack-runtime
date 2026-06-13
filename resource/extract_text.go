@@ -1,6 +1,7 @@
 package resource
 
 import (
+	"log/slog"
 	"strings"
 	"unicode/utf8"
 )
@@ -21,6 +22,7 @@ func extractText(data []byte, contentType string) Document {
 	}
 	// strings.ToValidUTF8 replaces invalid byte sequences with the replacement
 	// char, guaranteeing valid UTF-8 for downstream consumers.
+	slog.Debug("text: non-UTF-8 detected, sanitizing", "size_bytes", len(data))
 	doc.Text = strings.ToValidUTF8(string(data), "�")
 	doc.Note = "source was not valid UTF-8; invalid bytes replaced (text may be garbled)"
 	return doc
