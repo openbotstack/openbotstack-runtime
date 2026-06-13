@@ -3,10 +3,16 @@ package resource
 import (
 	"bytes"
 	"fmt"
+	"regexp"
 	"strings"
+	"time"
 
 	"github.com/dslipak/pdf"
 )
+
+// pdfTextOpRe matches PDF text-showing operators: (string) Tj, (string) ',
+// and array-of-strings TJ.
+var pdfTextOpRe = regexp.MustCompile(`\(([^)]*)\)\s*Tj|\(([^)]*)\)\s*'`)
 
 // extractPDF parses a PDF file and extracts its text content.
 // It also classifies the layout:
@@ -23,61 +29,131 @@ func extractPDF(data []byte) Document {
 		Layout:      LayoutSingleColumn,
 	}
 
-	// dslipak/pdf panics on malformed input. Recover and surface as Note.
+	// dslipak/pdf can panic or hang on malformed input. Run it in a
+	// goroutine with a timeout; fall back to regex stream extraction
+	// if the library fails to produce a result in time.
 	result := &doc
-	func() {
+	type pdfResult struct {
+		text      string
+		numPages  int
+		reader    *pdf.Reader
+		err       error
+	}
+	ch := make(chan pdfResult, 1)
+	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				result.Text = ""
-				result.Layout = LayoutUnknown
-				result.Note = fmt.Sprintf("PDF extraction panicked: %v", r)
+				ch <- pdfResult{err: fmt.Errorf("panic: %v", r)}
 			}
 		}()
-
 		r, err := pdf.NewReader(bytes.NewReader(data), int64(len(data)))
 		if err != nil {
-			result.Note = fmt.Sprintf("PDF extraction failed: %v", err)
+			ch <- pdfResult{err: err}
 			return
 		}
-
 		numPages := r.NumPage()
 		if numPages == 0 {
+			ch <- pdfResult{reader: r}
 			return
 		}
-
-		// Extract plain text from all pages.
 		textReader, err := r.GetPlainText()
 		if err != nil {
-			result.Note = fmt.Sprintf("PDF text extraction failed: %v", err)
+			ch <- pdfResult{err: fmt.Errorf("text extraction: %w", err), reader: r, numPages: numPages}
 			return
 		}
 		var textBuf bytes.Buffer
 		_, _ = textBuf.ReadFrom(textReader)
-		text := strings.TrimSpace(textBuf.String())
+		ch <- pdfResult{
+			text:     strings.TrimSpace(textBuf.String()),
+			numPages: numPages,
+			reader:   r,
+		}
+	}()
+
+	select {
+	case pr := <-ch:
+		if pr.err != nil {
+			// Library failed — fall back to regex stream extraction.
+			text := extractPDFStreamsFallback(data)
+			if text != "" {
+				result.Text = text
+				result.Note = fmt.Sprintf("PDF library parse failed (%v); used stream text extraction — output may be incomplete", pr.err)
+			} else {
+				result.Note = fmt.Sprintf("PDF extraction failed: %v", pr.err)
+			}
+			return doc
+		}
+		if pr.reader == nil || pr.numPages == 0 {
+			return doc
+		}
 
 		// Detect scanned PDF: little to no text, images present.
-		imageCount := countPDFImages(r, numPages)
-		if len(text) < 50 && imageCount > 0 {
+		imageCount := countPDFImages(pr.reader, pr.numPages)
+		if len(pr.text) < 50 && imageCount > 0 {
 			result.Layout = LayoutScanned
 			result.Note = "Scanned PDF. No extractable text. OCR/vision recommended."
-			// Surface page images as ImageRef for the planner.
 			result.Images = make([]ImageRef, 0, imageCount)
 			for i := 0; i < imageCount; i++ {
 				result.Images = append(result.Images, ImageRef{Page: i + 1})
 			}
-			return
+			return doc
 		}
 
-		// Detect two-column layout by examining text columns on the first few pages.
-		if detectTwoColumn(r, numPages) {
+		// Detect two-column layout.
+		if detectTwoColumn(pr.reader, pr.numPages) {
 			result.Layout = LayoutTwoColumn
 			result.Note = "Possible two-column PDF. Extraction order may not be perfect."
 		}
+		result.Text = pr.text
 
-		result.Text = text
-	}()
+	case <-time.After(10 * time.Second):
+		// Library hung — fall back to regex extraction.
+		text := extractPDFStreamsFallback(data)
+		if text != "" {
+			result.Text = text
+			result.Note = "PDF library timed out after 10s; used stream text extraction — output may be incomplete"
+		} else {
+			result.Note = "PDF extraction timed out"
+		}
+	}
 
 	return doc
+}
+
+// extractPDFStreamsFallback extracts text from PDF stream blocks using regex
+// when the PDF library cannot parse the file. It handles Tj and ' operators.
+// This is intentionally simple — it covers the common "malformed but readable"
+// case without adding a second PDF parsing dependency.
+func extractPDFStreamsFallback(data []byte) string {
+	// Find stream…endstream blocks. (?s) makes . match newlines.
+	streamRe := regexp.MustCompile(`(?s)stream\r?\n(.*?)endstream`)
+	matches := streamRe.FindAllSubmatch(data, -1)
+	if len(matches) == 0 {
+		return ""
+	}
+
+	var lines []string
+	for _, m := range matches {
+		content := m[1]
+		// Extract parenthesized strings from Tj and ' operators.
+		for _, op := range pdfTextOpRe.FindAllSubmatch(content, -1) {
+			// op[1] is from the Tj pattern, op[2] from the ' pattern.
+			for _, g := range op[1:] {
+				if len(g) > 0 {
+					lines = append(lines, string(g))
+				}
+			}
+		}
+		// Also try TJ arrays: [(text1) -200 (text2)] TJ
+		tjRe := regexp.MustCompile(`(?s)\[(.*?)\]\s*TJ`)
+		for _, tj := range tjRe.FindAllSubmatch(content, -1) {
+			strRe := regexp.MustCompile(`\(([^)]*)\)`)
+			for _, s := range strRe.FindAllSubmatch(tj[1], -1) {
+				lines = append(lines, string(s[1]))
+			}
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // countPDFImages counts how many image XObjects exist across all pages.

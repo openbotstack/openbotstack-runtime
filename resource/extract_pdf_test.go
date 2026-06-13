@@ -202,3 +202,39 @@ func TestExtractPDF_NilColumnText(t *testing.T) {
 		t.Errorf("expected empty string for nil column: got %q", result)
 	}
 }
+
+func TestExtractPDF_FallbackStreamExtraction(t *testing.T) {
+	// PDF with a missing startxref byte offset — dslipak/pdf will fail
+	// to parse it, but the fallback regex should extract text from streams.
+	pdf := `%PDF-1.7
+1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
+2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj
+3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj
+4 0 obj<</Length 50>>
+stream
+BT
+/F1 12 Tf 100 700 Td(Fallback extracted text)Tj
+ET
+endstream
+endobj
+5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj
+xref
+0 6
+0000000000 65535 f
+0000000009 00000 n
+trailer<</Size 6/Root 1 0 R>>
+startxref
+%%EOF`
+	doc := extractPDF([]byte(pdf))
+	if doc.Text == "" {
+		t.Error("fallback should extract text from streams")
+	}
+	if !strings.Contains(doc.Text, "Fallback extracted text") {
+		t.Errorf("expected fallback text: got %q", doc.Text)
+	}
+	if doc.Note == "" {
+		t.Error("Note should explain that library parse failed and fallback was used")
+	}
+	t.Logf("text: %q", doc.Text)
+	t.Logf("note: %q", doc.Note)
+}
