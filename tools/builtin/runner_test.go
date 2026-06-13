@@ -53,7 +53,7 @@ func TestBuiltinToolRunner_PermissionGranted(t *testing.T) {
 func TestBuiltinToolRunner_ToolsList(t *testing.T) {
 	runner := NewBuiltinToolRunner()
 	tools := runner.Tools()
-	if len(tools) != 8 {
-		t.Errorf("expected 8 tools, got %d", len(tools))
+	if len(tools) != 9 {
+		t.Errorf("expected 9 tools, got %d", len(tools))
 	}
 }

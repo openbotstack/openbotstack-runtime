@@ -62,6 +62,7 @@ func (r *BuiltinToolRunner) registerDefaults() {
 		&JSONQueryTool{},
 		&UUIDGenerateTool{},
 		&VisionAnalyzeTool{},
+		&ResourceReadTool{},
 	} {
 		r.tools[t.Name()] = t
 	}

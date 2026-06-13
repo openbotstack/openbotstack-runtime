@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -27,11 +26,6 @@ func (t *WebFetchTool) Parameters() map[string]string {
 func (t *WebFetchTool) Required() []string    { return []string{"url"} }
 func (t *WebFetchTool) Permissions() []string { return []string{"http.fetch"} }
 
-// isPrivateIP reports whether the given IP address belongs to a private,
-// loopback, or link-local network range. Used for SSRF protection.
-func isPrivateIP(ip net.IP) bool {
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast()
-}
 
 func (t *WebFetchTool) Execute(ctx context.Context, input map[string]any) (map[string]any, error) {
 	url, _ := input["url"].(string)
@@ -69,27 +63,10 @@ func (t *WebFetchTool) Execute(ctx context.Context, input map[string]any) (map[s
 			req.Header.Set(k, fmt.Sprintf("%v", v))
 		}
 	}
-	// SSRF protection: use custom transport that checks IPs at connection
-	// time to prevent DNS rebinding attacks.
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			host, _, err := net.SplitHostPort(addr)
-			if err != nil {
-				return nil, fmt.Errorf("web_fetch: invalid address: %w", err)
-			}
-			ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-			if err != nil {
-				return nil, fmt.Errorf("web_fetch: DNS resolution failed: %w", err)
-			}
-			for _, ip := range ips {
-				if !t.allowPrivateIPs && isPrivateIP(ip.IP) {
-					return nil, fmt.Errorf("web_fetch: access to private network addresses is blocked (%s)", ip.IP)
-				}
-			}
-			return (&net.Dialer{}).DialContext(ctx, network, addr)
-		},
-	}
-	client := &http.Client{Transport: transport}
+	// SSRF protection + bounded redirects via the shared client (the same
+	// transport web_fetch has always used, now factored out so resource_read
+	// inherits identical policy).
+	client := newSSRFClient(t.allowPrivateIPs)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -101,8 +78,7 @@ func (t *WebFetchTool) Execute(ctx context.Context, input map[string]any) (map[s
 	if maxBytes == 0 {
 		maxBytes = 1024 * 1024
 	}
-	limited := io.LimitReader(resp.Body, maxBytes+1)
-	data, err := io.ReadAll(limited)
+	data, _, err := readLimited(resp.Body, maxBytes)
 	if err != nil {
 		return nil, fmt.Errorf("web_fetch: read body: %w", err)
 	}
