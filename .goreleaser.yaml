@@ -30,6 +30,8 @@ archives:
     files:
       - README.md
       - LICENSE*
+      - .env.example
+      - deploy/ctl.sh
 
 checksum:
   name_template: 'checksums.txt'

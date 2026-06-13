@@ -39,7 +39,11 @@ binary: web-install web-build ## Build production binary with version info
 	mkdir -p data/skills
 	cp -rn skills/ data/skills/ 2>/dev/null || true
 	$(GO) build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/openbotstack
+	cp -f .env.example $(BUILD_DIR)/.env.example
+	cp -f deploy/ctl.sh $(BUILD_DIR)/ctl.sh
+	chmod +x $(BUILD_DIR)/ctl.sh
 	@echo "Built: $(BUILD_DIR)/$(BINARY_NAME) (version=$(VERSION) commit=$(COMMIT))"
+	@echo "Deploy files: ctl.sh .env.example"
 
 build-all: web-build ## Build binaries for all supported platforms
 	@set -e; for platform in $(PLATFORMS); do \
