@@ -41,14 +41,18 @@ func (r *LLMStepRunner) HasGenerator() bool {
 func (r *LLMStepRunner) Run(ctx context.Context, step execution.ExecutionStep, ec *execution.ExecutionContext, prevResults map[string]any) (*execution.StepResult, *HarnessMetrics, map[string][]TurnResult, error) {
 	startTime := time.Now()
 
-	// Check if the planner used {{step_name}} templates BEFORE ResolveArguments
+	// Check if the planner used {{step_name}} templates BEFORE Prepare
 	// replaces them. We need the original text to know whether injection is needed.
 	hadTemplates := hasTemplateMarkers(&step)
 
-	// Resolve step result interpolation templates in arguments.
-	if err := step.ResolveArguments(prevResults); err != nil {
+	// Prepare (clone + coerce + resolve) the step. Prepare returns a clone, so
+	// the caller's Arguments map is not mutated (the LLM runner previously
+	// resolved in place on the shared map — an inconsistency with the tool path).
+	prepared, err := step.Prepare(prevResults)
+	if err != nil {
 		return nil, nil, nil, fmt.Errorf("step %q: %w", step.Name, err)
 	}
+	step = *prepared
 
 	// Derive user request: prefer ExpectedOutput, fall back to arguments.prompt.
 	userRequest := step.ExpectedOutput

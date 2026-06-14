@@ -2,12 +2,9 @@ package harness
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
-
-	"log/slog"
 
 	"github.com/openbotstack/openbotstack-core/execution"
 	"github.com/openbotstack/openbotstack-runtime/toolrunner"
@@ -117,12 +114,9 @@ func (se *StepExecutor) ExecuteTool(
 	prevResults map[string]any,
 	stepTimeout time.Duration,
 ) (*execution.StepResult, error) {
-	cloned := step.Clone()
-	if n := cloned.CoerceStringNumbers(); n > 0 {
-		slog.DebugContext(ctx, "step_executor: coerced argument types", "step", cloned.Name, "count", n)
-	}
-	if err := cloned.ResolveArguments(prevResults); err != nil {
-		return nil, fmt.Errorf("step %q: %w", cloned.Name, err)
+	cloned, err := step.Prepare(prevResults)
+	if err != nil {
+		return nil, err
 	}
 
 	start := time.Now()
@@ -205,12 +199,9 @@ func (se *StepExecutor) ExecuteSkill(
 	prevResults map[string]any,
 	stepTimeout time.Duration,
 ) (*execution.StepResult, error) {
-	cloned := step.Clone()
-	if n := cloned.CoerceStringNumbers(); n > 0 {
-		slog.DebugContext(ctx, "step_executor: coerced argument types", "step", cloned.Name, "count", n)
-	}
-	if err := cloned.ResolveArguments(prevResults); err != nil {
-		return nil, fmt.Errorf("step %q: %w", cloned.Name, err)
+	cloned, err := step.Prepare(prevResults)
+	if err != nil {
+		return nil, err
 	}
 
 	start := time.Now()
@@ -304,20 +295,6 @@ func (se *StepExecutor) ExecuteFallback(
 	return se.ExecuteTool(ctx, fallbackStep, ec, prevResults, 0)
 }
 
-// ArgumentsToMap converts step arguments to a map for template resolution.
-func ArgumentsToMap(result *execution.StepResult) map[string]any {
-	if result == nil {
-		return nil
-	}
-	if str, ok := result.Output.(string); ok && str != "" {
-		var m map[string]any
-		if err := json.Unmarshal([]byte(str), &m); err == nil {
-			return m
-		}
-	}
-	return map[string]any{result.StepName: result.Output}
-}
-
 // prefixHandler adapts a ToolRunner to the StepHandler interface using
 // step name prefix matching. This replaces the previous string-prefix
 // map lookup with a pluggable handler pattern.
@@ -331,9 +308,13 @@ func (h *prefixHandler) CanHandle(step *execution.ExecutionStep) bool {
 	return strings.HasPrefix(step.Name, h.prefix)
 }
 
-// Handle resolves arguments from previous step results, then delegates to
-// the shared runToolWithTimeout helper, avoiding duplication with the default
-// runner path in ExecuteTool.
+// Handle delegates to the shared runToolWithTimeout helper. The step has
+// already been prepared (cloned + coerced + resolved) by the caller —
+// ExecuteTool/ExecuteSkill call Prepare before dispatching to a handler, and
+// the only other entry point (StepExecutor.Dispatch, used by the legacy
+// ExecutePlan path) passes nil prevResults so resolution is a no-op there.
+// Re-resolving here was historically redundant; Prepare is now the single
+// resolution point.
 func (h *prefixHandler) Handle(
 	ctx context.Context,
 	step *execution.ExecutionStep,
@@ -341,14 +322,5 @@ func (h *prefixHandler) Handle(
 	prevResults map[string]any,
 	stepTimeout time.Duration,
 ) (*execution.StepResult, error) {
-	// Resolve {{step_name}} references from previous results.
-	// The caller (ExecuteTool/ExecuteSkill) already cloned the step and
-	// ran CoerceStringNumbers, but we still need ResolveArguments here
-	// because prefixHandler is also invoked directly from Dispatch.
-	if prevResults != nil && len(prevResults) > 0 {
-		if err := step.ResolveArguments(prevResults); err != nil {
-			return nil, fmt.Errorf("step %q: %w", step.Name, err)
-		}
-	}
 	return runToolWithTimeout(ctx, h.runner, step, ec, stepTimeout)
 }

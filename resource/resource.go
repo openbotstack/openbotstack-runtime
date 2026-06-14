@@ -1,7 +1,9 @@
 package resource
 
 import (
+	"bytes"
 	"mime"
+	"net/http"
 	"strings"
 
 	"github.com/google/uuid"
@@ -10,8 +12,10 @@ import (
 // ReadResource normalises raw bytes from a source into a Document by detecting
 // the content type and dispatching to the appropriate extractor.
 //
-// contentType is the HTTP Content-Type header (may be empty). When empty,
-// content sniffing from data is attempted.
+// contentType is the HTTP Content-Type header (may be empty). When empty, the
+// bytes are sniffed via magic bytes (http.DetectContentType plus format-specific
+// signatures) so a PDF served without a Content-Type header is still dispatched
+// to the PDF extractor rather than treated as plain text.
 //
 // The returned Document carries a unique ID, the source URL, and the detected
 // or provided content type. It is the canonical boundary between "bytes from
@@ -27,6 +31,15 @@ func ReadResource(source string, data []byte, contentType string) Document {
 		parseNote = "Content-Type header could not be parsed; using raw value"
 	}
 	contentType = strings.TrimSpace(contentType)
+
+	// Sniff when the header is missing or generic, so the dispatcher routes to
+	// the right extractor. The header wins over sniffing only when it names a
+	// concrete format we support.
+	if contentType == "" || contentType == "application/octet-stream" {
+		if sniffed := sniffContentType(data); sniffed != "" {
+			contentType = sniffed
+		}
+	}
 
 	var doc Document
 	switch {
@@ -63,6 +76,45 @@ func ReadResource(source string, data []byte, contentType string) Document {
 		doc.Note = doc.Note + "; " + parseNote
 	}
 	return doc
+}
+
+// sniffContentType inspects magic bytes to identify a supported format. It
+// returns the canonical MIME type, or "" if nothing was recognised. PDF and
+// DOCX are identified by their signatures (http.DetectContentType reports
+// "application/octet-stream" for both and is therefore not sufficient on its
+// own). Images and generic HTML fall back to http.DetectContentType.
+func sniffContentType(data []byte) string {
+	switch {
+	case bytes.HasPrefix(data, []byte("%PDF")):
+		return ContentTypePDF
+	case isDOCXBytes(data):
+		return ContentTypeDOCX
+	}
+	// Leading-whitespace-tolerant HTML / XML detection (http.DetectContentType
+	// sometimes returns text/plain for HTML fragments).
+	trimmed := bytes.TrimLeft(data, " \t\r\n")
+	lower := bytes.ToLower(trimmed)
+	if bytes.HasPrefix(lower, []byte("<!doctype html")) || bytes.HasPrefix(lower, []byte("<html")) {
+		return ContentTypeHTML
+	}
+	// Defer to the stdlib sniffing registry for images and other common types.
+	ct := http.DetectContentType(data)
+	// http.DetectContentType defaults to "text/plain; charset=utf-8" for
+	// arbitrary bytes — that's not a confident sniff, so don't override.
+	if strings.HasPrefix(ct, "image/") {
+		return ct
+	}
+	return ""
+}
+
+// isDOCXBytes reports whether data is a ZIP archive containing the OPC part
+// word/document.xml — the defining signature of a .docx file.
+func isDOCXBytes(data []byte) bool {
+	// ZIP local-file-header magic: PK\x03\x04 (or empty-archive PK\x05\x06).
+	if !(bytes.HasPrefix(data, []byte("PK\x03\x04")) || bytes.HasPrefix(data, []byte("PK\x05\x06"))) {
+		return false
+	}
+	return bytes.Contains(data, []byte("word/document.xml"))
 }
 
 // isImageContentType reports whether mimeType is an image.

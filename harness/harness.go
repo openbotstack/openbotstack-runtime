@@ -12,7 +12,6 @@ import (
 	aitypes "github.com/openbotstack/openbotstack-core/ai/types"
 	"github.com/openbotstack/openbotstack-core/audit"
 	"github.com/openbotstack/openbotstack-core/execution"
-	"github.com/openbotstack/openbotstack-core/execution/template"
 	"github.com/openbotstack/openbotstack-core/planner"
 	"github.com/openbotstack/openbotstack-runtime/logging/execution_logs"
 	"github.com/openbotstack/openbotstack-runtime/toolrunner"
@@ -174,27 +173,19 @@ func (h *ExecutionHarness) Run(ctx context.Context, plan *execution.ExecutionPla
 			stepTimeout = 120 * time.Second
 		}
 
-		// Resolve templates in step arguments so the trace shows actual values.
-		// This mirrors dispatchStep's resolution for the trace only; the real
-		// execution re-resolves inside the executor and will fail the step if
-		// a template is unresolvable. Log a warning here so failed resolutions
-		// are visible in the trace even before the step is dispatched.
+		// Prepare a throwaway copy of the step for the execution trace so it
+		// shows resolved argument values. Prepare is the single resolution
+		// point; the real dispatch re-prepares inside the executor and will
+		// hard-fail on an unresolvable template. Here we only log a warning —
+		// the executor owns the authoritative failure.
 		if step.Arguments != nil {
-			resolved := make(map[string]any, len(step.Arguments))
-			for k, v := range step.Arguments {
-				if s, ok := v.(string); ok {
-					if r, err := template.Resolve(s, prevResults); err == nil {
-						resolved[k] = r
-					} else {
-						slog.Warn("harness: unresolvable template in step args",
-							"step", step.Name, "arg", k, "error", err)
-						resolved[k] = s
-					}
-				} else {
-					resolved[k] = v
-				}
+			if prepared, perr := step.Prepare(prevResults); perr == nil {
+				result.StepInputs[step.StepID] = prepared.Arguments
+			} else {
+				slog.Warn("harness: unresolvable template in step args",
+					"step", step.Name, "error", perr)
+				result.StepInputs[step.StepID] = step.Arguments
 			}
-			result.StepInputs[step.StepID] = resolved
 		}
 
 		stepResult, execErr := h.dispatchStep(ctx, step, i, plan, ec, prevResults, stepTimeout, result)
@@ -500,23 +491,6 @@ func (h *ExecutionHarness) buildPrevResults(stepResults []execution.StepResult) 
 		}
 	}
 	return prevResults
-}
-
-// isSimpleRespondRequest checks if a user message is simple enough to skip planning.
-// Short messages without tool-related keywords can go directly to LLM response.
-func isSimpleRespondRequest(msg string) bool {
-	if len(msg) > 100 {
-		return false
-	}
-	lower := strings.ToLower(msg)
-	toolKeywords := []string{"tool", "use ", "call ", "execute", "fetch", "search", "file",
-		"http", "mcp.", "builtin.", "skill", "read ", "write "}
-	for _, kw := range toolKeywords {
-		if strings.Contains(lower, kw) {
-			return false
-		}
-	}
-	return true
 }
 
 // PlanAndRun creates a plan via the given planner and executes it on this harness.

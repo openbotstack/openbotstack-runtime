@@ -305,7 +305,12 @@ func TestResourceReadTool_ImageContentType(t *testing.T) {
 	if !strings.Contains(note, "vision") {
 		t.Errorf("Note should mention vision: %q", note)
 	}
-	images, _ := result["images"].([]interface{})
+	// Document.ToMap emits images as []map[string]any (preserves typed intent,
+	// unlike the old JSON round-trip which produced []interface{}).
+	images, ok := result["images"].([]map[string]any)
+	if !ok {
+		t.Fatalf("images should be []map[string]any, got %T", result["images"])
+	}
 	if len(images) == 0 {
 		t.Error("images should not be empty for image documents")
 	}

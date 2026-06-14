@@ -24,8 +24,7 @@ import (
 //   6. harness.Run Metrics.TotalToolCalls not incremented for tool steps
 //   7. SubAgent: Run with failing plan
 //   8. Hook panic safety
-//   9. ArgumentsToMap — 0% coverage
-//  10. FallbackToolFor with per-step policy override
+//   9. FallbackToolFor with per-step policy override
 
 // --- Hook System (all 5 hook types) ---
 
@@ -492,52 +491,6 @@ func TestR2_CompactionTrigger_TokenThreshold(t *testing.T) {
 	}
 	if trigger.ShouldCompact(0, 99) {
 		t.Error("should not compact below MaxTokens")
-	}
-}
-
-// --- ArgumentsToMap ---
-
-// R2 Args 1: Nil result returns nil
-func TestR2_ArgumentsToMap_NilResult(t *testing.T) {
-	m := ArgumentsToMap(nil)
-	if m != nil {
-		t.Errorf("expected nil, got %v", m)
-	}
-}
-
-// R2 Args 2: String output that is valid JSON returns map
-func TestR2_ArgumentsToMap_JSONString(t *testing.T) {
-	result := &execution.StepResult{StepName: "test", Output: `{"key":"value","num":42}`}
-	m := ArgumentsToMap(result)
-	if m == nil {
-		t.Fatal("expected non-nil map")
-	}
-	if m["key"] != "value" {
-		t.Errorf("m['key'] = %v, want 'value'", m["key"])
-	}
-}
-
-// R2 Args 3: Non-JSON string output returns {stepName: output}
-func TestR2_ArgumentsToMap_PlainString(t *testing.T) {
-	result := &execution.StepResult{StepName: "my-step", Output: "plain text"}
-	m := ArgumentsToMap(result)
-	if m == nil {
-		t.Fatal("expected non-nil map")
-	}
-	if m["my-step"] != "plain text" {
-		t.Errorf("m['my-step'] = %v, want 'plain text'", m["my-step"])
-	}
-}
-
-// R2 Args 4: Non-string output returns {stepName: output}
-func TestR2_ArgumentsToMap_NonString(t *testing.T) {
-	result := &execution.StepResult{StepName: "step-a", Output: 42}
-	m := ArgumentsToMap(result)
-	if m == nil {
-		t.Fatal("expected non-nil map")
-	}
-	if m["step-a"] != 42 {
-		t.Errorf("m['step-a'] = %v, want 42", m["step-a"])
 	}
 }
 

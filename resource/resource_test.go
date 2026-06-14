@@ -74,6 +74,35 @@ func TestReadResource_EmptyContentType(t *testing.T) {
 	}
 }
 
+// TestReadResource_EmptyContentType_SniffsPDF pins the contract that
+// ReadResource docstring advertises: when contentType is empty, the bytes are
+// sniffed. A PDF served without a Content-Type header must dispatch to the PDF
+// extractor — not be silently treated as plain text.
+func TestReadResource_EmptyContentType_SniffsPDF(t *testing.T) {
+	data := minimalTextPDF(t, "Sniffed PDF text")
+	doc := ReadResource("no-header.pdf", data, "") // empty content type
+	if doc.ContentType != "application/pdf" {
+		t.Errorf("sniffed content type: got %q, want application/pdf", doc.ContentType)
+	}
+	if !strings.Contains(doc.Text, "Sniffed PDF text") {
+		t.Errorf("PDF text not extracted via sniffing: got %q", doc.Text)
+	}
+}
+
+// TestReadResource_EmptyContentType_SniffsHTML ensures HTML bytes with no
+// content type are sniffed and dispatched to the HTML extractor.
+func TestReadResource_EmptyContentType_SniffsHTML(t *testing.T) {
+	html := `<!DOCTYPE html><html><head><title>Sniffed</title></head>
+<body><article><p>HTML body via sniffing.</p></article></body></html>`
+	doc := ReadResource("no-header.html", []byte(html), "")
+	if doc.ContentType != "text/html" {
+		t.Errorf("sniffed content type: got %q, want text/html", doc.ContentType)
+	}
+	if !strings.Contains(doc.Text, "HTML body via sniffing") {
+		t.Errorf("HTML text not extracted via sniffing: got %q", doc.Text)
+	}
+}
+
 func TestReadResource_NonUTF8Fallback(t *testing.T) {
 	doc := ReadResource("garbled.bin", []byte{0xff, 0xfe, 0x00}, "application/octet-stream")
 	// Non-UTF-8 input always triggers the default extractText path, which

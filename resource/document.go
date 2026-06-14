@@ -64,3 +64,69 @@ const (
 	ContentTypePDF   = "application/pdf"
 	ContentTypeDOCX  = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 )
+
+// ToMap flattens the Document into the map[string]any shape that crosses the
+// builtin-tool boundary (BuiltinTool.Execute returns map[string]any). It owns
+// the wire shape in one place — no JSON marshal/unmarshal round-trip, which
+// would erode []ImageRef to []interface{} and lose the typed intent.
+//
+// It also emits a "content" alias for "text": the planner generates templates
+// like {{builtin.resource_read.content}} because read_file/web_fetch use that
+// key, so Document keeps both "text" (canonical) and "content" (alias)
+// resolvable. The alias lives here — not scattered in the tool layer.
+func (d Document) ToMap() map[string]any {
+	m := map[string]any{
+		"id":           d.ID,
+		"source":       d.Source,
+		"content_type": d.ContentType,
+		"layout":       string(d.Layout),
+	}
+	if d.Title != "" {
+		m["title"] = d.Title
+	}
+	if d.Charset != "" {
+		m["charset"] = d.Charset
+	}
+	if d.Language != "" {
+		m["language"] = d.Language
+	}
+	if d.Text != "" {
+		m["text"] = d.Text
+		// Alias so planner templates using {{resource_read.content}} resolve.
+		m["content"] = d.Text
+	}
+	if len(d.Images) > 0 {
+		imgs := make([]map[string]any, len(d.Images))
+		for i, img := range d.Images {
+			im := map[string]any{}
+			if img.URL != "" {
+				im["url"] = img.URL
+			}
+			if img.Base64 != "" {
+				im["base64"] = img.Base64
+			}
+			if img.Page != 0 {
+				im["page"] = img.Page
+			}
+			if img.Description != "" {
+				im["description"] = img.Description
+			}
+			imgs[i] = im
+		}
+		m["images"] = imgs
+	}
+	if len(d.Metadata) > 0 {
+		meta := make(map[string]any, len(d.Metadata))
+		for k, v := range d.Metadata {
+			meta[k] = v
+		}
+		m["metadata"] = meta
+	}
+	if d.Truncated {
+		m["truncated"] = true
+	}
+	if d.Note != "" {
+		m["note"] = d.Note
+	}
+	return m
+}

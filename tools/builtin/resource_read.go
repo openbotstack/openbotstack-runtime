@@ -2,7 +2,6 @@ package builtin
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -113,27 +112,7 @@ func (t *ResourceReadTool) Execute(ctx context.Context, input map[string]any) (m
 		slog.Warn("resource_read: document note", "url", rawURL, "note", doc.Note)
 	}
 
-	// Convert Document to map[string]any via JSON round-trip so the caller
-	// always sees a consistent structure.
-	return documentToMap(doc)
-}
-
-// documentToMap converts a resource.Document to map[string]any via JSON,
-// adding a "content" alias for "text" so that {{resource_read.content}}
-// works in planner templates (planner guesses field names; "content" matches
-// read_file and web_fetch conventions).
-func documentToMap(doc resource.Document) (map[string]any, error) {
-	b, err := json.Marshal(doc)
-	if err != nil {
-		return nil, fmt.Errorf("resource_read: marshal document: %w", err)
-	}
-	var result map[string]any
-	if err := json.Unmarshal(b, &result); err != nil {
-		return nil, fmt.Errorf("resource_read: unmarshal document: %w", err)
-	}
-	// Alias: planner uses {{step.content}}, Document stores text under "text".
-	if text, ok := result["text"]; ok {
-		result["content"] = text
-	}
-	return result, nil
+	// Document.ToMap owns the wire shape (including the content/text alias).
+	// No JSON round-trip — preserves []ImageRef and map[string]string intent.
+	return doc.ToMap(), nil
 }
