@@ -122,6 +122,32 @@ func TestReadResource_EmptyContentType_PlainZIPNotDOCX(t *testing.T) {
 	}
 }
 
+// TestReadResource_DeclaredPDFButHTML_ReSniffs guards against server
+// mislabeling: if Content-Type says application/pdf but the bytes are actually
+// HTML (e.g. an error page), ReadResource must re-sniff and dispatch to the
+// HTML extractor rather than forcing PDF extraction and reporting a failure.
+func TestReadResource_DeclaredPDFButHTML_ReSniffs(t *testing.T) {
+	html := []byte(`<!DOCTYPE html><html><head><title>Error</title></head>
+<body><article><p>Not a PDF — an error page.</p></article></body></html>`)
+	doc := ReadResource("https://example.com/doc.pdf", html, "application/pdf")
+	if doc.ContentType != "text/html" {
+		t.Errorf("mislabelled PDF should re-sniff to text/html: got %q", doc.ContentType)
+	}
+	if !strings.Contains(doc.Text, "Not a PDF") {
+		t.Errorf("HTML text should be extracted: got %q", doc.Text)
+	}
+}
+
+// TestReadResource_DeclaredPDFAndIsPDF_KeepsPDF verifies the guard does not
+// override a correct PDF declaration.
+func TestReadResource_DeclaredPDFAndIsPDF_KeepsPDF(t *testing.T) {
+	data := minimalTextPDF(t, "Real PDF content here")
+	doc := ReadResource("doc.pdf", data, "application/pdf")
+	if doc.ContentType != "application/pdf" {
+		t.Errorf("real PDF should keep application/pdf: got %q", doc.ContentType)
+	}
+}
+
 func TestReadResource_NonUTF8Fallback(t *testing.T) {
 	doc := ReadResource("garbled.bin", []byte{0xff, 0xfe, 0x00}, "application/octet-stream")
 	// Non-UTF-8 input always triggers the default extractText path, which

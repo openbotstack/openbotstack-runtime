@@ -2,7 +2,9 @@ package resource
 
 import (
 	"bytes"
+	"compress/zlib"
 	"fmt"
+	"io"
 	"log/slog"
 	"regexp"
 	"strings"
@@ -28,6 +30,12 @@ import (
 // exceeds this, we fall back to regex stream extraction.
 const pdfExtractionTimeout = 10 * time.Second
 
+// maxPDFPages caps how many pages are extracted. Beyond this the result is
+// truncated (Document.Truncated = true) to bound both extraction time and the
+// size of the returned text buffer. The deadline reader still enforces a hard
+// wall-clock limit regardless.
+const maxPDFPages = 200
+
 func extractPDF(data []byte) Document {
 	doc := Document{
 		ContentType: ContentTypePDF,
@@ -35,6 +43,17 @@ func extractPDF(data []byte) Document {
 	}
 
 	slog.Debug("pdf: extracting", "size_bytes", len(data))
+
+	// Sanitize the trailer before parsing. Real-world PDFs are frequently
+	// zero-padded (sample-file services pad to a round size), truncated
+	// (interrupted downloads), or have trailing garbage appended (an HTML
+	// error page). dslipak/pdf scans the final bytes for %%EOF and rejects
+	// the whole file if the marker isn't there — so strip the tail first.
+	clean := sanitizePDFTrailer(data)
+	if len(clean) != len(data) {
+		slog.Debug("pdf: trimmed trailing bytes", "before", len(data), "after", len(clean))
+	}
+	data = clean
 
 	// dslipak/pdf can panic or hang on malformed input. Run it in a goroutine
 	// with a timeout; fall back to regex stream extraction if it fails.
@@ -49,10 +68,11 @@ func extractPDF(data []byte) Document {
 	src := &deadlineReaderAt{data: data, deadline: deadline}
 
 	type pdfResult struct {
-		text     string
-		numPages int
-		reader   *pdf.Reader
-		err      error
+		text      string
+		numPages  int
+		truncated bool
+		reader    *pdf.Reader
+		err       error
 	}
 	ch := make(chan pdfResult, 1)
 	go func() {
@@ -71,17 +91,19 @@ func extractPDF(data []byte) Document {
 			ch <- pdfResult{reader: r}
 			return
 		}
-		textReader, err := r.GetPlainText()
+		// Extract page-by-page so we can cap the number of pages processed.
+		// r.GetPlainText() reads ALL pages, which for a large PDF both takes
+		// too long and produces an unbounded text buffer.
+		text, truncated, err := extractPDFPages(r, numPages)
 		if err != nil {
 			ch <- pdfResult{err: fmt.Errorf("text extraction: %w", err), reader: r, numPages: numPages}
 			return
 		}
-		var textBuf bytes.Buffer
-		_, _ = textBuf.ReadFrom(textReader)
 		ch <- pdfResult{
-			text:     strings.TrimSpace(textBuf.String()),
-			numPages: numPages,
-			reader:   r,
+			text:      strings.TrimSpace(text),
+			numPages:  numPages,
+			truncated: truncated,
+			reader:    r,
 		}
 	}()
 
@@ -95,8 +117,15 @@ func extractPDF(data []byte) Document {
 				doc.Note = fmt.Sprintf("PDF library parse failed (%v); used stream text extraction — output may be incomplete", pr.err)
 				slog.Info("pdf: fallback succeeded", "text_len", len(text))
 			} else {
-				doc.Note = fmt.Sprintf("PDF extraction failed: %v", pr.err)
-				slog.Warn("pdf: fallback also failed", "error", pr.err)
+				// Library could not parse and the fallback found no text. This is
+				// NOT a tool failure — the document simply has no recoverable text
+				// (it may be blank, scanned, or use an unsupported encoding). Frame
+				// it as a result, not an error, so callers relay "no text" rather
+				// than "the tool broke". The underlying parse error is included
+				// for debugging.
+				doc.Layout = LayoutUnknown
+				doc.Note = fmt.Sprintf("PDF has no extractable text (parse error: %v). The document may be blank, scanned, or use an unsupported encoding.", pr.err)
+				slog.Warn("pdf: no text recovered", "error", pr.err)
 			}
 			return doc
 		}
@@ -110,16 +139,26 @@ func extractPDF(data []byte) Document {
 			"text_len", len(pr.text),
 		)
 
-		// Detect scanned PDF: little to no text, images present.
 		imageCount := countPDFImages(pr.reader, pr.numPages)
-		if len(pr.text) < 50 && imageCount > 0 {
-			doc.Layout = LayoutScanned
-			doc.Note = "Scanned PDF. No extractable text. OCR/vision recommended."
-			doc.Images = make([]ImageRef, 0, imageCount)
-			for i := 0; i < imageCount; i++ {
-				doc.Images = append(doc.Images, ImageRef{Page: i + 1})
+		if len(pr.text) == 0 {
+			// No extractable text at all. Distinguish scanned (images present,
+			// OCR is the viable path) from a valid-but-blank document (no
+			// images either — e.g. an empty page or a vector-only drawing).
+			// Both are NOT failures; a short-but-present text (above) is normal
+			// content and must not be misclassified as blank.
+			if imageCount > 0 {
+				doc.Layout = LayoutScanned
+				doc.Note = "Scanned PDF. No extractable text. OCR/vision recommended."
+				doc.Images = make([]ImageRef, 0, imageCount)
+				for i := 0; i < imageCount; i++ {
+					doc.Images = append(doc.Images, ImageRef{Page: i + 1})
+				}
+				slog.Info("pdf: detected scanned", "pages", pr.numPages, "images", imageCount)
+				return doc
 			}
-			slog.Info("pdf: detected scanned", "pages", pr.numPages, "images", imageCount)
+			doc.Layout = LayoutUnknown
+			doc.Note = "PDF has no extractable text (blank or vector-only document)."
+			slog.Info("pdf: blank document (no text, no images)", "pages", pr.numPages)
 			return doc
 		}
 
@@ -130,6 +169,16 @@ func extractPDF(data []byte) Document {
 			slog.Info("pdf: detected two-column layout", "pages", pr.numPages)
 		}
 		doc.Text = pr.text
+		if pr.truncated {
+			doc.Truncated = true
+			extra := fmt.Sprintf(" Extracted first %d of %d pages.", maxPDFPages, pr.numPages)
+			if doc.Note == "" {
+				doc.Note = "PDF truncated." + extra
+			} else {
+				doc.Note += extra
+			}
+			slog.Info("pdf: truncated at page cap", "pages", pr.numPages, "cap", maxPDFPages)
+		}
 
 	case <-time.After(pdfExtractionTimeout):
 		slog.Warn("pdf: library timed out, trying fallback", "size_bytes", len(data))
@@ -139,12 +188,49 @@ func extractPDF(data []byte) Document {
 			doc.Note = "PDF library timed out after 10s; used stream text extraction — output may be incomplete"
 			slog.Info("pdf: fallback succeeded after timeout", "text_len", len(text))
 		} else {
-			doc.Note = "PDF extraction timed out"
-			slog.Warn("pdf: fallback also failed after timeout")
+			doc.Layout = LayoutUnknown
+			doc.Note = "PDF has no extractable text (parse timed out). The document may be blank, scanned, or use an unsupported encoding."
+			slog.Warn("pdf: no text recovered after timeout")
 		}
 	}
 
 	return doc
+}
+
+// sanitizePDFTrailer trims trailing bytes that are not part of the PDF so the
+// parser can locate %%EOF. It handles three common real-world corruptions:
+//   - Zero-padding: sample-file services pad a PDF to a round size with NULs.
+//   - Truncation: an interrupted download leaves the tail missing/garbled.
+//   - Appended garbage: e.g. an HTML error page concatenated after the PDF.
+//
+// Strategy: find the LAST %%EOF marker and truncate after it (plus any
+// immediately-following newline). If no %%EOF exists, fall back to trimming
+// trailing NULs and whitespace. Returns the original slice unchanged when the
+// trailer is already clean.
+func sanitizePDFTrailer(data []byte) []byte {
+	const eof = "%%EOF"
+	if idx := bytes.LastIndex(data, []byte(eof)); idx >= 0 {
+		end := idx + len(eof)
+		// Tolerate a trailing newline right after %%EOF (legal per spec).
+		for end < len(data) && (data[end] == '\n' || data[end] == '\r') {
+			end++
+		}
+		if end < len(data) {
+			return data[:end]
+		}
+		return data
+	}
+	// No %%EOF at all — strip trailing NULs/whitespace as a best effort.
+	end := len(data)
+	for end > 0 {
+		switch data[end-1] {
+		case 0, ' ', '\t', '\n', '\r':
+			end--
+		default:
+			return data[:end]
+		}
+	}
+	return data[:end]
 }
 
 // deadlineReaderAt is an io.ReaderAt over a byte slice that starts returning
@@ -174,9 +260,11 @@ func (d *deadlineReaderAt) ReadAt(p []byte, off int64) (int, error) {
 var streamRe = regexp.MustCompile(`(?s)stream\r?\n(.*?)endstream`)
 
 // extractPDFStreamsFallback extracts text from PDF content streams using a
-// balanced-paren scanner when the PDF library cannot parse the file. Unlike a
-// naive regex, it correctly handles escaped parens (\( \)) and backslashes
-// inside PDF literal strings, and decodes the standard escape sequences.
+// balanced-paren scanner when the PDF library cannot parse the file. It handles
+// escaped parens/backslashes inside literal strings, decodes escape sequences,
+// and — critically — zlib-inflates FlateDecode streams (the encoding most
+// real-world PDFs use), since a compressed stream otherwise looks like binary
+// noise to the string scanner.
 func extractPDFStreamsFallback(data []byte) string {
 	matches := streamRe.FindAllSubmatch(data, -1)
 	if len(matches) == 0 {
@@ -184,9 +272,42 @@ func extractPDFStreamsFallback(data []byte) string {
 	}
 	var lines []string
 	for _, m := range matches {
-		lines = append(lines, extractPDFStrings(m[1])...)
+		// m[0] is the full "stream...endstream" match (with the preceding dict
+		// line if the regex captured it); m[1] is the stream payload. We scan a
+		// little before the payload for the /Filter marker to decide whether to
+		// inflate.
+		payload := m[1]
+		startOff := bytes.LastIndexByte(data[:bytes.Index(data, payload)], '\n')
+		dictWindow := data
+		if startOff >= 0 {
+			dictWindow = data[max(0, startOff-200):]
+		}
+		content := payload
+		if bytes.Contains(dictWindow, []byte("/FlateDecode")) {
+			if inflated, err := zlibInflate(payload); err == nil {
+				content = inflated
+			}
+		}
+		lines = append(lines, extractPDFStrings(content)...)
 	}
 	return strings.Join(lines, "\n")
+}
+
+// zlibInflate decompresses a zlib stream, returning the inflated bytes or the
+// error. Bounded by the input size — a decompression bomb would need an
+// enormous compressed payload, which the 10 MiB fetch cap already prevents.
+func zlibInflate(data []byte) ([]byte, error) {
+	r, err := zlib.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	// Cap inflated output at 4x the compressed size to defuse bombs.
+	maxOut := len(data) * 4
+	if maxOut < 64*1024 {
+		maxOut = 64 * 1024
+	}
+	return io.ReadAll(io.LimitReader(r, int64(maxOut)))
 }
 
 // extractPDFStrings scans content for PDF literal strings "( ... )" and returns
@@ -279,6 +400,36 @@ func extractPDFStrings(content []byte) []string {
 		buf = append(buf, c)
 	}
 	return out
+}
+
+// extractPDFPages extracts plain text from up to maxPDFPages pages of r,
+// returning the concatenated text, whether the page cap was hit (truncated),
+// and any error. Per-page extraction (rather than r.GetPlainText) bounds both
+// runtime and the size of the returned text for large PDFs.
+func extractPDFPages(r *pdf.Reader, numPages int) (string, bool, error) {
+	limit := numPages
+	truncated := false
+	if numPages > maxPDFPages {
+		limit = maxPDFPages
+		truncated = true
+	}
+	fonts := make(map[string]*pdf.Font)
+	var buf bytes.Buffer
+	for i := 1; i <= limit; i++ {
+		p := r.Page(i)
+		for _, name := range p.Fonts() {
+			if _, ok := fonts[name]; !ok {
+				f := p.Font(name)
+				fonts[name] = &f
+			}
+		}
+		t, err := p.GetPlainText(fonts)
+		if err != nil {
+			return buf.String(), truncated, err
+		}
+		buf.WriteString(t)
+	}
+	return buf.String(), truncated, nil
 }
 
 // countPDFImages counts how many image XObjects exist across all pages.

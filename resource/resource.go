@@ -32,11 +32,19 @@ func ReadResource(source string, data []byte, contentType string) Document {
 	}
 	contentType = strings.TrimSpace(contentType)
 
-	// Sniff when the header is missing or generic, so the dispatcher routes to
-	// the right extractor. The header wins over sniffing only when it names a
-	// concrete format we support.
+	// Reconcile the declared content type with the bytes' magic signature.
+	// Servers mislabel (an HTML error page served as application/pdf is
+	// common), which would otherwise force the wrong extractor and report a
+	// spurious failure. Two cases:
+	//   - header missing/generic → sniff and trust the sniff;
+	//   - header names a binary format (PDF/DOCX/image) but the bytes don't
+	//     match its magic → sniff overrides the (wrong) header.
 	if contentType == "" || contentType == "application/octet-stream" {
 		if sniffed := sniffContentType(data); sniffed != "" {
+			contentType = sniffed
+		}
+	} else if mismatchedMagic(data, contentType) {
+		if sniffed := sniffContentType(data); sniffed != "" && sniffed != contentType {
 			contentType = sniffed
 		}
 	}
@@ -105,6 +113,26 @@ func sniffContentType(data []byte) string {
 		return ct
 	}
 	return ""
+}
+
+// mismatchedMagic reports whether the bytes' magic signature contradicts the
+// declared content type — i.e. the header names a binary format but the bytes
+// don't start with that format's signature. Used to detect server mislabeling
+// (e.g. an HTML error page served as application/pdf) and re-sniff. Text
+// formats are not checked: their magic is unreliable and sniffing would
+// second-guess every text/plain response.
+func mismatchedMagic(data []byte, declared string) bool {
+	switch declared {
+	case ContentTypePDF:
+		return !bytes.HasPrefix(data, []byte("%PDF"))
+	case ContentTypeDOCX:
+		return !isDOCXBytes(data)
+	}
+	if strings.HasPrefix(declared, "image/") {
+		// Re-sniff only if the stdlib doesn't think it's an image at all.
+		return !strings.HasPrefix(http.DetectContentType(data), "image/")
+	}
+	return false
 }
 
 // isDOCXBytes reports whether data is a ZIP archive containing the OPC part
