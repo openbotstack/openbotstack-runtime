@@ -26,9 +26,12 @@ import (
 // PDF limitations are explicitly surfaced via Document.Note:
 //   - two-column → "Possible two-column PDF. Extraction order may not be perfect."
 //   - scanned → "Scanned PDF. No extractable text. OCR/vision recommended."
-// pdfExtractionTimeout bounds how long the dslipak/pdf library may run. If it
-// exceeds this, we fall back to regex stream extraction.
-const pdfExtractionTimeout = 10 * time.Second
+// pdfLibraryBudget bounds how long we wait for the dslipak/pdf library. If it
+// hasn't produced a result by then, the concurrent fast stream-scan fallback
+// (already computed in parallel) is used instead. 6s is generous for any PDF
+// the library can actually parse; the common compressed-stream PDFs that make
+// the library slow are recovered near-instantly by the fallback.
+const pdfLibraryBudget = 6 * time.Second
 
 // maxPDFPages caps how many pages are extracted. Beyond this the result is
 // truncated (Document.Truncated = true) to bound both extraction time and the
@@ -64,8 +67,18 @@ func extractPDF(data []byte) Document {
 	// every ReadAt returns an error, which forces the library's internal reads
 	// to fail and the goroutine to exit — rather than spinning forever on a
 	// malformed file. Worst case is a brief tail until the next ReadAt fires.
-	deadline := time.Now().Add(pdfExtractionTimeout)
+	deadline := time.Now().Add(pdfLibraryBudget)
 	src := &deadlineReaderAt{data: data, deadline: deadline}
+
+	// Compute the fast stream-scan fallback ONCE, concurrently with the
+	// library. It is the floor: ~100ms (regex + zlib on content streams),
+	// and recovers text from compressed-stream PDFs that make dslipak/pdf
+	// slow/hang. If the library wins within budget we prefer it (better
+	// reading order + layout); otherwise the fallback result is already in
+	// hand — no serial wait after a timeout.
+	type fallbackResult struct{ text string }
+	fbCh := make(chan fallbackResult, 1)
+	go func() { fbCh <- fallbackResult{text: extractPDFStreamsFallback(data)} }()
 
 	type pdfResult struct {
 		text      string
@@ -107,30 +120,22 @@ func extractPDF(data []byte) Document {
 		}
 	}()
 
+	// fbText is the fallback floor, ready ~immediately regardless of the
+	// library. Drain it once the library branch resolves.
+	fb := <-fbCh
+	fbText := fb.text
+
 	select {
 	case pr := <-ch:
 		if pr.err != nil {
-			slog.Warn("pdf: library failed, trying fallback", "error", pr.err, "size_bytes", len(data))
-			text := extractPDFStreamsFallback(data)
-			if text != "" {
-				doc.Text = text
-				doc.Note = fmt.Sprintf("PDF library parse failed (%v); used stream text extraction — output may be incomplete", pr.err)
-				slog.Info("pdf: fallback succeeded", "text_len", len(text))
-			} else {
-				// Library could not parse and the fallback found no text. This is
-				// NOT a tool failure — the document simply has no recoverable text
-				// (it may be blank, scanned, or use an unsupported encoding). Frame
-				// it as a result, not an error, so callers relay "no text" rather
-				// than "the tool broke". The underlying parse error is included
-				// for debugging.
-				doc.Layout = LayoutUnknown
-				doc.Note = fmt.Sprintf("PDF has no extractable text (parse error: %v). The document may be blank, scanned, or use an unsupported encoding.", pr.err)
-				slog.Warn("pdf: no text recovered", "error", pr.err)
-			}
-			return doc
+			slog.Warn("pdf: library failed, using fallback", "error", pr.err, "size_bytes", len(data))
+			return fallbackDocument(doc, fbText, fmt.Sprintf("PDF library parse failed (%v)", pr.err))
 		}
 		if pr.reader == nil || pr.numPages == 0 {
 			slog.Debug("pdf: empty document", "pages", pr.numPages)
+			if fbText != "" {
+				return fallbackDocument(doc, fbText, "library reported zero pages")
+			}
 			return doc
 		}
 
@@ -180,20 +185,31 @@ func extractPDF(data []byte) Document {
 			slog.Info("pdf: truncated at page cap", "pages", pr.numPages, "cap", maxPDFPages)
 		}
 
-	case <-time.After(pdfExtractionTimeout):
-		slog.Warn("pdf: library timed out, trying fallback", "size_bytes", len(data))
-		text := extractPDFStreamsFallback(data)
-		if text != "" {
-			doc.Text = text
-			doc.Note = "PDF library timed out after 10s; used stream text extraction — output may be incomplete"
-			slog.Info("pdf: fallback succeeded after timeout", "text_len", len(text))
-		} else {
-			doc.Layout = LayoutUnknown
-			doc.Note = "PDF has no extractable text (parse timed out). The document may be blank, scanned, or use an unsupported encoding."
-			slog.Warn("pdf: no text recovered after timeout")
-		}
+	case <-time.After(pdfLibraryBudget):
+		slog.Warn("pdf: library timed out, using fallback", "size_bytes", len(data), "budget", pdfLibraryBudget)
+		return fallbackDocument(doc, fbText, fmt.Sprintf("PDF library timed out after %s", pdfLibraryBudget))
 	}
 
+	return doc
+}
+
+// fallbackDocument builds a Document from the fast stream-scan fallback text.
+// The fallback scans EVERY content stream (decompressing FlateDecode), so the
+// recovered text is complete — the only real limitation is reading ORDER
+// (multi-column reflow), which is what the Note says. reason describes why the
+// library path was not used (parse error / timeout), included for diagnostics.
+func fallbackDocument(doc Document, fbText, reason string) Document {
+	if fbText == "" {
+		// No text recoverable at all: a valid-but-empty result (blank / scanned
+		// / unsupported encoding), not a tool failure.
+		doc.Layout = LayoutUnknown
+		doc.Note = fmt.Sprintf("%s. PDF has no extractable text. The document may be blank, scanned, or use an unsupported encoding.", reason)
+		slog.Warn("pdf: no text recovered via fallback", "reason", reason)
+		return doc
+	}
+	doc.Text = fbText
+	doc.Note = fmt.Sprintf("%s; text extracted via fast stream scan. Content is complete but reading order may differ from the original layout (e.g. two-column).", reason)
+	slog.Info("pdf: fallback produced text", "text_len", len(fbText), "reason", reason)
 	return doc
 }
 

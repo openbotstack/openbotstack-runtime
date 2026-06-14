@@ -34,6 +34,30 @@ func TestExtractPDFStreamsFallback_FlateDecode(t *testing.T) {
 	}
 }
 
+// TestExtractPDF_FallbackNote_IsAccurate pins the wording of the fallback note.
+// The fallback scans ALL content streams, so the extracted text is COMPLETE —
+// the only real limitation is reading ORDER (e.g. two-column reflow). The note
+// must not say "incomplete" (that misleads the LLM into thinking the text is
+// truncated/garbage). It must say the order may differ.
+func TestExtractPDF_FallbackNote_IsAccurate(t *testing.T) {
+	// Build a PDF that dslipak/pdf cannot parse (broken xref) but whose
+	// stream has extractable text → forces the fallback path.
+	pdfBytes := []byte("%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n" +
+		"4 0 obj<</Length 44>>\nstream\nBT /F1 12 Tf (Fallback text here) Tj ET\nendstream\n" +
+		"xref\n0 1\n0000000000 65535 f \ntrailer<<>>\nstartxref\n%%EOF")
+	doc := extractPDF(pdfBytes)
+	if !strings.Contains(doc.Text, "Fallback text here") {
+		t.Fatalf("fallback text missing: got %q (note=%q)", doc.Text, doc.Note)
+	}
+	lower := strings.ToLower(doc.Note)
+	if strings.Contains(lower, "incomplete") {
+		t.Errorf("fallback note must not say 'incomplete' (text is complete): %q", doc.Note)
+	}
+	if !strings.Contains(lower, "order") {
+		t.Errorf("fallback note should mention reading ORDER, not completeness: %q", doc.Note)
+	}
+}
+
 func itoa(n int) string {
 	if n == 0 {
 		return "0"
