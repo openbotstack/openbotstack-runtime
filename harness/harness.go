@@ -182,7 +182,7 @@ func (h *ExecutionHarness) Run(ctx context.Context, plan *execution.ExecutionPla
 			if prepared, perr := step.Prepare(prevResults); perr == nil {
 				result.StepInputs[step.StepID] = prepared.Arguments
 			} else {
-				slog.Warn("harness: unresolvable template in step args",
+				slog.Warn("harness: trace shows unresolved args; step will fail at dispatch",
 					"step", step.Name, "error", perr)
 				result.StepInputs[step.StepID] = step.Arguments
 			}

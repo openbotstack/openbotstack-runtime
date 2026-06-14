@@ -103,6 +103,25 @@ func TestReadResource_EmptyContentType_SniffsHTML(t *testing.T) {
 	}
 }
 
+// TestReadResource_EmptyContentType_PlainZIPNotDOCX pins the negative case:
+// a ZIP archive without the OPC part word/document.xml (e.g. an XLSX, JAR, or
+// plain zip) must NOT be misidentified as DOCX by the sniffer.
+func TestReadResource_EmptyContentType_PlainZIPNotDOCX(t *testing.T) {
+	// Minimal ZIP local-file header + central dir magic, but no word/document.xml.
+	zipBytes := []byte{
+		'P', 'K', 0x03, 0x04, // local file header signature
+		0x14, 0x00, 0x00, 0x00, 0x08, 0x00, // version, flags, method
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mod time/date
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // crc, sizes
+		0x04, 0x00, 0x00, 0x00, // name len, extra len
+		'd', 'a', 't', 'a', // entry name "data"
+	}
+	doc := ReadResource("archive.zip", zipBytes, "")
+	if doc.ContentType == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" {
+		t.Errorf("plain ZIP must not be misidentified as DOCX: content_type=%q", doc.ContentType)
+	}
+}
+
 func TestReadResource_NonUTF8Fallback(t *testing.T) {
 	doc := ReadResource("garbled.bin", []byte{0xff, 0xfe, 0x00}, "application/octet-stream")
 	// Non-UTF-8 input always triggers the default extractText path, which
